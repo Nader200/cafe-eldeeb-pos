@@ -1,0 +1,21 @@
+{
+  "entities": {
+    "CafeSyncDoc": {
+      "title": "Cafe Sync Document",
+      "description": "Synced state item for Cafe Eldeeb POS",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "updated_at": { "type": "string" },
+        "cafe_id": { "type": "string" }
+      },
+      "required": ["id"]
+    }
+  },
+  "firestore": {
+    "/cafes/{cafeId}/sync_store/{docId}": {
+      "schema": "CafeSyncDoc",
+      "description": "Real-time sync store for cafe entity collections"
+    }
+  }
+}

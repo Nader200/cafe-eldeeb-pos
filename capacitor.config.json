@@ -1,0 +1,6 @@
+{
+  "appId": "com.eldeeb.pos",
+  "appName": "Cafe Eldeeb POS Enterprise",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}

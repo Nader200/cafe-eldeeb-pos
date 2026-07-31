@@ -1,0 +1,390 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+:root {
+  --gold-50: #fefcf3;
+  --gold-100: #fdf6e2;
+  --gold-200: #faf0cc;
+  --gold-300: #f4e0aa;
+  --gold-400: #eccd83;
+  --gold-500: #e3b65e;
+  --gold-600: #d4af37;
+  --gold-700: #b58d2a;
+  --gold-800: #936e23;
+  --gold-900: #74541e;
+
+  --gold: var(--gold-600);
+  --gold-rgb: 212, 175, 55;
+  --bg: #0a0a0a;
+  --card: #1e1e1e;
+  --text: #ffffff;
+  --muted: #a0a0a0;
+
+  --luxury-bg: #0a0a0a;
+  --luxury-card: #111111;
+  --luxury-panel: #1a1a1a;
+  --luxury-border: rgba(212, 175, 55, 0.15);
+}
+
+@theme {
+  --font-sans: "Cairo", "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+  
+  --color-gold-50: var(--gold-50);
+  --color-gold-100: var(--gold-100);
+  --color-gold-200: var(--gold-200);
+  --color-gold-300: var(--gold-300);
+  --color-gold-400: var(--gold-400);
+  --color-gold-500: var(--gold-500);
+  --color-gold-600: var(--gold-600);
+  --color-gold-700: var(--gold-700);
+  --color-gold-800: var(--gold-800);
+  --color-gold-900: var(--gold-900);
+  
+  --color-luxury-bg: var(--luxury-bg);
+  --color-luxury-card: var(--luxury-card);
+  --color-luxury-panel: var(--luxury-panel);
+  --color-luxury-border: var(--luxury-border);
+}
+
+@layer base {
+  body {
+    background-color: var(--luxury-bg);
+    color: #ffffff;
+    font-family: var(--font-sans);
+    overflow-x: hidden;
+  }
+  
+  /* Scrollbars styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0a0a0a;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(var(--gold-rgb), 0.15);
+    border-radius: 10px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--gold-600);
+  }
+}
+
+/* Immersive UI Special Utilities */
+.luxury-shadow {
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 20px rgba(var(--gold-rgb), 0.05);
+}
+
+.gold-glow {
+  text-shadow: 0 0 10px rgba(var(--gold-rgb), 0.4);
+  box-shadow: 0 0 15px rgba(var(--gold-rgb), 0.15);
+}
+
+.gold-glow-focus:focus-within {
+  box-shadow: 0 0 25px rgba(var(--gold-rgb), 0.35);
+  border-color: var(--gold-600);
+}
+
+.border-gold {
+  border: 1px solid rgba(var(--gold-rgb), 0.3);
+}
+
+.rounded-luxury {
+  border-radius: 18px;
+}
+
+.glass {
+  background: rgba(30, 30, 30, 0.8);
+  backdrop-filter: blur(10px);
+}
+
+.active-tab {
+  background: var(--gold-600);
+  color: #0a0a0a;
+  font-weight: bold;
+}
+
+.stat-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: #333;
+  overflow: hidden;
+}
+
+.stat-fill {
+  height: 100%;
+  background: var(--gold-600);
+  box-shadow: 0 0 8px var(--gold-600);
+}
+
+.gold-gradient-text {
+  background: linear-gradient(135deg, var(--gold-300) 0%, var(--gold-600) 50%, var(--gold-900) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.gold-border-gradient {
+  border-image: linear-gradient(to right, var(--gold-800), var(--gold-600), var(--gold-800)) 1;
+}
+
+/* Print Receipt Emulator Layouts */
+@keyframes golden-glow {
+  0%, 100% {
+    box-shadow: 0 0 12px rgba(var(--gold-rgb), 0.35), 0 0 4px rgba(var(--gold-rgb), 0.15);
+    border-color: rgba(var(--gold-rgb), 0.3);
+  }
+  50% {
+    box-shadow: 0 0 28px rgba(var(--gold-rgb), 0.85), 0 0 12px rgba(var(--gold-rgb), 0.5);
+    border-color: rgba(var(--gold-rgb), 0.85);
+  }
+}
+.animate-eldeeb-logo {
+  animation: golden-glow 3s infinite ease-in-out;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: white;
+    color: black;
+  }
+}
+
+/* ==========================================================================
+   DYNAMIC ANIMATED THEMES BRANDING OVERRIDES & GLOWS
+   ========================================================================== */
+
+/* Keyframe Animations */
+@keyframes themeShimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 15px var(--theme-glow, rgba(212, 175, 55, 0.2)); }
+  50% { box-shadow: 0 0 25px var(--theme-glow, rgba(212, 175, 55, 0.4)); }
+}
+
+.theme-card-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.03) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+  animation: themeShimmer 6s infinite linear;
+}
+
+.theme-button-glow {
+  animation: pulseGlow 4s infinite ease-in-out;
+}
+
+/* 1. LUXURY COFFEE (Default Espresso & Gold) */
+.theme-LUXURY_COFFEE, .theme-NONE {
+  --gold-600: #d4af37;
+  --gold-rgb: 212, 175, 55;
+  --theme-glow: rgba(212, 175, 55, 0.25);
+  --theme-accent: #f59e0b;
+}
+
+/* 2. RAMADAN (Emerald Green & Gold) */
+.theme-RAMADAN {
+  --gold-600: #22c55e;
+  --gold-rgb: 34, 197, 94;
+  --theme-glow: rgba(34, 197, 94, 0.25);
+  --theme-accent: #4ade80;
+}
+.theme-RAMADAN .text-gold-500,
+.theme-RAMADAN .text-gold-400,
+.theme-RAMADAN .text-gold-600 {
+  color: #22c55e !important;
+}
+.theme-RAMADAN .bg-gold-600,
+.theme-RAMADAN .bg-gold-500 {
+  background-color: #22c55e !important;
+  color: #000000 !important;
+}
+.theme-RAMADAN .bg-gold-600\/10 {
+  background-color: rgba(34, 197, 94, 0.1) !important;
+}
+.theme-RAMADAN .border-gold-500\/10,
+.theme-RAMADAN .border-gold-500\/15,
+.theme-RAMADAN .border-gold-500\/30,
+.theme-RAMADAN .border-gold-600\/20,
+.theme-RAMADAN .border-gold-600\/30 {
+  border-color: rgba(34, 197, 94, 0.2) !important;
+}
+.theme-RAMADAN .from-gold-600 {
+  --tw-gradient-from: #15803d !important;
+  --tw-gradient-to: #22c55e !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+.theme-RAMADAN .bg-luxury-card {
+  background-color: #082214 !important;
+}
+.theme-RAMADAN .border-luxury-border {
+  border-color: rgba(34, 197, 94, 0.2) !important;
+}
+
+/* 3. EID (Purple & Festive Gold) */
+.theme-EID, .theme-EID_AL_FITR, .theme-EID_AL_ADHA {
+  --gold-600: #a855f7;
+  --gold-rgb: 168, 85, 247;
+  --theme-glow: rgba(168, 85, 247, 0.28);
+  --theme-accent: #c084fc;
+}
+.theme-EID .text-gold-500, .theme-EID_AL_FITR .text-gold-500, .theme-EID_AL_ADHA .text-gold-500,
+.theme-EID .text-gold-400, .theme-EID_AL_FITR .text-gold-400, .theme-EID_AL_ADHA .text-gold-400,
+.theme-EID .text-gold-600, .theme-EID_AL_FITR .text-gold-600, .theme-EID_AL_ADHA .text-gold-600 {
+  color: #c084fc !important;
+}
+.theme-EID .bg-gold-600, .theme-EID_AL_FITR .bg-gold-600, .theme-EID_AL_ADHA .bg-gold-600,
+.theme-EID .bg-gold-500, .theme-EID_AL_FITR .bg-gold-500, .theme-EID_AL_ADHA .bg-gold-500 {
+  background-color: #a855f7 !important;
+  color: #ffffff !important;
+}
+.theme-EID .bg-gold-600\/10, .theme-EID_AL_FITR .bg-gold-600\/10, .theme-EID_AL_ADHA .bg-gold-600\/10 {
+  background-color: rgba(168, 85, 247, 0.12) !important;
+}
+.theme-EID .border-gold-500\/10, .theme-EID_AL_FITR .border-gold-500\/10,
+.theme-EID .border-gold-600\/30, .theme-EID_AL_FITR .border-gold-600\/30 {
+  border-color: rgba(168, 85, 247, 0.22) !important;
+}
+.theme-EID .bg-luxury-card, .theme-EID_AL_FITR .bg-luxury-card, .theme-EID_AL_ADHA .bg-luxury-card {
+  background-color: #15082b !important;
+}
+.theme-EID .border-luxury-border, .theme-EID_AL_FITR .border-luxury-border, .theme-EID_AL_ADHA .border-luxury-border {
+  border-color: rgba(168, 85, 247, 0.22) !important;
+}
+
+/* 4. WINTER (Frosty Sky Blue & Warm Amber) */
+.theme-WINTER {
+  --gold-600: #38bdf8;
+  --gold-rgb: 56, 189, 248;
+  --theme-glow: rgba(56, 189, 248, 0.25);
+  --theme-accent: #7dd3fc;
+}
+.theme-WINTER .text-gold-500,
+.theme-WINTER .text-gold-400,
+.theme-WINTER .text-gold-600 {
+  color: #38bdf8 !important;
+}
+.theme-WINTER .bg-gold-600,
+.theme-WINTER .bg-gold-500 {
+  background-color: #0284c7 !important;
+  color: #ffffff !important;
+}
+.theme-WINTER .bg-gold-600\/10 {
+  background-color: rgba(56, 189, 248, 0.12) !important;
+}
+.theme-WINTER .border-gold-500\/10,
+.theme-WINTER .border-gold-600\/30 {
+  border-color: rgba(56, 189, 248, 0.22) !important;
+}
+.theme-WINTER .bg-luxury-card {
+  background-color: #0a1626 !important;
+}
+.theme-WINTER .border-luxury-border {
+  border-color: rgba(56, 189, 248, 0.2) !important;
+}
+
+/* 5. SUMMER (Vivid Teal & Coral Sun) */
+.theme-SUMMER {
+  --gold-600: #14b8a6;
+  --gold-rgb: 20, 184, 166;
+  --theme-glow: rgba(20, 184, 166, 0.25);
+  --theme-accent: #2dd4bf;
+}
+.theme-SUMMER .text-gold-500,
+.theme-SUMMER .text-gold-400,
+.theme-SUMMER .text-gold-600 {
+  color: #2dd4bf !important;
+}
+.theme-SUMMER .bg-gold-600,
+.theme-SUMMER .bg-gold-500 {
+  background-color: #0d9488 !important;
+  color: #ffffff !important;
+}
+.theme-SUMMER .bg-gold-600\/10 {
+  background-color: rgba(20, 184, 166, 0.12) !important;
+}
+.theme-SUMMER .border-gold-500\/10,
+.theme-SUMMER .border-gold-600\/30 {
+  border-color: rgba(20, 184, 166, 0.22) !important;
+}
+.theme-SUMMER .bg-luxury-card {
+  background-color: #062428 !important;
+}
+.theme-SUMMER .border-luxury-border {
+  border-color: rgba(20, 184, 166, 0.2) !important;
+}
+
+/* 6. VALENTINE (Velvet Rose & Crimson) */
+.theme-VALENTINE {
+  --gold-600: #f43f5e;
+  --gold-rgb: 244, 63, 94;
+  --theme-glow: rgba(244, 63, 94, 0.28);
+  --theme-accent: #fb7185;
+}
+.theme-VALENTINE .text-gold-500,
+.theme-VALENTINE .text-gold-400,
+.theme-VALENTINE .text-gold-600 {
+  color: #fb7185 !important;
+}
+.theme-VALENTINE .bg-gold-600,
+.theme-VALENTINE .bg-gold-500 {
+  background-color: #e11d48 !important;
+  color: #ffffff !important;
+}
+.theme-VALENTINE .bg-gold-600\/10 {
+  background-color: rgba(244, 63, 94, 0.12) !important;
+}
+.theme-VALENTINE .border-gold-500\/10,
+.theme-VALENTINE .border-gold-600\/30 {
+  border-color: rgba(244, 63, 94, 0.22) !important;
+}
+.theme-VALENTINE .bg-luxury-card {
+  background-color: #24060f !important;
+}
+.theme-VALENTINE .border-luxury-border {
+  border-color: rgba(244, 63, 94, 0.2) !important;
+}
+
+/* 7. NEW YEAR (Electric Cyan & Neon Gold) */
+.theme-NEW_YEAR {
+  --gold-600: #0ea5e9;
+  --gold-rgb: 14, 165, 233;
+  --theme-glow: rgba(14, 165, 233, 0.28);
+  --theme-accent: #38bdf8;
+}
+.theme-NEW_YEAR .text-gold-500,
+.theme-NEW_YEAR .text-gold-400,
+.theme-NEW_YEAR .text-gold-600 {
+  color: #38bdf8 !important;
+}
+.theme-NEW_YEAR .bg-gold-600,
+.theme-NEW_YEAR .bg-gold-500 {
+  background-color: #0284c7 !important;
+  color: #ffffff !important;
+}
+.theme-NEW_YEAR .bg-gold-600\/10 {
+  background-color: rgba(14, 165, 233, 0.12) !important;
+}
+.theme-NEW_YEAR .border-gold-500\/10,
+.theme-NEW_YEAR .border-gold-600\/30 {
+  border-color: rgba(14, 165, 233, 0.22) !important;
+}
+.theme-NEW_YEAR .bg-luxury-card {
+  background-color: #0f172a !important;
+}
+.theme-NEW_YEAR .border-luxury-border {
+  border-color: rgba(14, 165, 233, 0.2) !important;
+}
+
+
+

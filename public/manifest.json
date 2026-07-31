@@ -1,0 +1,26 @@
+{
+  "name": "Cafe Eldeeb POS",
+  "short_name": "Cafe Eldeeb",
+  "description": "نظام مبيعات وإدارة متكامل وفاخر للمقاهي والمطاعم الراقية",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "display": "standalone",
+  "orientation": "any",
+  "dir": "rtl",
+  "lang": "ar"
+}

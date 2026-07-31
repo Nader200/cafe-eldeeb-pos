@@ -1,0 +1,129 @@
+{
+  "cafe_customers": [
+    {
+      "id": "cust_1785338852884_28",
+      "full_name": "الصعيدى ",
+      "phone": "01012723483",
+      "whatsapp": "",
+      "address": "",
+      "notes": "",
+      "credit_limit": 1000,
+      "is_vip": false,
+      "photo": "👤",
+      "birthday": "",
+      "current_balance": 0,
+      "wallet_balance": 0,
+      "is_archived": false,
+      "created_at": "2026-07-29T15:27:32.884Z",
+      "updated_at": "2026-07-29T15:27:32.884Z"
+    }
+  ],
+  "cafe_cash_drawers": [
+    {
+      "id": "cd_1785334295425",
+      "opening_balance": 0,
+      "cash_in": 0,
+      "cash_out": 0,
+      "closing_balance": 0,
+      "business_date": "2026-07-29",
+      "created_at": "2026-07-29T14:11:35.425Z",
+      "updated_at": "2026-07-29T14:16:05.686Z"
+    },
+    {
+      "id": "cd_1785334565686",
+      "opening_balance": 0,
+      "cash_in": 0,
+      "cash_out": 0,
+      "closing_balance": null,
+      "business_date": "2026-07-29",
+      "created_at": "2026-07-29T14:16:05.686Z",
+      "updated_at": "2026-07-29T14:16:05.686Z"
+    }
+  ],
+  "cafe_settings": {
+    "id": "settings_1",
+    "cafe_name": "كافيه الديب ",
+    "owner_name": "نادر الديب",
+    "is_setup_completed": true,
+    "address": "شاطئ النخيل ش 37 بين ش 6 و 4 - الإسكندرية ",
+    "phone": "01094793701",
+    "currency": "ج.م",
+    "receipt_footer": "شكراً لزيارتكم! سعدنا بخدمتكم.",
+    "logo_path": "☕",
+    "google_drive_backup_enabled": false,
+    "default_tax_percentage": 0,
+    "printer_paper_size": "80",
+    "printer_name": "Bluetooth-Thermal-XP80",
+    "pin_code": "1234",
+    "pin_protection_enabled": false,
+    "updated_at": "2026-07-29T14:16:05.668Z",
+    "reminder_days_friendly": 7,
+    "reminder_days_statement": 15,
+    "reminder_days_final": 30,
+    "whatsapp_reminders_enabled": true,
+    "whatsapp_template_friendly": "السلام عليكم أستاذ / {CustomerName}\nنود تذكيركم بلطف بأن لديكم مديونية مستحقة بقيمة {RemainingBalance} ج.م لدى كافيه الديب.\nشاكرين تعاونكم المستمر معنا 🌹",
+    "whatsapp_template_statement": "السلام عليكم أستاذ / {CustomerName}\nتجدون مرفقاً كشف الحساب التفصيلي الخاص بكم لدى كافيه الديب.\nإجمالي الرصيد المستحق: {RemainingBalance} ج.م.\nنشكركم لثقتكم الغالية 🌹",
+    "whatsapp_template_final": "السلام عليكم أستاذ / {CustomerName}\nتنبيه نهائي بخصوص مستحقات مديونيتكم المتأخرة بقيمة {RemainingBalance} ج.م.\nنرجو التكرم بالسداد في أقرب وقت لتفادي تعليق الحساب التجاري.\nشاكرين تفهمكم 🌹",
+    "whatsapp_template_receipt": "تم استلام دفعة مالية بقيمة {PaymentAmount} ج.م بنجاح.\nالرصيد المتبقي المستحق: {RemainingBalance} ج.م.\nشكراً لتعاملكم معنا 🌹",
+    "statement_footer": "هذا الكشف صادر آلياً من نظام كافيه الديب POS الملوكي ولا يحتاج لتوقيع.",
+    "sales_allow_edit_price": true,
+    "sales_allow_discount": true,
+    "sales_allow_delete_item": true,
+    "sales_require_password_price_change": false,
+    "sales_require_password_discount": false,
+    "payment_numbers": [
+      {
+        "id": "pay_1",
+        "type": "VODAFONE_CASH",
+        "number": "01094793701",
+        "is_active": true,
+        "name": "نادر الديب (الرئيسي)"
+      },
+      {
+        "id": "pay_2",
+        "type": "INSTAPAY",
+        "number": "01094793701",
+        "is_active": true,
+        "name": "نادر الديب"
+      }
+    ],
+    "vodafone_cash_number": "01094793701",
+    "instapay_number": "01094793701",
+    "employee_consumption_policy": "DEDUCT",
+    "custom_expense_categories": []
+  },
+  "cafe_auth_users": [
+    {
+      "id": "user_admin",
+      "username": "admin",
+      "name": "أدمن النظام / نادر الديب",
+      "role": "Admin",
+      "passwordHash": "admin123",
+      "phone": "01000000000",
+      "is_active": true,
+      "created_at": "2026-07-29T14:15:36.407Z"
+    },
+    {
+      "id": "user_cashier",
+      "username": "cashier",
+      "name": "الكاشير / أحمد الديب",
+      "role": "Cashier",
+      "passwordHash": "123456",
+      "phone": "01100000000",
+      "is_active": true,
+      "created_at": "2026-07-29T14:15:36.407Z"
+    }
+  ],
+  "cafe_auth_audit_logs": [
+    {
+      "id": "auth_log_1785334582771_2ijb",
+      "employee_name": "أدمن النظام / نادر الديب",
+      "username": "admin",
+      "role": "Admin",
+      "action": "LOGIN",
+      "date": "2026-07-29",
+      "time": "17:16:22",
+      "timestamp": "2026-07-29T14:16:22.770Z"
+    }
+  ]
+}
