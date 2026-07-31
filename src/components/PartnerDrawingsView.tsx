@@ -262,7 +262,7 @@ export default function PartnerDrawingsView({ onShowSuccessAlert, onShowWarningA
         </head>
         <body>
           <div class="header">
-            <img src="${getEldeebLogoDataUrl(200, false, 'gold')}" alt="Cafe Eldeeb Logo" style="height: 90px; width: auto; margin: 0 auto 10px; display: block;" />
+            <img src="${getEldeebLogoDataUrl(300, false, 'gold')}" alt="Cafe Eldeeb Logo" style="height: 155px; width: auto; margin: 0 auto 12px; display: block; filter: contrast(115%) brightness(102%); image-rendering: -webkit-optimize-contrast;" />
             <div class="title">كافيه الديب POS Enterprise</div>
             <div class="subtitle">تقرير كشف حساب الشريك: ${partner.name}</div>
             <div class="subtitle">التاريخ: ${new Date().toLocaleDateString('ar-EG')}</div>

@@ -80,6 +80,41 @@ const getCurrentUserRole = (): UserRole => {
   return 'Admin';
 };
 
+export function isServiceOrNonInventoryProduct(prod: any): boolean {
+  if (!prod) return false;
+  if (prod.is_service === true) return true;
+  const id = String(prod.id || '');
+  const categoryId = String(prod.category_id || '');
+  const barcode = String(prod.barcode || '');
+  const unit = String(prod.unit || '');
+  const nameEn = String(prod.name_en || '');
+  const nameAr = String(prod.name_ar || '');
+
+  if (
+    id === 'service_playstation' ||
+    id === 'prod_playstation' ||
+    id.startsWith('service_') ||
+    id.startsWith('prod_playstation') ||
+    categoryId === 'cat_playstation_service' ||
+    categoryId === 'cat_playstation' ||
+    categoryId === 'cat_service' ||
+    categoryId === 'services' ||
+    barcode === 'SERVICE_PS' ||
+    barcode.startsWith('SERVICE_') ||
+    unit === 'جلسة' ||
+    unit === 'خدمة' ||
+    unit === 'ساعة' ||
+    nameEn.toLowerCase().includes('playstation playtime') ||
+    nameEn.toLowerCase().includes('service fee') ||
+    nameAr.includes('رسم وقت لعب') ||
+    nameAr.includes('وقت لعب') ||
+    nameAr.includes('خدمة')
+  ) {
+    return true;
+  }
+  return false;
+}
+
 import { firebaseSyncService } from './lib/firebaseSyncService';
 
 const setLocal = <T>(key: string, value: T): void => {
@@ -799,6 +834,7 @@ export const dbService = {
       list.push(updatedCust);
     }
     setLocal(KEYS.CUSTOMERS, list);
+    syncToServer();
     return list;
   },
   deleteCustomer: (id: string) => {
@@ -828,6 +864,7 @@ export const dbService = {
     const visits = getLocal<any[]>(KEYS.CUSTOMER_VISITS, []).filter(v => v.customer_id !== id);
     setLocal(KEYS.CUSTOMER_VISITS, visits);
 
+    syncToServer();
     return list;
   },
 
@@ -872,6 +909,7 @@ export const dbService = {
       tx.user || 'أدمن النظام'
     );
 
+    syncToServer();
     return newTx;
   },
 
@@ -4297,6 +4335,9 @@ export const dbService = {
 
     for (const cartItem of cartItems) {
       const prod = cartItem.product;
+      if (isServiceOrNonInventoryProduct(prod)) {
+        continue; // Skip inventory checks for PlayStation playtime fees and service products
+      }
       const qty = cartItem.quantity;
 
       if (prod.recipe_ingredients && prod.recipe_ingredients.length > 0) {
@@ -4369,12 +4410,14 @@ export const dbService = {
     productQty?: number
   ): void => {
     if (quantityToConsume <= 0) return;
+    if (itemId === 'service_playstation' || itemId === 'prod_playstation' || itemId.startsWith('service_')) return;
     const batches = dbService.getInventoryBatches();
     const consumptions = getLocal<any[]>('cafe_batch_consumptions', []);
     const products = dbService.getProducts();
     const rawMaterials = dbService.getRawMaterials();
 
     const targetItem = products.find(p => p.id === itemId) || rawMaterials.find(r => r.id === itemId);
+    if (targetItem && isServiceOrNonInventoryProduct(targetItem)) return;
     const targetName = targetItem ? ((targetItem as any).name_ar || (targetItem as any).name || '') : '';
 
     const rm = rawMaterials.find(r => r.id === itemId);

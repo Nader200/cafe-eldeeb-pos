@@ -265,7 +265,7 @@ export default function InvoiceHistoryView({
             </style>
           </head>
           <body>
-            <div class="center" style="margin-bottom: 8px;"><img src="${getEldeebLogoDataUrl(200, false, 'gold')}" alt="Logo" style="height: 75px; width: auto; margin: 0 auto 8px; display: block;" /></div>
+            <div class="center" style="margin-bottom: 8px;"><img src="${getEldeebLogoDataUrl(240, false, 'gold')}" alt="Logo" style="height: 135px; width: auto; margin: 0 auto 8px; display: block; filter: contrast(115%) brightness(102%); image-rendering: -webkit-optimize-contrast;" /></div>
             <div class="center bold" style="font-size: 16px;">${settings.cafe_name}</div>
             <div class="center">${settings.address || ''}</div>
             <div class="center">هاتف: ${settings.phone || ''}</div>
@@ -504,7 +504,7 @@ export default function InvoiceHistoryView({
             </style>
           </head>
           <body>
-            <div class="center" style="margin-bottom: 8px;"><img src="${getEldeebLogoDataUrl(200, false, 'gold')}" alt="Logo" style="height: 75px; width: auto; margin: 0 auto 8px; display: block;" /></div>
+            <div class="center" style="margin-bottom: 8px;"><img src="${getEldeebLogoDataUrl(240, false, 'gold')}" alt="Logo" style="height: 135px; width: auto; margin: 0 auto 8px; display: block; filter: contrast(115%) brightness(102%); image-rendering: -webkit-optimize-contrast;" /></div>
             <div class="center bold" style="font-size: 16px;">${settings.cafe_name}</div>
             <div class="center">${settings.address || 'كافيه الديب'}</div>
             <div class="center">هاتف: ${settings.phone || 'غير مسجل'}</div>
@@ -1082,7 +1082,7 @@ export default function InvoiceHistoryView({
               {/* Receipt Header */}
               <div className="text-center w-full border-b border-dashed border-gray-400 pb-2.5 flex flex-col items-center">
                 <div className="mb-1 flex justify-center">
-                  <EldeebLogoFull className="w-[140px]" showSubtext={true} />
+                  <EldeebLogoFull className="w-[220px] sm:w-[250px]" showSubtext={true} />
                 </div>
                 <p className="text-[9px] text-gray-600">{settings.address}</p>
                 <p className="text-[9px] text-gray-600">هاتف: {settings.phone}</p>

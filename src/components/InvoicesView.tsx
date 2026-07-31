@@ -347,7 +347,7 @@ export default function InvoicesView({ onShowSuccessAlert, onShowWarningAlert }:
               {/* Receipt Header branding */}
               <div className="text-center w-full border-b border-dashed border-gray-400 pb-2 flex flex-col items-center">
                 <div className="mb-1 flex justify-center">
-                  <EldeebLogoFull className="w-[140px]" showSubtext={true} />
+                  <EldeebLogoFull className="w-[220px] sm:w-[250px]" showSubtext={true} />
                 </div>
                 <p className="text-[10px] text-gray-600">{settings.address}</p>
                 <p className="text-[10px] text-gray-600">هاتف: {settings.phone}</p>

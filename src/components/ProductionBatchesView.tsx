@@ -1095,7 +1095,7 @@ export default function ProductionBatchesView({
           <div className="bg-luxury-card border border-luxury-border rounded-3xl p-6 shadow-2xl space-y-6">
             <div className="flex items-center justify-between border-b border-gray-800 pb-4">
               <div className="flex items-center gap-3">
-                <EldeebLogoHeader className="h-10 shrink-0" />
+                <EldeebLogoHeader className="h-14 shrink-0" />
                 <div>
                   <h3 className="text-base font-black text-white">التقرير الموحد لإدارة المخزون والأرباح</h3>
                   <p className="text-xs text-gray-400">تحليل الموقف المالي الشامل لدفعات المواد الخام والمنتجات الجاهزة</p>

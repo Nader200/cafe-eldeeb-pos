@@ -37,6 +37,7 @@ export interface Product {
   created_at: string;
   updated_at: string;
   is_raw_material?: boolean; // True if this item is a raw material/ingredient (e.g. Coffee Beans, Milk) rather than a direct sellable menu item
+  is_service?: boolean; // True if item is a service or non-inventory playtime charge
   recipe_ingredients?: RecipeIngredient[]; // List of ingredients that this menu item consumes upon sale
   used_raw_materials?: string[]; // IDs of separate Raw Materials used in this product
 }

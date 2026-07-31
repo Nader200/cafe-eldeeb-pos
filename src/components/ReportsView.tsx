@@ -26,6 +26,7 @@ import {
 import { dbService, isPurchaseExpense } from '../dbService';
 import { Invoice, Expense, Product, CashDrawer, InvoiceItem, ReturnTransaction, Partner, PartnerDrawing } from '../types';
 import { BatchProfitReportView } from './BatchProfitReportView';
+import { EldeebLogoHeader } from './EldeebLogo';
 
 interface ReportsViewProps {
   onShowSuccessAlert: (msg: string) => void;

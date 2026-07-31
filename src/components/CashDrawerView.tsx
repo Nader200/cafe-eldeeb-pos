@@ -253,7 +253,7 @@ export default function CashDrawerView({
         </head>
         <body onload="window.print()">
           <div class="header">
-            <img src="${getEldeebLogoDataUrl(200, false, 'gold')}" alt="Cafe Eldeeb Logo" style="height: 80px; width: auto; margin: 0 auto 10px; display: block;" />
+            <img src="${getEldeebLogoDataUrl(300, false, 'gold')}" alt="Cafe Eldeeb Logo" style="height: 145px; width: auto; margin: 0 auto 10px; display: block; filter: contrast(115%) brightness(102%); image-rendering: -webkit-optimize-contrast;" />
             <div class="title">${settings.cafe_name}</div>
             <div class="subtitle">تقرير وجرد مطابقة درج النقدية اليومي المعتمد</div>
             <div>التاريخ: ${new Date().toLocaleDateString('ar-EG')}</div>

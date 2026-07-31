@@ -125,7 +125,7 @@ export async function createInvoicePDF({
       
       <!-- HEADER matching Customer Statement -->
       <div style="text-align: center; border-bottom: 3px double #d4af37; padding-bottom: 20px; margin-bottom: 22px;">
-        <img src="${getEldeebLogoDataUrl(220, false, 'gold')}" alt="Cafe Eldeeb Logo" style="height: 85px; width: auto; margin: 0 auto 10px; display: block;" />
+        <img src="${getEldeebLogoDataUrl(300, false, 'gold')}" alt="Cafe Eldeeb Logo" style="height: 155px; width: auto; margin: 0 auto 12px; display: block; filter: contrast(115%) brightness(102%); image-rendering: -webkit-optimize-contrast;" />
         <h1 style="color: #111111; margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px;">${cafeName}</h1>
         <p style="margin: 6px 0 0; color: #4b5563; font-size: 14px; font-weight: bold;">فاتورة مبيعات إلكترونية • Official Sales Invoice</p>
         <p style="margin: 4px 0 0; color: #6b7280; font-size: 12px; font-weight: 600;">تاريخ الإصدار: ${formattedDateTime}</p>

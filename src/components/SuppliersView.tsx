@@ -795,7 +795,7 @@ export default function SuppliersView({
                 <div id="supplier-ledger-container" className="bg-[#050505] border border-gold-500/10 rounded-3xl p-5 shadow-lg space-y-4">
                   {/* Print Statement Header with Official Logo */}
                   <div className="flex flex-col items-center justify-center text-center pb-3 border-b border-gray-800">
-                    <EldeebLogoHeader className="h-12 mb-1" />
+                    <EldeebLogoHeader className="h-16 mb-2" />
                     <span className="text-xs text-gray-400 font-semibold">كشف حساب المورد المسجل: {selectedSupplier.name}</span>
                   </div>
 

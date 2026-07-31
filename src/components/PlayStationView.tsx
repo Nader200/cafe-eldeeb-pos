@@ -644,7 +644,8 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
       notes: 'رسم وقت لعب بلايستيشن ملوكي',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-      is_raw_material: false
+      is_raw_material: false,
+      is_service: true
     };
 
     // 2. Build CartItem representing the play fee

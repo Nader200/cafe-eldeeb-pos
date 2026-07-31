@@ -415,7 +415,7 @@ export function BatchProfitReportView() {
       {/* 1. Report Header Section with Official Logo */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between border-b border-gold-500/10 pb-5 gap-4 print:border-b-2 print:border-black">
         <div>
-          <EldeebLogoHeader className="h-12 mb-3" />
+          <EldeebLogoHeader className="h-16 mb-3" />
           <h2 className="text-xl font-extrabold text-gold-500 flex items-center gap-2 print:text-black print:text-2xl">
             <TrendingUp className="w-6 h-6 text-gold-500 print:hidden" />
             <span>تقرير تحليل ربح الدفعات التفصيلي</span>

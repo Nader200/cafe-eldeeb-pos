@@ -8,7 +8,7 @@ import {
   Users, UserCheck, Search, Star, Wallet, CreditCard, Calendar, TrendingUp, History, 
   QrCode, Plus, Edit, Archive, RotateCcw, FileText, CheckCircle, Clock, ArrowUpRight, 
   ArrowDownLeft, X, ChevronLeft, Trash, PlusCircle, DollarSign, Camera, User, MapPin, Phone, MessageSquare,
-  Printer, Download
+  Printer, Download, AlertTriangle
 } from 'lucide-react';
 
 interface EnterpriseCustomersViewProps {
@@ -70,6 +70,22 @@ export default function EnterpriseCustomersView({
 
   const [showStatementModal, setShowStatementModal] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
+
+  // Custom Confirmation Modal State (Safe for iframe and web previews)
+  const [confirmModalState, setConfirmModalState] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmText: string;
+    confirmBg?: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    confirmText: 'تأكيد',
+    onConfirm: () => {}
+  });
 
   // New Note State
   const [newNoteText, setNewNoteText] = useState('');
@@ -459,7 +475,7 @@ export default function EnterpriseCustomersView({
       </head>
       <body>
         <div class="header">
-          <img src="${getEldeebLogoDataUrl(200, false, 'gold')}" alt="Cafe Eldeeb Logo" style="height: 90px; width: auto; margin: 0 auto 10px; display: block;" />
+          <img src="${getEldeebLogoDataUrl(400, false, 'gold')}" alt="Cafe Eldeeb Logo" style="height: 240px; width: auto; margin: 0 auto 15px; display: block; filter: contrast(150%) brightness(92%) saturate(130%) drop-shadow(0 4px 12px rgba(0,0,0,0.3)); -webkit-filter: contrast(150%) brightness(92%) saturate(130%) drop-shadow(0 4px 12px rgba(0,0,0,0.3)); image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges;" />
           <h1>كافيه الديب POS • Cafe Eldeeb</h1>
           <p>تقرير كشف مديونيات الحساب الآجل وحركات الذمة المالية للعملاء</p>
           <p>تاريخ استخراج التقرير: ${todayStr} | إجمالي عدد العمليات المشمولة: ${filteredCreditTransactions.length}</p>
@@ -590,7 +606,7 @@ export default function EnterpriseCustomersView({
       </head>
       <body>
         <div class="header">
-          <img src="${getEldeebLogoDataUrl(200, false, 'gold')}" alt="Cafe Eldeeb Logo" style="height: 90px; width: auto; margin: 0 auto 10px; display: block;" />
+          <img src="${getEldeebLogoDataUrl(400, false, 'gold')}" alt="Cafe Eldeeb Logo" style="height: 240px; width: auto; margin: 0 auto 15px; display: block; filter: contrast(150%) brightness(92%) saturate(130%) drop-shadow(0 4px 12px rgba(0,0,0,0.3)); -webkit-filter: contrast(150%) brightness(92%) saturate(130%) drop-shadow(0 4px 12px rgba(0,0,0,0.3)); image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges;" />
           <h1>كافيه الديب POS • Cafe Eldeeb</h1>
           <p>تقرير كشف حركات المحفظة الإلكترونية الشامل للزبائن</p>
           <p>تاريخ استخراج التقرير: ${todayStr} | إجمالي عدد العمليات المشمولة: ${filteredWalletTransactions.length}</p>
@@ -752,20 +768,85 @@ export default function EnterpriseCustomersView({
 
   // Archive Customer Toggle
   const handleArchiveCustomer = (cust: Customer) => {
-    const confirmMsg = cust.is_archived 
-      ? `هل أنت متأكد من استعادة العميل الملوكي "${cust.full_name}"؟`
-      : `هل أنت متأكد من أرشفة العميل "${cust.full_name}"؟ لن تضيع أي حسابات مالية أو تفاصيل مديونيات خاصة به.`;
+    const isArchiving = !cust.is_archived;
+    const title = isArchiving ? 'أرشفة العميل' : 'استعادة العميل من الأرشيف';
+    const confirmMsg = isArchiving 
+      ? `هل أنت متأكد من أرشفة العميل "${cust.full_name}"؟ لن تضيع أي حسابات مالية أو تفاصيل مديونيات خاصة به ويمكن استعادته لاحقاً.`
+      : `هل أنت متأكد من استعادة العميل الملوكي "${cust.full_name}" من الأرشيف؟`;
       
-    if (window.confirm(confirmMsg)) {
-      const updatedCust: Customer = {
-        ...cust,
-        is_archived: !cust.is_archived,
-        updated_at: new Date().toISOString()
-      };
-      const list = dbService.saveCustomer(updatedCust);
-      setCustomers(list);
-      onShowSuccessAlert(cust.is_archived ? 'تم استعادة ملف العميل بنجاح!' : 'تم أرشفة العميل بنجاح ملوكي لحين الطلب.');
+    setConfirmModalState({
+      isOpen: true,
+      title,
+      message: confirmMsg,
+      confirmText: isArchiving ? 'نعم، أرشفة العميل' : 'نعم، استعادة العميل',
+      confirmBg: isArchiving ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-emerald-600 hover:bg-emerald-700 text-white',
+      onConfirm: () => {
+        const updatedCust: Customer = {
+          ...cust,
+          is_archived: isArchiving,
+          updated_at: new Date().toISOString()
+        };
+        const list = dbService.saveCustomer(updatedCust);
+        setCustomers(list);
+        
+        // Update selected customer ID so the detail panel updates immediately
+        if (isArchiving && activeFilter !== 'archived') {
+          const remainingActive = list.filter(c => !c.is_archived && c.id !== cust.id);
+          setSelectedCustomerId(remainingActive[0]?.id || null);
+        } else if (!isArchiving && activeFilter === 'archived') {
+          const remainingArchived = list.filter(c => !!c.is_archived && c.id !== cust.id);
+          setSelectedCustomerId(remainingArchived[0]?.id || null);
+        }
+
+        onShowSuccessAlert(isArchiving ? 'تم أرشفة العميل بنجاح ملوكي لحين الطلب.' : 'تم استعادة ملف العميل بنجاح!');
+        loadData();
+      }
+    });
+  };
+
+  // Delete Customer Handler with strict validation rules
+  const handleDeleteCustomer = (cust: Customer) => {
+    const custInvoices = invoices.filter(inv => inv.customer_id === cust.id);
+    const custCreditTxs = creditTransactions.filter(tx => tx.customer_id === cust.id);
+    const custWalletTxs = walletTransactions.filter(tx => tx.customer_id === cust.id);
+    const custPayments = creditPayments.filter(p => p.customer_id === cust.id);
+
+    const hasInvoices = custInvoices.length > 0;
+    const hasDebt = (cust.current_balance || 0) > 0 || custCreditTxs.length > 0;
+    const hasPayments = custPayments.length > 0;
+    const hasWallet = (cust.wallet_balance || 0) > 0 || custWalletTxs.length > 0;
+
+    const hasFinancialData = hasInvoices || hasDebt || hasPayments || hasWallet;
+
+    if (hasFinancialData) {
+      onShowWarningAlert('لا يمكن حذف العميل لأنه يحتوي على بيانات مالية أو فواتير أو كشف حساب. يمكنك أرشفة العميل بدلاً من ذلك للحفاظ على السجلات المالية.');
+      return;
     }
+
+    setConfirmModalState({
+      isOpen: true,
+      title: 'حذف العميل نهائياً',
+      message: `هل أنت متأكد من حذف حساب العميل "${cust.full_name}" نهائياً؟ سيتم إزالة ملفه تماماً من النظام.`,
+      confirmText: 'نعم، حذف العميل',
+      confirmBg: 'bg-red-600 hover:bg-red-700 text-white',
+      onConfirm: () => {
+        dbService.deleteCustomer(cust.id);
+        onShowSuccessAlert(`تم حذف العميل "${cust.full_name}" بنجاح.`);
+
+        const remainingCustomers = dbService.getCustomers();
+        setCustomers(remainingCustomers);
+
+        if (activeFilter === 'archived') {
+          const remainingArchived = remainingCustomers.filter(c => !!c.is_archived && c.id !== cust.id);
+          setSelectedCustomerId(remainingArchived[0]?.id || null);
+        } else {
+          const remainingActive = remainingCustomers.filter(c => !c.is_archived && c.id !== cust.id);
+          setSelectedCustomerId(remainingActive[0]?.id || null);
+        }
+
+        loadData();
+      }
+    });
   };
 
   // Toggle VIP Status
@@ -818,40 +899,95 @@ export default function EnterpriseCustomersView({
     }
 
     const currentBal = selectedCustomer.wallet_balance || 0;
-    let newBal = currentBal;
-    let desc = '';
+    const currentDebt = selectedCustomer.current_balance || 0;
 
     if (walletOpType === 'DEPOSIT') {
-      newBal = currentBal + walletAmount;
-      desc = walletNotes.trim() || 'شحن رصيد نقدي للمحفظة';
+      if (currentDebt > 0) {
+        // Auto offset debt first
+        const debtPaid = Math.min(walletAmount, currentDebt);
+        const remainingDeposit = walletAmount - debtPaid;
+        const newWalletBal = currentBal + remainingDeposit;
+
+        // 1. Record Wallet Deposit transaction first (full amount deposited or remaining)
+        dbService.saveWalletTransaction({
+          customer_id: selectedCustomer.id,
+          customer_name: selectedCustomer.full_name,
+          transaction_type: 'DEPOSIT',
+          amount: walletAmount,
+          previous_balance: currentBal,
+          new_balance: newWalletBal,
+          notes: walletNotes.trim() || `شحن محفظة بقيمة ${walletAmount} ج.م (تم خصم ${debtPaid} ج.م لسداد الدين)`,
+          date: new Date().toISOString().split('T')[0],
+          time: new Date().toTimeString().split(' ')[0],
+          user: cashierName
+        });
+
+        // 2. Record Credit Payment for debt clearance
+        dbService.addCreditPayment(
+          selectedCustomer.id,
+          debtPaid,
+          `تسوية دين تلقائية من مبلغ شحن المحفظة بقيمة ${debtPaid} ج.م`,
+          cashierName
+        );
+
+        onShowSuccessAlert(`تم شحن المحفظة بنجاح! تم تسوية دين بقيمة ${debtPaid} ج.م وإضافة ${remainingDeposit} ج.م للمحفظة.`);
+      } else {
+        const newBal = currentBal + walletAmount;
+        dbService.saveWalletTransaction({
+          customer_id: selectedCustomer.id,
+          customer_name: selectedCustomer.full_name,
+          transaction_type: 'DEPOSIT',
+          amount: walletAmount,
+          previous_balance: currentBal,
+          new_balance: newBal,
+          notes: walletNotes.trim() || 'شحن رصيد نقدي للمحفظة',
+          date: new Date().toISOString().split('T')[0],
+          time: new Date().toTimeString().split(' ')[0],
+          user: cashierName
+        });
+        onShowSuccessAlert('تم تحديث المحفظة الملوكية للعميل وتسجيل الحركة المالية بالخزينة!');
+      }
     } else if (walletOpType === 'WITHDRAWAL') {
       if (currentBal < walletAmount) {
         onShowWarningAlert('عذراً، الرصيد المتوفر بالمحفظة غير كافٍ لإجراء عملية السحب!');
         return;
       }
-      newBal = currentBal - walletAmount;
-      desc = walletNotes.trim() || 'سحب نقدي من رصيد المحفظة';
+      const newBal = currentBal - walletAmount;
+      const desc = walletNotes.trim() || 'خصم / سحب من رصيد المحفظة';
+
+      dbService.saveWalletTransaction({
+        customer_id: selectedCustomer.id,
+        customer_name: selectedCustomer.full_name,
+        transaction_type: 'WITHDRAWAL',
+        amount: walletAmount,
+        previous_balance: currentBal,
+        new_balance: newBal,
+        notes: desc,
+        date: new Date().toISOString().split('T')[0],
+        time: new Date().toTimeString().split(' ')[0],
+        user: cashierName
+      });
+      onShowSuccessAlert('تم خصم المبلغ من المحفظة الملوكية للعميل وتحديث الرصيد مباشرة!');
     } else {
       // Manual adjustment
-      newBal = walletAmount; // sets balance directly
-      desc = walletNotes.trim() || `تعديل يدوي لرصيد المحفظة من ${currentBal} ج.م إلى ${walletAmount} ج.م`;
+      const newBal = walletAmount; // sets balance directly
+      const desc = walletNotes.trim() || `تعديل يدوي لرصيد المحفظة من ${currentBal} ج.م إلى ${walletAmount} ج.م`;
+
+      dbService.saveWalletTransaction({
+        customer_id: selectedCustomer.id,
+        customer_name: selectedCustomer.full_name,
+        transaction_type: 'MANUAL_ADJUSTMENT',
+        amount: Math.abs(newBal - currentBal),
+        previous_balance: currentBal,
+        new_balance: newBal,
+        notes: desc,
+        date: new Date().toISOString().split('T')[0],
+        time: new Date().toTimeString().split(' ')[0],
+        user: cashierName
+      });
+      onShowSuccessAlert('تم تحديث المحفظة الملوكية للعميل وتسجيل الحركة المالية بالخزينة!');
     }
 
-    // Save transaction
-    dbService.saveWalletTransaction({
-      customer_id: selectedCustomer.id,
-      customer_name: selectedCustomer.full_name,
-      transaction_type: walletOpType,
-      amount: walletOpType === 'MANUAL_ADJUSTMENT' ? Math.abs(newBal - currentBal) : walletAmount,
-      previous_balance: currentBal,
-      new_balance: newBal,
-      notes: desc,
-      date: new Date().toISOString().split('T')[0],
-      time: new Date().toTimeString().split(' ')[0],
-      user: cashierName
-    });
-
-    onShowSuccessAlert('تم تحديث المحفظة الملوكية للعميل وتسجيل الحركة المالية بالخزينة!');
     setShowWalletModal(false);
     setWalletAmount(0);
     setWalletNotes('');
@@ -859,22 +995,11 @@ export default function EnterpriseCustomersView({
   };
 
   // Pay Dues / Credit Payments
-  const handleCreditPayment = (e: React.FormEvent) => {
-    e.preventDefault();
+  const executeCreditPaymentProcess = (amountToPay: number) => {
     if (!selectedCustomer) return;
-    if (creditPayAmount <= 0) {
-      onShowWarningAlert('يرجى إدخال مبلغ دفع صالح أكبر من الصفر');
-      return;
-    }
-    if (creditPayAmount > selectedCustomer.current_balance) {
-      if (!window.confirm(`المبلغ المدخل (${creditPayAmount} ج.م) يتجاوز مديونية العميل الحالية (${selectedCustomer.current_balance} ج.م). هل تريد سداد المديونية بالكامل وحفظ المبلغ المتبقي كدفعة مقدمة بالمحفظة؟`)) {
-        return;
-      }
-    }
-
     const currentOwed = selectedCustomer.current_balance;
-    const paidAmount = Math.min(creditPayAmount, currentOwed);
-    const excessAmount = creditPayAmount - paidAmount;
+    const paidAmount = Math.min(amountToPay, currentOwed);
+    const excessAmount = amountToPay - paidAmount;
 
     // 1. Process credit payment for the owed amount
     if (paidAmount > 0) {
@@ -898,7 +1023,7 @@ export default function EnterpriseCustomersView({
         amount: excessAmount,
         previous_balance: currentWallet,
         new_balance: newWalletBal,
-        notes: `رصيد زائد متبقي من دفعة سداد آجل بقيمة ${creditPayAmount} ج.م`,
+        notes: `رصيد زائد متبقي من دفعة سداد آجل بقيمة ${amountToPay} ج.م`,
         date: new Date().toISOString().split('T')[0],
         time: new Date().toTimeString().split(' ')[0],
         user: cashierName
@@ -910,6 +1035,27 @@ export default function EnterpriseCustomersView({
     setCreditPayAmount(0);
     setCreditNotes('');
     loadData();
+  };
+
+  const handleCreditPayment = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCustomer) return;
+    if (creditPayAmount <= 0) {
+      onShowWarningAlert('يرجى إدخال مبلغ دفع صالح أكبر من الصفر');
+      return;
+    }
+    if (creditPayAmount > selectedCustomer.current_balance) {
+      setConfirmModalState({
+        isOpen: true,
+        title: 'سداد مبلغ زائد للمحفظة',
+        message: `المبلغ المدخل (${creditPayAmount} ج.م) يتجاوز مديونية العميل الحالية (${selectedCustomer.current_balance} ج.م). هل تريد سداد المديونية بالكامل وحفظ المبلغ المتبقي كدفعة مقدمة بالمحفظة؟`,
+        confirmText: 'تأكيد السداد والتحويل للمحفظة',
+        onConfirm: () => executeCreditPaymentProcess(creditPayAmount)
+      });
+      return;
+    }
+
+    executeCreditPaymentProcess(creditPayAmount);
   };
 
   // Pay Credit Dues using Wallet Balance
@@ -928,110 +1074,44 @@ export default function EnterpriseCustomersView({
     }
 
     const payAmount = Math.min(walletBal, owedBal);
-    if (window.confirm(`هل أنت متأكد من سداد مبلغ ${payAmount} ج.م من مديونية العميل باستخدام رصيد محفظته المتوفر؟`)) {
-      // 1. Deduct from Wallet
-      const newWalletBal = walletBal - payAmount;
-      dbService.saveWalletTransaction({
-        customer_id: selectedCustomer.id,
-        customer_name: selectedCustomer.full_name,
-        transaction_type: 'WITHDRAWAL',
-        amount: payAmount,
-        previous_balance: walletBal,
-        new_balance: newWalletBal,
-        notes: `سداد مديونية آجل داخلي بقيمة ${payAmount} ج.م من رصيد المحفظة`,
-        date: new Date().toISOString().split('T')[0],
-        time: new Date().toTimeString().split(' ')[0],
-        user: cashierName
-      });
+    setConfirmModalState({
+      isOpen: true,
+      title: 'تأكيد سداد الدين من المحفظة',
+      message: `هل أنت متأكد من سداد مبلغ ${payAmount} ج.م من مديونية العميل باستخدام رصيد محفظته المتوفر؟`,
+      confirmText: 'نعم، سداد المديونية',
+      onConfirm: () => {
+        // 1. Deduct from Wallet
+        const newWalletBal = walletBal - payAmount;
+        dbService.saveWalletTransaction({
+          customer_id: selectedCustomer.id,
+          customer_name: selectedCustomer.full_name,
+          transaction_type: 'WITHDRAWAL',
+          amount: payAmount,
+          previous_balance: walletBal,
+          new_balance: newWalletBal,
+          notes: `سداد مديونية آجل داخلي بقيمة ${payAmount} ج.م من رصيد المحفظة`,
+          date: new Date().toISOString().split('T')[0],
+          time: new Date().toTimeString().split(' ')[0],
+          user: cashierName
+        });
 
-      // 2. Reduce credit balance in customer model & save
-      selectedCustomer.current_balance = Math.max(0, owedBal - payAmount);
-      selectedCustomer.updated_at = new Date().toISOString();
-      dbService.saveCustomer(selectedCustomer);
+        // 2. Reduce credit balance in customer model & save
+        selectedCustomer.current_balance = Math.max(0, owedBal - payAmount);
+        selectedCustomer.updated_at = new Date().toISOString();
+        dbService.saveCustomer(selectedCustomer);
 
-      // 3. Log a ledger credit transaction
-      const creditTxs = dbService.getCreditTransactions();
-      const customersList = dbService.getCustomers();
-      const cIdx = customersList.findIndex(c => c.id === selectedCustomer.id);
-      if (cIdx !== -1) {
-        customersList[cIdx].current_balance = Math.max(0, owedBal - payAmount);
-        customersList[cIdx].updated_at = new Date().toISOString();
+        // 3. Log a ledger credit transaction
+        dbService.addCreditPayment(
+          selectedCustomer.id,
+          payAmount,
+          'سداد مديونية آجل من رصيد المحفظة',
+          cashierName
+        );
+
+        onShowSuccessAlert(`تم سداد ${payAmount} ج.م من مديونية العميل بنجاح من المحفظة!`);
+        loadData();
       }
-
-      const now = new Date();
-      const todayStr = now.toISOString().split('T')[0];
-      const timeStr = now.toTimeString().split(' ')[0];
-      const customerTxs = creditTxs.filter(t => t.customer_id === selectedCustomer.id);
-      let previous_balance = 0;
-      customerTxs.forEach(t => {
-        if (t.transaction_type === 'INVOICE') previous_balance += t.amount;
-        else if (t.transaction_type === 'PAYMENT') previous_balance -= t.amount;
-        else if (t.transaction_type === 'MANUAL_ADJUSTMENT') previous_balance += t.amount;
-        else if (t.transaction_type === 'CORRECTION') previous_balance += t.amount;
-        else if (t.transaction_type === 'REFUND') previous_balance -= t.amount;
-      });
-
-      const newTx: CustomerCreditTransaction = {
-        id: `ctx_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-        customer_id: selectedCustomer.id,
-        customer_name: selectedCustomer.full_name,
-        transaction_type: 'PAYMENT',
-        amount: payAmount,
-        previous_balance,
-        new_balance: Math.max(0, previous_balance - payAmount),
-        date: todayStr,
-        time: timeStr,
-        created_by: cashierName,
-        notes: 'سداد آلي من رصيد المحفظة الخاصة بالعميل',
-        created_at: now.toISOString()
-      };
-      creditTxs.push(newTx);
-      localStorage.setItem('cafe_credit_transactions', JSON.stringify(creditTxs));
-      localStorage.setItem('cafe_customers', JSON.stringify(customersList));
-
-      // 4. Update individual credit invoices (oldest first)
-      const invoicesList = dbService.getInvoices();
-      const custInvoices = invoicesList.filter(
-        inv => inv.customer_id === selectedCustomer.id &&
-        inv.invoice_status !== 'CANCELLED' &&
-        inv.remaining_amount > 0
-      );
-      custInvoices.sort((a, b) => a.invoice_date.localeCompare(b.invoice_date));
-
-      let remainingPayment = payAmount;
-      for (const inv of custInvoices) {
-        if (remainingPayment <= 0) break;
-        const invIdx = invoicesList.findIndex(i => i.id === inv.id);
-        if (invIdx !== -1) {
-          const canPay = Math.min(invoicesList[invIdx].remaining_amount, remainingPayment);
-          invoicesList[invIdx].paid_amount += canPay;
-          invoicesList[invIdx].remaining_amount -= canPay;
-          invoicesList[invIdx].payment_status = dbService.determinePaymentStatus(invoicesList[invIdx]);
-          invoicesList[invIdx].updated_at = new Date().toISOString();
-          remainingPayment -= canPay;
-        }
-      }
-      localStorage.setItem('cafe_invoices', JSON.stringify(invoicesList));
-
-      // 5. Log a legacy credit payment object for backward-compatibility with reports/invoice history
-      const payment: CreditPayment = {
-        id: `pay_${Date.now()}`,
-        customer_id: selectedCustomer.id,
-        amount: payAmount,
-        payment_date: new Date().toISOString().split('T')[0],
-        notes: 'سداد آلي من رصيد المحفظة الخاصة بالعميل',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      const paymentsList = dbService.getCreditPayments();
-      paymentsList.push(payment);
-      localStorage.setItem('cafe_credit_payments', JSON.stringify(paymentsList));
-      dbService.syncToServer();
-
-      // Note: No fresh external cash flows into the drawer since wallet was already logged as cash-in when deposited!
-      onShowSuccessAlert('تم سداد المديونية آلياً من رصيد المحفظة بنجاح تام!');
-      loadData();
-    }
+    });
   };
 
   // Add Custom Note
@@ -1052,11 +1132,18 @@ export default function EnterpriseCustomersView({
 
   // Delete Custom Note
   const handleDeleteNote = (id: string) => {
-    if (window.confirm('هل أنت متأكد من حذف هذه الملاحظة؟')) {
-      dbService.deleteCustomerNote(id);
-      onShowSuccessAlert('تم حذف الملاحظة بنجاح');
-      loadData();
-    }
+    setConfirmModalState({
+      isOpen: true,
+      title: 'حذف الملاحظة',
+      message: 'هل أنت متأكد من حذف هذه الملاحظة؟',
+      confirmText: 'نعم، حذف الملاحظة',
+      confirmBg: 'bg-red-600 hover:bg-red-700 text-white',
+      onConfirm: () => {
+        dbService.deleteCustomerNote(id);
+        onShowSuccessAlert('تم حذف الملاحظة بنجاح');
+        loadData();
+      }
+    });
   };
 
   // Add direct Manual Visit
@@ -1165,7 +1252,7 @@ export default function EnterpriseCustomersView({
       </head>
       <body>
         <div class="header">
-          <img src="${getEldeebLogoDataUrl(200, false, 'gold')}" alt="Cafe Eldeeb Logo" style="height: 90px; width: auto; margin: 0 auto 10px; display: block;" />
+          <img src="${getEldeebLogoDataUrl(400, false, 'gold')}" alt="Cafe Eldeeb Logo" style="height: 250px; width: auto; margin: 0 auto 15px; display: block; filter: contrast(155%) brightness(92%) saturate(135%) drop-shadow(0 4px 15px rgba(0,0,0,0.35)); -webkit-filter: contrast(155%) brightness(92%) saturate(135%) drop-shadow(0 4px 15px rgba(0,0,0,0.35)); image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges;" />
           <h1>كافيه الديب POS • Cafe Eldeeb</h1>
           <p>كشف مديونيات وحسابات العملاء الآجل والذمم المالية</p>
           <p>تاريخ الاستخراج: ${todayStr}</p>
@@ -1569,11 +1656,18 @@ export default function EnterpriseCustomersView({
                       className={`p-2 border rounded-xl cursor-pointer transition-all ${
                         selectedCustomer.is_archived
                           ? 'bg-emerald-950/20 border-emerald-800 text-emerald-400 hover:bg-emerald-950/40'
-                          : 'bg-red-950/20 border-red-900 text-red-400 hover:bg-red-950/40'
+                          : 'bg-amber-950/20 border-amber-900/50 text-amber-400 hover:bg-amber-950/40'
                       }`}
                       title={selectedCustomer.is_archived ? 'استعادة من الأرشيف' : 'نقل العميل للأرشيف'}
                     >
                       {selectedCustomer.is_archived ? <RotateCcw className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
+                    </button>
+                    <button
+                      onClick={() => handleDeleteCustomer(selectedCustomer)}
+                      className="p-2 bg-red-950/30 border border-red-900/60 text-red-400 hover:bg-red-900/50 hover:text-red-200 rounded-xl cursor-pointer transition-all"
+                      title="حذف العميل نهائياً"
+                    >
+                      <Trash className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => setShowQrModal(true)}
@@ -2894,7 +2988,7 @@ export default function EnterpriseCustomersView({
                   </head>
                   <body>
                     <div class="card">
-                      <img src="${getEldeebLogoDataUrl(200, false, 'gold')}" alt="Cafe Eldeeb Logo" style="height: 80px; width: auto; margin: 0 auto 10px; display: block;" />
+                      <img src="${getEldeebLogoDataUrl(300, false, 'gold')}" alt="Cafe Eldeeb Logo" style="height: 160px; width: auto; margin: 0 auto 10px; display: block; filter: contrast(145%) brightness(92%) saturate(125%) drop-shadow(0 3px 10px rgba(0,0,0,0.25)); -webkit-filter: contrast(145%) brightness(92%) saturate(125%) drop-shadow(0 3px 10px rgba(0,0,0,0.25)); image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges;" />
                       <div class="logo" style="margin-top: 6px;">كافيه الديب • Cafe Eldeeb</div>
                       <div class="name">${selectedCustomer.full_name}</div>
                       <div class="phone">${selectedCustomer.phone}</div>
@@ -2972,6 +3066,54 @@ export default function EnterpriseCustomersView({
 
             </form>
 
+          </div>
+        </div>
+      )}
+
+      {/* --- Custom Confirmation Modal (Safe for iframe and web previews) --- */}
+      {confirmModalState.isOpen && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in" dir="rtl">
+          <div className="bg-luxury-card border border-luxury-border rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col gap-5 text-right relative">
+            <div className="flex justify-between items-center border-b border-luxury-border pb-3">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-amber-500" />
+                {confirmModalState.title}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setConfirmModalState(prev => ({ ...prev, isOpen: false }))}
+                className="p-1 text-gray-400 hover:text-white rounded-lg transition-all cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs sm:text-sm text-gray-300 leading-relaxed font-medium">
+              {confirmModalState.message}
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setConfirmModalState(prev => ({ ...prev, isOpen: false }))}
+                className="px-4 py-2 bg-luxury-bg border border-luxury-border text-gray-300 hover:text-white rounded-xl text-xs font-bold cursor-pointer transition-all"
+              >
+                إلغاء التراجع
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const cb = confirmModalState.onConfirm;
+                  setConfirmModalState(prev => ({ ...prev, isOpen: false }));
+                  if (cb) cb();
+                }}
+                className={`px-5 py-2 rounded-xl text-xs font-bold cursor-pointer transition-all shadow-md active:scale-95 ${
+                  confirmModalState.confirmBg || 'bg-gradient-to-r from-gold-600 to-gold-700 text-black font-black'
+                }`}
+              >
+                {confirmModalState.confirmText}
+              </button>
+            </div>
           </div>
         </div>
       )}

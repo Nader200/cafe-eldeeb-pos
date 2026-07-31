@@ -2971,7 +2971,7 @@ export default function POSView({
               {/* Branding header */}
               <div className="text-center w-full border-b border-dashed border-gray-400 pb-3 flex flex-col items-center">
                 <div className="mb-1.5 flex justify-center">
-                  <EldeebLogoFull className="w-[140px]" showSubtext={true} />
+                  <EldeebLogoFull className="w-[220px] sm:w-[250px]" showSubtext={true} />
                 </div>
                 <p className="text-[10px] text-gray-600 mt-0.5">{settings.address}</p>
                 <p className="text-[10px] text-gray-600">الهاتف: {settings.phone}</p>
