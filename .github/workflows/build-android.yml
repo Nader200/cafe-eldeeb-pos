@@ -44,8 +44,8 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Grant Gradle Permission
-        run: chmod +x android/gradlew
+      - name: Grant Gradle Permissions
+        run: chmod +x android/gradlew android/gradlew.bat
 
       - name: Build APK
         run: |
