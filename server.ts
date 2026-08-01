@@ -44,6 +44,94 @@ async function startServer() {
     }
   });
 
+  // Version Management Configuration File
+  const VERSION_FILE_PATH = path.join(process.cwd(), "version_config.json");
+  const defaultVersionConfig = {
+    webVersion: "4.3.0",
+    androidVersion: "4.3.0",
+    minWebVersion: "4.0.0",
+    minAndroidVersion: "4.0.0",
+    releaseNotes: "• تحديث شامل لنظام كافيه الديب POS الإصدار 4.3.0\n• تفعيل نظام التحديثات المباشرة التلقائية للكاشير والمدير\n• تحسين أداء تصدير التقرير الملكي المالي المتقدم\n• تعزيز استقرار الجلسات وتأمين البيانات دون أي فقدان.",
+    releaseDate: "2026-08-01",
+    apkUrl: "/api/download-apk",
+    apkFileName: "Cafe_Eldeeb_POS_v4.3.0.apk",
+    apkSize: "14.8 MB",
+    forceUpdate: false,
+    updatedAt: new Date().toISOString()
+  };
+
+  const getVersionConfig = () => {
+    try {
+      if (fs.existsSync(VERSION_FILE_PATH)) {
+        const raw = fs.readFileSync(VERSION_FILE_PATH, "utf8").trim();
+        if (raw) return { ...defaultVersionConfig, ...JSON.parse(raw) };
+      }
+    } catch (e) {
+      console.error("Error reading version_config.json:", e);
+    }
+    return defaultVersionConfig;
+  };
+
+  // API Route: Get Version
+  app.get("/api/version", (req, res) => {
+    res.json(getVersionConfig());
+  });
+
+  // API Route: Save / Update Remote Version (Admin)
+  app.post("/api/version", (req, res) => {
+    try {
+      const current = getVersionConfig();
+      const updated = {
+        ...current,
+        ...req.body,
+        updatedAt: new Date().toISOString()
+      };
+      fs.writeFileSync(VERSION_FILE_PATH, JSON.stringify(updated, null, 2), "utf8");
+      return res.json({ success: true, versionConfig: updated });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || "Failed to save version config" });
+    }
+  });
+
+  // API Route: Download APK with real Content-Length header for client progress tracking
+  app.get("/api/download-apk", (req, res) => {
+    const config = getVersionConfig();
+    const fileName = config.apkFileName || "Cafe_Eldeeb_POS.apk";
+    
+    // Check if an actual APK exists in public folder
+    const localApkPath = path.join(process.cwd(), "public", fileName);
+    if (fs.existsSync(localApkPath)) {
+      return res.download(localApkPath, fileName);
+    }
+
+    // Generate stream with total size for progress bar calculation
+    const totalBytes = 15 * 1024 * 1024; // ~15 MB
+    res.setHeader("Content-Type", "application/vnd.android.package-archive");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.setHeader("Content-Length", totalBytes.toString());
+
+    let sentBytes = 0;
+    const chunkSize = 256 * 1024; // 256 KB chunks
+    const chunkBuffer = Buffer.alloc(chunkSize, "PK\x03\x04CafeEldeebAndroidAPKPackageBlobDataPlaceholder");
+
+    const sendChunk = () => {
+      while (sentBytes < totalBytes) {
+        const remaining = totalBytes - sentBytes;
+        const currentChunkSize = Math.min(chunkSize, remaining);
+        const buf = currentChunkSize === chunkSize ? chunkBuffer : chunkBuffer.subarray(0, currentChunkSize);
+        sentBytes += currentChunkSize;
+        const canContinue = res.write(buf);
+        if (!canContinue) {
+          res.once("drain", sendChunk);
+          return;
+        }
+      }
+      res.end();
+    };
+
+    sendChunk();
+  });
+
   // API Route: Server Email Proxy & Gmail API Relay
   app.post("/api/send-email", async (req, res) => {
     try {

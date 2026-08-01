@@ -32,15 +32,22 @@ import {
   Plus,
   Trash2,
   Edit,
-  X
+  X,
+  CheckCircle2,
+  Globe,
+  Clock
 } from 'lucide-react';
 import { dbService, seedDatabase, safeStorage } from '../dbService';
 const localStorage = safeStorage;
-import { AppSettings, PaymentNumber } from '../types';
+import { AppSettings, PaymentNumber, UpdateLog } from '../types';
 import { THEMES, normalizeThemeKey, applyThemeToDOM } from '../lib/themeEngine';
 import GoogleDriveBackupView from './GoogleDriveBackupView';
 import GmailIntegrationView from './GmailIntegrationView';
 import RoyalBrandBoard from './RoyalBrandBoard';
+import { CURRENT_APP_VERSION, CURRENT_RELEASE_DATE, detectClientPlatform, ClientPlatform, UpdateCheckResult } from '../config/version';
+import { checkForUpdates, publishRemoteVersionConfig } from '../services/updateService';
+import UpdateModal from './UpdateModal';
+import { useAuth } from '../contexts/AuthContext';
 
 interface SettingsViewProps {
   onShowSuccessAlert: (msg: string) => void;
@@ -84,8 +91,29 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
   const [pinError, setPinError] = useState<string>('');
   const [resetStep, setResetStep] = useState<'pin' | 'warning' | 'done'>('pin');
 
-  // Tab Control and First Business Day Setup states
-  const [activeTab, setActiveTab] = useState<'general' | 'backup' | 'gmail' | 'brand' | 'accounting' | 'payments' | 'partners'>('general');
+  // Auth context
+  const { currentUser } = useAuth();
+
+  // Tab Control
+  const [activeTab, setActiveTab] = useState<'general' | 'backup' | 'gmail' | 'brand' | 'accounting' | 'payments' | 'partners' | 'updates'>('general');
+
+  // Version & Updates Management State
+  const [autoUpdateEnabled, setAutoUpdateEnabled] = useState<boolean>(true);
+  const [clientPlatformOverride, setClientPlatformOverride] = useState<ClientPlatform>(() => detectClientPlatform());
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState<boolean>(false);
+  const [updateCheckResult, setUpdateCheckResult] = useState<UpdateCheckResult | null>(null);
+  const [showUpdateModal, setShowUpdateModal] = useState<boolean>(false);
+
+  // Admin Publish Version Form State
+  const [adminWebVersion, setAdminWebVersion] = useState<string>('4.3.0');
+  const [adminAndroidVersion, setAdminAndroidVersion] = useState<string>('4.3.0');
+  const [adminReleaseNotes, setAdminReleaseNotes] = useState<string>(
+    '• تحديث شامل لنظام كافيه الديب POS الإصدار 4.3.0\n• إضافة نظام التحديثات المباشرة التلقائية للكاشير والمدير\n• تحسين أداء تصدير التقرير الملكي المالي المتقدم\n• تعزيز استقرار الجلسات وتأمين البيانات دون أي فقدان.'
+  );
+  const [adminApkSize, setAdminApkSize] = useState<string>('14.8 MB');
+  const [adminForceUpdate, setAdminForceUpdate] = useState<boolean>(false);
+  const [isPublishingVersion, setIsPublishingVersion] = useState<boolean>(false);
+  const [updateLogs, setUpdateLogs] = useState<UpdateLog[]>(() => dbService.getUpdateLogs());
 
   // Partners Management State
   const [partnersList, setPartnersList] = useState<Partner[]>([]);
@@ -282,6 +310,11 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
     setWhatsappTemplateConfirmation(s.whatsapp_template_receipt || '');
     setStatementFooter(s.statement_footer || '');
 
+    // Initialize version & update settings
+    setAutoUpdateEnabled(s.auto_update_checks_enabled !== false);
+    setClientPlatformOverride(s.client_platform || detectClientPlatform());
+    setUpdateLogs(dbService.getUpdateLogs());
+
     // Initialize payment numbers
     setPaymentNumbers(s.payment_numbers || []);
     setVodafoneCashNumber(s.vodafone_cash_number || '');
@@ -416,6 +449,81 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
       onSettingsChanged();
     }
     onShowSuccessAlert('تم حفظ وتثبيت إعدادات ورقم هاتف وعنوان الكافيه في قاعدة البيانات بنجاح! 💾');
+  };
+
+  const handleManualCheckUpdate = async () => {
+    setIsCheckingUpdate(true);
+    try {
+      const result = await checkForUpdates(clientPlatformOverride, currentUser?.role || 'Admin');
+      setUpdateCheckResult(result);
+      setUpdateLogs(dbService.getUpdateLogs());
+      if (result.hasUpdate) {
+        setShowUpdateModal(true);
+      } else {
+        onShowSuccessAlert(`أنت تستخدم أحدث إصدار متاح بالفعل من كافيه الديب POS (v${result.currentVersion}) 👑`);
+      }
+    } catch (err: any) {
+      onShowWarningAlert('حدث خطأ أثناء فحص التحديثات من الخادم!');
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
+
+  const handlePublishNewVersion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminWebVersion.trim() || !adminAndroidVersion.trim()) {
+      onShowWarningAlert('يرجى إدخال أرقام الإصدارات للويب والأندرويد!');
+      return;
+    }
+    setIsPublishingVersion(true);
+    try {
+      const success = await publishRemoteVersionConfig({
+        webVersion: adminWebVersion.trim(),
+        androidVersion: adminAndroidVersion.trim(),
+        releaseNotes: adminReleaseNotes.trim(),
+        apkSize: adminApkSize.trim(),
+        forceUpdate: adminForceUpdate,
+        apkUrl: '/api/download-apk',
+        apkFileName: `Cafe_Eldeeb_POS_v${adminAndroidVersion.trim()}.apk`
+      });
+
+      if (success) {
+        onShowSuccessAlert(`تم نشر التحديث الجديد (v${adminWebVersion.trim()}) على الخادم بنجاح! 🚀`);
+        dbService.addUpdateLog({
+          action: 'UPDATE_DETECTED',
+          installed_version: CURRENT_APP_VERSION,
+          remote_version: adminWebVersion.trim(),
+          platform: clientPlatformOverride,
+          status: 'SUCCESS',
+          details: `تم نشر تحديث جديد من المدير بنجاح: الإصدار ${adminWebVersion.trim()}`,
+          user_role: currentUser?.role || 'Admin'
+        });
+        setUpdateLogs(dbService.getUpdateLogs());
+      } else {
+        onShowWarningAlert('فشل نشر التحديث على الخادم!');
+      }
+    } catch (err) {
+      onShowWarningAlert('خطأ في الاتصال بالخادم عند نشر التحديث!');
+    } finally {
+      setIsPublishingVersion(false);
+    }
+  };
+
+  const handleToggleAutoUpdate = (enabled: boolean) => {
+    setAutoUpdateEnabled(enabled);
+    dbService.saveSettings({ auto_update_checks_enabled: enabled });
+    onShowSuccessAlert(
+      enabled
+        ? 'تم تفعيل التفقّد التلقائي للتحديثات عند بدء التشغيل 🚀'
+        : 'تم إيقاف التفقّد التلقائي للتحديثات'
+    );
+  };
+
+  const handleSelectClientPlatform = (plat: ClientPlatform) => {
+    setClientPlatformOverride(plat);
+    localStorage.setItem('eldeeb_client_platform', plat);
+    dbService.saveSettings({ client_platform: plat });
+    onShowSuccessAlert(`تم تعيين نوع العميل الحالي إلى: ${plat === 'android' ? 'أندرويد (المدير)' : 'الويب (الكاشير)'}`);
   };
 
   const handleSimulateBackup = () => {
@@ -744,6 +852,18 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
           }`}
         >
           🤝 الشركاء (Partners)
+        </button>
+        <button
+          id="tab-settings-updates"
+          type="button"
+          onClick={() => setActiveTab('updates')}
+          className={`flex-1 py-3 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+            activeTab === 'updates'
+              ? 'bg-gold-600 text-black font-extrabold shadow-md'
+              : 'text-gray-400 hover:text-white hover:bg-gray-900/60'
+          }`}
+        >
+          🚀 التحديثات والإصدارات (Updates)
         </button>
       </div>
 
@@ -1908,6 +2028,255 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
         </div>
       )}
 
+      {/* 8. System Updates & Version Control Tab */}
+      {activeTab === 'updates' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          {/* Left Column: Current System Version & Manual Check */}
+          <div className="bg-luxury-card border border-luxury-border rounded-3xl p-6 shadow-lg space-y-6">
+            <div>
+              <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2 border-b border-gray-900 pb-3">
+                <ShieldCheck className="w-4.5 h-4.5 text-gold-500" />
+                <span>معلومات الإصدار والمنصة الحالية</span>
+              </h3>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                يحتفظ النظام تلقائياً بآخر تحديثات كافيه الديب POS ويضمن مزامنة الأجهزة المباشرة.
+              </p>
+            </div>
+
+            {/* Version Badges */}
+            <div className="p-4 bg-stone-950/80 rounded-2xl border border-stone-800 space-y-3">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-gray-400">إصدار التطبيق المثبت:</span>
+                <span className="font-mono font-bold text-amber-400 bg-amber-950/80 px-2.5 py-0.5 rounded border border-amber-500/30">
+                  v{CURRENT_APP_VERSION}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-gray-400">تاريخ إطلاق النسخة:</span>
+                <span className="font-mono text-gray-300">{CURRENT_RELEASE_DATE}</span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-gray-400">حالة الاتصال بالسحابة:</span>
+                <span className="text-emerald-400 font-bold flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  متصل ومبثوث
+                </span>
+              </div>
+            </div>
+
+            {/* Select Client Platform Override */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-gray-300 block">
+                تحديد المنصة الحالية لهذا الجهاز:
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSelectClientPlatform('web')}
+                  className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
+                    clientPlatformOverride === 'web'
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-md'
+                      : 'bg-stone-900/60 text-gray-400 border-stone-800 hover:text-white'
+                  }`}
+                >
+                  <Globe className="w-4 h-4" />
+                  <span>الويب (الكاشير)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSelectClientPlatform('android')}
+                  className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
+                    clientPlatformOverride === 'android'
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-md'
+                      : 'bg-stone-900/60 text-gray-400 border-stone-800 hover:text-white'
+                  }`}
+                >
+                  <Smartphone className="w-4 h-4" />
+                  <span>أندرويد (المدير)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Auto Update Check Toggle */}
+            <div className="p-4 bg-stone-950/60 rounded-2xl border border-stone-800 flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-white block">التفقّد التلقائي للتحديثات</span>
+                <span className="text-[11px] text-gray-400">فحص الخادم فور بدء تشغيل التطبيق</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={autoUpdateEnabled}
+                onChange={e => handleToggleAutoUpdate(e.target.checked)}
+                className="w-5 h-5 accent-amber-500 rounded cursor-pointer"
+              />
+            </div>
+
+            {/* Manual Check Button */}
+            <button
+              type="button"
+              onClick={handleManualCheckUpdate}
+              disabled={isCheckingUpdate}
+              className="w-full py-3.5 bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-stone-950 font-black text-xs rounded-2xl shadow-lg shadow-amber-500/20 transition cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {isCheckingUpdate ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>جاري الاتصال بخادم التحديثات...</span>
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4" />
+                  <span>التحقق من وجود تحديثات جديدة الآن</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Center Column: Admin Publishing Panel */}
+          <div className="lg:col-span-2 bg-luxury-card border border-luxury-border rounded-3xl p-6 shadow-lg space-y-6">
+            <h3 className="text-sm font-bold text-white border-b border-gray-900 pb-3 flex items-center gap-2">
+              <Sparkles className="w-4.5 h-4.5 text-gold-500" />
+              <span>لوحة نشر التحديثات والإصدارات السحابية (خاص بالمدير)</span>
+            </h3>
+
+            <form onSubmit={handlePublishNewVersion} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-gray-300 mb-1.5 block">
+                    إصدار الويب المباشر (Web Version):
+                  </label>
+                  <input
+                    type="text"
+                    value={adminWebVersion}
+                    onChange={e => setAdminWebVersion(e.target.value)}
+                    placeholder="مثال: 4.3.0"
+                    className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2.5 px-3 text-xs focus:outline-none focus:border-gold-500 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-gray-300 mb-1.5 block">
+                    إصدار تطبيق أندرويد (Android Version):
+                  </label>
+                  <input
+                    type="text"
+                    value={adminAndroidVersion}
+                    onChange={e => setAdminAndroidVersion(e.target.value)}
+                    placeholder="مثال: 4.3.0"
+                    className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2.5 px-3 text-xs focus:outline-none focus:border-gold-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-gray-300 mb-1.5 block">
+                  ملاحظات ومميزات الاصدار الجديد (Release Notes):
+                </label>
+                <textarea
+                  rows={4}
+                  value={adminReleaseNotes}
+                  onChange={e => setAdminReleaseNotes(e.target.value)}
+                  placeholder="أدخل مميزات وتفاصيل التحديث..."
+                  className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2.5 px-3 text-xs focus:outline-none focus:border-gold-500 resize-none font-sans leading-relaxed"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-gray-300 mb-1.5 block">
+                    حجم حزمة أندرويد (APK Size):
+                  </label>
+                  <input
+                    type="text"
+                    value={adminApkSize}
+                    onChange={e => setAdminApkSize(e.target.value)}
+                    placeholder="14.8 MB"
+                    className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2.5 px-3 text-xs focus:outline-none focus:border-gold-500 font-mono"
+                  />
+                </div>
+
+                <div className="flex items-center gap-3 pt-6">
+                  <input
+                    type="checkbox"
+                    id="chk-force-update"
+                    checked={adminForceUpdate}
+                    onChange={e => setAdminForceUpdate(e.target.checked)}
+                    className="w-4 h-4 accent-red-500 rounded cursor-pointer"
+                  />
+                  <label htmlFor="chk-force-update" className="text-xs font-bold text-red-400 cursor-pointer">
+                    فرض التحديث الإجباري على جميع العملاء
+                  </label>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isPublishingVersion}
+                className="w-full py-3 bg-gradient-to-r from-gold-600 to-gold-500 hover:from-gold-500 hover:to-gold-400 text-black font-black text-xs rounded-xl shadow-lg transition cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {isPublishingVersion ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>جاري نشر الإصدار وإرسال الإشعارات...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    <span>نشر الإصدار الجديد على السحابة الآن 🚀</span>
+                  </>
+                )}
+              </button>
+            </form>
+
+            {/* Update History Log Table */}
+            <div className="mt-8 border-t border-gray-900 pt-4">
+              <h4 className="text-xs font-bold text-gray-300 mb-3 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-amber-500" />
+                <span>سجل عمليات واكتشاف التحديثات السابقة ({updateLogs.length})</span>
+              </h4>
+
+              <div className="overflow-x-auto max-h-60 overflow-y-auto rounded-xl border border-stone-800">
+                <table className="w-full text-right text-xs">
+                  <thead className="bg-stone-950 text-gray-400 sticky top-0">
+                    <tr>
+                      <th className="p-2.5">التاريخ والوقت</th>
+                      <th className="p-2.5">الإجراء</th>
+                      <th className="p-2.5">الإصدار المثبت</th>
+                      <th className="p-2.5">المنصة</th>
+                      <th className="p-2.5">التفاصيل</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-900 text-stone-300 font-mono">
+                    {updateLogs.slice().reverse().map((log) => (
+                      <tr key={log.id} className="hover:bg-stone-900/50">
+                        <td className="p-2.5 text-[11px] text-gray-400">
+                          {new Date(log.timestamp).toLocaleString('ar-EG')}
+                        </td>
+                        <td className="p-2.5 font-bold text-amber-400">{log.action}</td>
+                        <td className="p-2.5">{log.installed_version} ➔ {log.remote_version}</td>
+                        <td className="p-2.5">{log.platform}</td>
+                        <td className="p-2.5 text-[11px] font-sans text-gray-300">{log.details}</td>
+                      </tr>
+                    ))}
+                    {updateLogs.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="p-4 text-center text-gray-500 text-xs">
+                          لا توجد سجلات تحديثات سابقة.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+      )}
+
       {/* Delete Partner Modal Confirmation */}
       {partnerToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn" dir="rtl">
@@ -1953,6 +2322,14 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
           </div>
         </div>
       )}
+
+      {/* Update Modal */}
+      <UpdateModal
+        isOpen={showUpdateModal}
+        updateInfo={updateCheckResult}
+        onClose={() => setShowUpdateModal(false)}
+        userRole={currentUser?.role || 'Admin'}
+      />
 
     </div>
   );

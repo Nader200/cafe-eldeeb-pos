@@ -722,14 +722,14 @@ export default function RawMaterialsView({
                           <span className="text-[9px] text-gray-500 block">الدفعة والإنتاجية</span>
                           <span className="text-xs font-bold text-gray-300 font-mono">
                             {batch.original_quantity} <span className="text-[9px]">{batch.unit}</span>
-                            {batch.yield_capacity ? <span className="block text-[9px] text-amber-400 font-bold">({batch.yield_capacity} كوب)</span> : null}
+                            {batch.yield_capacity ? <span className="block text-[9px] text-amber-400 font-bold">({batch.yield_capacity} {batch.yield_unit || 'كوب'})</span> : null}
                           </span>
                         </div>
                         <div>
                           <span className="text-[9px] text-gray-500 block">المباع</span>
                           {batch.item_type === 'raw_material' ? (
                             <span className="text-xs font-bold text-amber-400 font-mono">
-                              {batch.consumed_quantity} <span className="text-[9px]">كوب/طلب</span>
+                              {batch.consumed_quantity} <span className="text-[9px]">{batch.yield_unit || 'كوب'}</span>
                             </span>
                           ) : (
                             <span className="text-xs font-bold text-red-500/80 font-mono">
@@ -744,7 +744,7 @@ export default function RawMaterialsView({
                               {batch.yield_capacity 
                                 ? Math.max(0, batch.yield_capacity - batch.consumed_quantity) 
                                 : batch.remaining_quantity}{' '}
-                              <span className="text-[9px]">{batch.yield_capacity ? 'كوب' : batch.unit}</span>
+                              <span className="text-[9px]">{batch.yield_capacity ? (batch.yield_unit || 'كوب') : batch.unit}</span>
                             </span>
                           ) : (
                             <span className="text-xs font-black text-emerald-400 font-mono">
@@ -1223,7 +1223,7 @@ export default function RawMaterialsView({
                     </label>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <div>
-                        <label className="text-[9px] text-gray-400 block mb-1">عدد الوحدات/الأكواب الناتجة:</label>
+                        <label className="text-[9px] text-gray-400 block mb-1">السعة الإنتاجية (الكمية):</label>
                         <input
                           type="number"
                           min="1"
@@ -1235,19 +1235,44 @@ export default function RawMaterialsView({
                         />
                       </div>
                       <div>
-                        <label className="text-[9px] text-gray-400 block mb-1">وحدة التقديم/البيع:</label>
-                        <select
+                        <label className="text-[9px] text-gray-400 block mb-1">وحدة الإنتاج / التقديم:</label>
+                        <input
+                          type="text"
+                          list="raw-yield-units-list"
+                          placeholder="كوب، كاس، بولة، حجر..."
                           value={yieldUnit}
                           onChange={(e) => setYieldUnit(e.target.value)}
-                          className="w-full bg-zinc-950 text-white rounded-xl py-2.5 px-3 text-xs font-bold border border-zinc-900 focus:border-[#D4AF37] focus:outline-none transition-all cursor-pointer"
-                        >
-                          <option value="كوب">كوب (أكواب قهوة/شاي/مشروب)</option>
+                          className="w-full bg-zinc-950 text-white rounded-xl py-2.5 px-3 text-xs font-bold border border-zinc-900 focus:border-[#D4AF37] focus:outline-none transition-all"
+                        />
+                        <datalist id="raw-yield-units-list">
+                          <option value="كوب">كوب (أكواب)</option>
+                          <option value="كاس">كاس</option>
+                          <option value="بولة">بولة</option>
+                          <option value="حجر شيشة">حجر شيشة</option>
+                          <option value="قطعة">قطعة</option>
+                          <option value="زجاجة">زجاجة</option>
                           <option value="براد">براد</option>
                           <option value="جرعة">جرعة (Shot)</option>
-                          <option value="وجبة">وجبة</option>
-                          <option value="قطعة">قطعة</option>
-                          <option value="عبوة">عبوة</option>
-                        </select>
+                          <option value="كجم">كيلوجرام</option>
+                          <option value="لتر">لتر</option>
+                          <option value="علبة">علبة</option>
+                        </datalist>
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {['كوب', 'كاس', 'بولة', 'حجر شيشة', 'قطعة', 'زجاجة', 'كجم'].map((preset) => (
+                            <button
+                              key={preset}
+                              type="button"
+                              onClick={() => setYieldUnit(preset)}
+                              className={`text-[9px] px-1.5 py-0.5 rounded-md border transition-all cursor-pointer ${
+                                yieldUnit === preset
+                                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-bold'
+                                  : 'bg-zinc-900 text-gray-400 border-zinc-800 hover:text-white'
+                              }`}
+                            >
+                              {preset}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     </div>
                     <p className="text-[10px] text-gray-400">
@@ -1404,7 +1429,7 @@ export default function RawMaterialsView({
                 {/* Metadata List of Batch */}
                 <div className="bg-zinc-950 border border-zinc-900 rounded-2xl p-4 divide-y divide-zinc-900/60 text-xs">
                   <div className="py-2.5 flex justify-between">
-                    <span className="text-gray-500">سعة الدفعة بالإنتاج:</span>
+                    <span className="text-gray-500">السعة الإنتاجية للدفعة:</span>
                     <span className="font-bold text-white font-mono">
                       {selectedBatch.item_type === 'raw_material' ? (selectedBatch.yield_capacity || selectedBatch.original_quantity) : selectedBatch.original_quantity}{' '}
                       {selectedBatch.item_type === 'raw_material' ? (selectedBatch.yield_unit || 'كوب') : selectedBatch.unit}

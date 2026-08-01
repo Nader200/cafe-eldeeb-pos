@@ -112,6 +112,13 @@ export default function POSView({
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [cart, setCart] = useState<CartItem[]>([]);
+
+  // Dispatch global cart status event so Update System can postpone updates if invoice active
+  useEffect(() => {
+    const hasItems = cart.length > 0;
+    (window as any).hasActivePOSCart = hasItems;
+    window.dispatchEvent(new CustomEvent('pos_cart_updated', { detail: { hasItems, count: cart.length } }));
+  }, [cart]);
   const [selectedCustomer, setSelectedCustomer] = useState<string>('c_general'); // default general customer
   const [discount, setDiscount] = useState<number>(0);
   const [taxPercentage, setTaxPercentage] = useState<number>(() => {

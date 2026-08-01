@@ -48,6 +48,7 @@ import {
 import { dbService, seedDatabase } from './dbService';
 import { AppSettings, CashDrawer } from './types';
 import { uploadBackupToGoogleDrive } from './lib/googleDriveService';
+import { checkAndExpirePSSessions, ExpiredSessionNotification } from './lib/playstationNotifier';
 
 // Import our modular sub-views
 import LockScreen from './components/LockScreen';
@@ -75,6 +76,9 @@ import ProductionBatchesView from './components/ProductionBatchesView';
 import PartnerDrawingsView from './components/PartnerDrawingsView';
 import SyncStatusIndicator from './components/SyncStatusIndicator';
 import CalculatorModal from './components/CalculatorModal';
+import UpdateModal from './components/UpdateModal';
+import { checkForUpdates } from './services/updateService';
+import { UpdateCheckResult } from './config/version';
 
 type TabType = 'dashboard' | 'pos' | 'open-invoices' | 'invoices' | 'invoice-history' | 'products' | 'customers' | 'suppliers' | 'expenses' | 'reports' | 'settings' | 'cash_drawer' | 'employees' | 'playstation' | 'raw_materials' | 'production_batches' | 'partner_drawings';
 
@@ -190,6 +194,44 @@ function AppContent() {
 
   const [isDbLoaded, setIsDbLoaded] = useState<boolean>(false);
 
+  const [expiredPSNotif, setExpiredPSNotif] = useState<ExpiredSessionNotification | null>(null);
+
+  // Update System States
+  const [updateCheckResult, setUpdateCheckResult] = useState<UpdateCheckResult | null>(null);
+  const [pendingUpdateResult, setPendingUpdateResult] = useState<UpdateCheckResult | null>(null);
+  const [showUpdateModal, setShowUpdateModal] = useState<boolean>(false);
+  const [hasActiveInvoice, setHasActiveInvoice] = useState<boolean>(false);
+
+  // Listener for postponed update modal when invoice/cart is cleared
+  useEffect(() => {
+    const handleCartUpdated = (e: any) => {
+      const hasItems = Boolean(e.detail?.hasItems);
+      setHasActiveInvoice(hasItems);
+      if (!hasItems && pendingUpdateResult) {
+        setUpdateCheckResult(pendingUpdateResult);
+        setShowUpdateModal(true);
+        setPendingUpdateResult(null);
+      }
+    };
+
+    const handleInvoiceSuccess = () => {
+      setHasActiveInvoice(false);
+      if (pendingUpdateResult) {
+        setUpdateCheckResult(pendingUpdateResult);
+        setShowUpdateModal(true);
+        setPendingUpdateResult(null);
+      }
+    };
+
+    window.addEventListener('pos_cart_updated', handleCartUpdated as EventListener);
+    window.addEventListener('invoice_submitted_success', handleInvoiceSuccess);
+
+    return () => {
+      window.removeEventListener('pos_cart_updated', handleCartUpdated as EventListener);
+      window.removeEventListener('invoice_submitted_success', handleInvoiceSuccess);
+    };
+  }, [pendingUpdateResult]);
+
   // Initialize Database once on startup
   useEffect(() => {
     // Load database state from backend server
@@ -200,6 +242,24 @@ function AppContent() {
       setActiveDrawer(dbService.getActiveDrawer());
       setHasStartedRawMaterials(dbService.hasRegisteredRawMaterialsForToday());
       setIsDbLoaded(true);
+
+      // Automatic update check on app startup if enabled
+      if (loadedSettings.auto_update_checks_enabled !== false) {
+        checkForUpdates(loadedSettings.client_platform, 'Cashier')
+          .then((res) => {
+            if (res.hasUpdate) {
+              const isCartActive = Boolean((window as any).hasActivePOSCart);
+              if (isCartActive) {
+                // Postpone update modal until active invoice is completed
+                setPendingUpdateResult(res);
+              } else {
+                setUpdateCheckResult(res);
+                setShowUpdateModal(true);
+              }
+            }
+          })
+          .catch(e => console.warn('Startup update check failed:', e));
+      }
 
       // Perform background automatic daily Google Drive backup if enabled
       if (loadedSettings.google_drive_auto_backup_enabled && loadedSettings.google_drive_access_token) {
@@ -228,9 +288,22 @@ function AppContent() {
       }
     });
 
-    // Running UTC clock
+    // Running clock and PlayStation auto-expiry check
     const timer = setInterval(() => {
-      setCurrentTime(new Date());
+      const now = new Date();
+      setCurrentTime(now);
+      checkAndExpirePSSessions(now, (notif) => {
+        setExpiredPSNotif(notif);
+      });
+
+      // Auto dismiss modal if device was extended/cleared
+      setExpiredPSNotif(prev => {
+        if (!prev) return null;
+        const currentDevs = dbService.getPSDevices();
+        const dev = currentDevs.find(d => d.id === prev.device.id);
+        if (!dev || dev.status !== 'TIME_EXPIRED') return null;
+        return prev;
+      });
     }, 1000);
 
     return () => clearInterval(timer);
@@ -1138,6 +1211,78 @@ function AppContent() {
       <CalculatorModal
         isOpen={isCalculatorOpen}
         onClose={() => setIsCalculatorOpen(false)}
+      />
+
+      {/* PlayStation Session Time Expired Popup Modal */}
+      {expiredPSNotif && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-[100] p-4 animate-fade-in" dir="rtl">
+          <div className="bg-luxury-card border border-amber-500/50 rounded-3xl w-full max-w-md p-6 shadow-2xl relative text-right">
+            <div className="flex items-center gap-3 mb-4 pb-3 border-b border-gray-900">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-500 animate-pulse">
+                <Clock className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-amber-400">
+                  انتهى وقت جلسة الجهاز {expiredPSNotif.device.name} ⏰
+                </h3>
+                <p className="text-[11px] text-gray-400">تنبيه انتهاء الوقت المحدد للجلسة</p>
+              </div>
+            </div>
+
+            <div className="bg-black/40 border border-gray-900 rounded-2xl p-4 space-y-2.5 text-xs mb-6">
+              <div className="flex justify-between items-center">
+                <span className="text-gray-400 font-bold">اسم الجهاز:</span>
+                <span className="text-white font-mono font-black text-sm">{expiredPSNotif.device.name}</span>
+              </div>
+              <div className="flex justify-between items-center border-t border-gray-900/60 pt-2">
+                <span className="text-gray-400 font-bold">اللاعب / ملاحظات الجلسة:</span>
+                <span className="text-amber-300 font-semibold">{expiredPSNotif.playerName}</span>
+              </div>
+              <div className="flex justify-between items-center border-t border-gray-900/60 pt-2">
+                <span className="text-gray-400 font-bold">وقت البداية:</span>
+                <span className="text-white font-mono">{expiredPSNotif.startTimeFormatted}</span>
+              </div>
+              <div className="flex justify-between items-center border-t border-gray-900/60 pt-2">
+                <span className="text-gray-400 font-bold">وقت النهاية:</span>
+                <span className="text-white font-mono">{expiredPSNotif.endTimeFormatted}</span>
+              </div>
+              <div className="flex justify-between items-center border-t border-gray-900/60 pt-2 text-gold-500 font-black text-sm">
+                <span>إجمالي تكلفة اللعب:</span>
+                <span className="font-mono text-base">{expiredPSNotif.totalCost} ج.م</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setExpiredPSNotif(null);
+                  handleNavigate('playstation');
+                }}
+                className="py-3 bg-gold-600 hover:bg-gold-500 text-black font-extrabold rounded-xl transition-all cursor-pointer text-xs flex items-center justify-center gap-1.5 shadow-lg"
+              >
+                <Gamepad2 className="w-4 h-4" />
+                المحاسبة في البلايستيشن
+              </button>
+              <button
+                type="button"
+                onClick={() => setExpiredPSNotif(null)}
+                className="py-3 bg-luxury-bg border border-gray-800 hover:bg-gray-900 text-gray-400 font-bold rounded-xl transition-all cursor-pointer text-xs"
+              >
+                إغلاق التنبيه
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Global Update Modal */}
+      <UpdateModal
+        isOpen={showUpdateModal}
+        updateInfo={updateCheckResult}
+        onClose={() => setShowUpdateModal(false)}
+        userRole={currentUser?.role || 'Cashier'}
+        hasActiveInvoice={hasActiveInvoice}
       />
 
     </div>

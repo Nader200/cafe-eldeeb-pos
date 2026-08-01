@@ -27,6 +27,7 @@ import { dbService, isPurchaseExpense } from '../dbService';
 import { Invoice, Expense, Product, CashDrawer, InvoiceItem, ReturnTransaction, Partner, PartnerDrawing } from '../types';
 import { BatchProfitReportView } from './BatchProfitReportView';
 import { EldeebLogoHeader } from './EldeebLogo';
+import { exportReportToExcel, exportReportToPDF } from '../utils/reportExporter';
 
 interface ReportsViewProps {
   onShowSuccessAlert: (msg: string) => void;
@@ -511,12 +512,42 @@ export default function ReportsView({ onShowSuccessAlert }: ReportsViewProps) {
     };
   }, [chartData, maxVal]);
 
-  const handleExportExcel = () => {
-    onShowSuccessAlert('📂 جاري تجميع دفاتر مبيعات وجرد كافيه الديب وإصدار تقرير Excel (XLSX) مشفر للتحميل...');
+  const [isExporting, setIsExporting] = useState(false);
+
+  const getExportOptions = () => ({
+    activeReportTab,
+    invoices,
+    expenses,
+    products,
+    invoiceItems,
+    drawerHistory,
+    returnTransactions,
+    partnersList,
+    partnerDrawingsList,
+    selectedDate,
+    selectedPartnerId,
+    settings,
+    onStart: (msg: string) => onShowSuccessAlert(msg),
+    onSuccess: (msg: string) => {
+      setIsExporting(false);
+      onShowSuccessAlert(msg);
+    },
+    onError: (msg: string) => {
+      setIsExporting(false);
+      onShowSuccessAlert(`⚠️ ${msg}`);
+    }
+  });
+
+  const handleExportExcel = async () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    await exportReportToExcel(getExportOptions());
   };
 
-  const handleExportPDF = () => {
-    onShowSuccessAlert('📄 جاري رسم وضغط الفواتير الشهرية وتوليد مستند PDF ملوكي عالي الجودة للطباعة...');
+  const handleExportPDF = async () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    await exportReportToPDF(getExportOptions());
   };
 
   return (
@@ -536,19 +567,11 @@ export default function ReportsView({ onShowSuccessAlert }: ReportsViewProps) {
           <button
             id="export-pdf-report"
             onClick={handleExportPDF}
-            className="px-4 py-2 bg-luxury-bg border border-gray-800 hover:border-gold-600 text-gold-500 hover:text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md flex items-center gap-1.5"
+            disabled={isExporting}
+            className="px-5 py-2.5 bg-gradient-to-r from-gold-600 to-gold-700 text-black text-xs font-extrabold rounded-xl transition-all cursor-pointer shadow-md hover:opacity-90 flex items-center gap-2 disabled:opacity-50"
           >
-            <Download className="w-3.5 h-3.5" />
-            تصدير تقرير PDF ملوكي
-          </button>
-          
-          <button
-            id="export-excel-report"
-            onClick={handleExportExcel}
-            className="px-5 py-2.5 bg-gradient-to-r from-gold-600 to-gold-700 text-black text-xs font-extrabold rounded-xl transition-all cursor-pointer shadow-md hover:opacity-90 flex items-center gap-1.5"
-          >
-            <FileSpreadsheet className="w-4 h-4" />
-            تحميل كشف Excel
+            <Download className="w-4 h-4 text-black" />
+            {isExporting ? 'جاري التصدير...' : 'تصدير تقرير PDF ملوكي'}
           </button>
         </div>
       </div>

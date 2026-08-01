@@ -49,7 +49,8 @@ import {
   AuthAuditLog,
   UserRole,
   Partner,
-  PartnerDrawing
+  PartnerDrawing,
+  UpdateLog
 } from './types';
 
 import { safeStorage } from './lib/safeStorage';
@@ -164,6 +165,7 @@ const KEYS = {
   AUTH_AUDIT_LOGS: 'cafe_auth_audit_logs',
   PARTNERS: 'cafe_partners',
   PARTNER_DRAWINGS: 'cafe_partner_drawings',
+  UPDATE_LOGS: 'cafe_update_logs',
 };
 
 // Sync current client database state to the server
@@ -251,6 +253,10 @@ const defaultSettings: AppSettings = {
   instapay_number: '01094793701',
   employee_consumption_policy: 'DEDUCT',
   custom_expense_categories: [],
+  auto_update_checks_enabled: true,
+  last_update_check_date: new Date().toISOString(),
+  last_installed_version: '4.2.5',
+  force_update_enabled: false,
 };
 
 // Clear and Reset Database Engine
@@ -4943,5 +4949,21 @@ export const dbService = {
       invoicesCount: totalOrders,
       topProducts
     };
+  },
+  getUpdateLogs: (): UpdateLog[] => {
+    return getLocal<UpdateLog[]>(KEYS.UPDATE_LOGS, []);
+  },
+  addUpdateLog: (logEntry: Omit<UpdateLog, 'id' | 'timestamp'>): UpdateLog => {
+    const logs = getLocal<UpdateLog[]>(KEYS.UPDATE_LOGS, []);
+    const newLog: UpdateLog = {
+      id: `upd_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      timestamp: new Date().toISOString(),
+      ...logEntry
+    };
+    logs.unshift(newLog);
+    // Keep last 100 update logs
+    const trimmed = logs.slice(0, 100);
+    setLocal(KEYS.UPDATE_LOGS, trimmed);
+    return newLog;
   }
 };

@@ -277,6 +277,7 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
     loadData();
     const interval = setInterval(() => {
       setCurrentTime(new Date());
+      setDevices(dbService.getPSDevices());
     }, 1000);
     return () => clearInterval(interval);
   }, []);
@@ -344,14 +345,28 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
 
   // --- SESSION CONTROLS ---
 
-  // Helper: calculate seconds played for an active/paused device
+  // Helper: calculate seconds played for an active/paused/expired device
   const getPlayedSeconds = (dev: PSDevice): number => {
-    if (!dev.session_start_time) return 0;
-    let seconds = dev.session_accumulated_seconds;
+    if (dev.status === 'TIME_EXPIRED') {
+      let limitMin = dev.limit_minutes || 60;
+      if (!dev.limit_minutes) {
+        const match = dev.session_notes.match(/(?:محدد|محددة|وقت محدد):\s*(\d+)/) || dev.session_notes.match(/(\d+)\s*د/);
+        if (match) limitMin = parseInt(match[1]);
+      }
+      return limitMin * 60; // Freeze at exact limit
+    }
+    if (!dev.session_start_time) return dev.session_accumulated_seconds || 0;
+    let seconds = dev.session_accumulated_seconds || 0;
     if (dev.status === 'PLAYING_SINGLE' || dev.status === 'PLAYING_MULTI') {
       const start = new Date(dev.session_start_time).getTime();
       const now = currentTime.getTime();
       seconds += Math.max(0, Math.floor((now - start) / 1000));
+    }
+    if (dev.is_limited && dev.limit_minutes && dev.limit_minutes > 0) {
+      const maxSecs = dev.limit_minutes * 60;
+      if (seconds >= maxSecs) {
+        return maxSecs; // Freeze at exact limit
+      }
     }
     return seconds;
   };
@@ -368,7 +383,13 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
   const getSessionLiveCost = (dev: PSDevice): number => {
     const totalSecs = getPlayedSeconds(dev);
     const hours = totalSecs / 3600;
-    const isMulti = dev.status === 'PLAYING_MULTI' || (dev.status === 'PAUSED' && dev.current_session_id?.includes('MULTI'));
+    let isMulti = dev.status === 'PLAYING_MULTI' || (dev.status === 'PAUSED' && dev.session_notes.includes('زوجي'));
+    if (dev.current_session_id) {
+      const sess = sessions.find(s => s.id === dev.current_session_id);
+      if (sess) {
+        isMulti = sess.session_type === 'MULTI';
+      }
+    }
     const hourlyPrice = isMulti ? dev.hourly_price_multi : dev.hourly_price_single;
     const rawCost = hours * hourlyPrice;
     return Math.round(rawCost * 10) / 10; // round to nearest 0.1
@@ -390,6 +411,7 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
 
     const sessionId = `ps_sess_${Date.now()}`;
     const startTimeStr = new Date().toISOString();
+    const targetEndTime = isLimited ? new Date(Date.now() + limitedMinutes * 60 * 1000).toISOString() : null;
 
     // 1. Update Device State
     const updatedDevice: PSDevice = {
@@ -399,7 +421,11 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
       session_pause_time: null,
       session_accumulated_seconds: 0,
       session_notes: sessionNotes.trim() + (isLimited ? ` | (وقت محدد: ${limitedMinutes} دقيقة)` : ' | (وقت مفتوح)'),
-      current_session_id: sessionId
+      current_session_id: sessionId,
+      is_limited: isLimited,
+      limit_minutes: isLimited ? limitedMinutes : 0,
+      target_end_time: targetEndTime,
+      expired_notified: false
     };
 
     // 2. Create Session Log
@@ -419,7 +445,10 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
       total_price: 0,
       status: 'ACTIVE',
       notes: sessionNotes.trim() + (isLimited ? ` (محدد ${limitedMinutes} د)` : ' (مفتوح)'),
-      created_at: startTimeStr
+      created_at: startTimeStr,
+      is_limited: isLimited,
+      limit_minutes: isLimited ? limitedMinutes : 0,
+      target_end_time: targetEndTime
     };
 
     dbService.savePSDevice(updatedDevice);
@@ -501,15 +530,61 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
     e.preventDefault();
     if (!selectedDevice) return;
 
-    // Update device notes
-    const updatedNotes = selectedDevice.session_notes + ` | تم التمديد +${extendMinutes} دقيقة`;
+    const extraMin = extendMinutes || 30;
+    const currentNotes = selectedDevice.session_notes || '';
+    const updatedNotes = currentNotes + ` | تم التمديد +${extraMin} دقيقة`;
+
+    const oldLimit = selectedDevice.limit_minutes || 60;
+    const newLimit = oldLimit + extraMin;
+
+    const sessList = dbService.getPSSessions();
+    const sess = sessList.find(s => s.id === selectedDevice.current_session_id);
+
+    const sessType = sess ? sess.session_type : (selectedDevice.session_notes.includes('زوجي') ? 'MULTI' : 'SINGLE');
+    const activeStatus = sessType === 'SINGLE' ? 'PLAYING_SINGLE' : 'PLAYING_MULTI';
+
+    let startTime = selectedDevice.session_start_time;
+    let accumulatedSecs = selectedDevice.session_accumulated_seconds || 0;
+
+    // Fix accumulatedSecs if it was previously overwritten by legacy expiry logic
+    if (selectedDevice.status === 'TIME_EXPIRED' && startTime) {
+      if (accumulatedSecs >= oldLimit * 60) {
+        accumulatedSecs = Math.max(0, accumulatedSecs - oldLimit * 60);
+      }
+    }
+
+    if (!startTime) {
+      startTime = new Date(Date.now() - accumulatedSecs * 1000).toISOString();
+    }
+
+    const remainingSecsFromStart = Math.max(0, (newLimit * 60) - accumulatedSecs);
+    const targetEndTime = new Date(new Date(startTime).getTime() + remainingSecsFromStart * 1000).toISOString();
+
     const updatedDev: PSDevice = {
       ...selectedDevice,
-      session_notes: updatedNotes
+      status: selectedDevice.status === 'PAUSED' ? 'PAUSED' : activeStatus,
+      session_start_time: startTime,
+      session_pause_time: selectedDevice.status === 'PAUSED' ? selectedDevice.session_pause_time : null,
+      session_accumulated_seconds: accumulatedSecs,
+      session_notes: updatedNotes,
+      is_limited: true,
+      limit_minutes: newLimit,
+      target_end_time: targetEndTime,
+      expired_notified: false
     };
 
+    if (sess) {
+      sess.status = selectedDevice.status === 'PAUSED' ? 'PAUSED' : 'ACTIVE';
+      sess.is_limited = true;
+      sess.limit_minutes = newLimit;
+      sess.target_end_time = targetEndTime;
+      sess.notes += ` (تمديد +${extraMin} د - المجموع ${newLimit} د)`;
+      dbService.savePSSession(sess);
+    }
+
     dbService.savePSDevice(updatedDev);
-    onShowSuccessAlert(`تم تمديد جلسة جهاز "${selectedDevice.name}" بزيادة قدرها ${extendMinutes} دقيقة!`);
+    dbService.logAuditAction('EXTEND_PS_SESSION', `تمديد وقت اللعب للجهاز ${selectedDevice.name} بزيادة +${extraMin} دقيقة (المجموع: ${newLimit} دقيقة)`, 'نظام البلايستيشن');
+    onShowSuccessAlert(`تم تمديد جلسة جهاز "${selectedDevice.name}" بزيادة قدرها ${extraMin} دقيقة (المجموع الجديد: ${newLimit} دقيقة) بنجاح! ⏰`);
     setShowExtendModal(false);
     loadData();
   };
@@ -714,7 +789,11 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
       session_pause_time: null,
       session_accumulated_seconds: 0,
       session_notes: '',
-      current_session_id: null
+      current_session_id: null,
+      is_limited: false,
+      limit_minutes: 0,
+      target_end_time: null,
+      expired_notified: false
     };
     dbService.savePSDevice(resetDev);
 
@@ -825,29 +904,41 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {devices.map(dev => {
-                const isPlaying = dev.status.startsWith('PLAYING');
-                const isPaused = dev.status === 'PAUSED';
+                const isSessLimited = dev.is_limited || dev.session_notes.includes('محدد') || dev.session_notes.includes('دقيقة');
+                let limitMin = dev.limit_minutes || 0;
+                if (!dev.limit_minutes && isSessLimited) {
+                  const match = dev.session_notes.match(/(?:محدد|محددة|وقت محدد):\s*(\d+)/) || dev.session_notes.match(/(\d+)\s*د/);
+                  if (match) limitMin = parseInt(match[1]);
+                }
                 const playedSecs = getPlayedSeconds(dev);
+                const isTimeUp = isSessLimited && limitMin > 0 && playedSecs >= limitMin * 60;
+                const isExpired = dev.status === 'TIME_EXPIRED' || isTimeUp;
+                const isPlaying = (dev.status === 'PLAYING_SINGLE' || dev.status === 'PLAYING_MULTI') && !isTimeUp;
+                const isPaused = dev.status === 'PAUSED';
                 const playedCost = getSessionLiveCost(dev);
 
                 return (
                   <div key={dev.id} className={`bg-luxury-card border rounded-3xl p-5 relative flex flex-col justify-between transition-all ${
-                    isPlaying 
-                      ? 'border-gold-500/35 shadow-[0_0_15px_rgba(212,175,55,0.06)] bg-gradient-to-l from-gold-600/5 to-transparent' 
-                      : isPaused
-                        ? 'border-amber-500/25 bg-amber-950/5'
-                        : 'border-luxury-border'
+                    isExpired
+                      ? 'border-amber-500 bg-amber-950/20 shadow-[0_0_20px_rgba(245,158,11,0.2)] animate-pulse'
+                      : isPlaying 
+                        ? 'border-gold-500/35 shadow-[0_0_15px_rgba(212,175,55,0.06)] bg-gradient-to-l from-gold-600/5 to-transparent' 
+                        : isPaused
+                          ? 'border-amber-500/25 bg-amber-950/5'
+                          : 'border-luxury-border'
                   }`}>
                     <div>
                       {/* Name, category, edit */}
                       <div className="flex justify-between items-start mb-3">
                         <div className="flex items-center gap-2.5">
                           <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold ${
-                            isPlaying
-                              ? 'bg-gold-600 text-black'
-                              : isPaused
-                                ? 'bg-amber-600 text-black animate-pulse'
-                                : 'bg-black border border-gray-800 text-gray-400'
+                            isExpired
+                              ? 'bg-amber-500 text-black animate-bounce'
+                              : isPlaying
+                                ? 'bg-gold-600 text-black'
+                                : isPaused
+                                  ? 'bg-amber-600 text-black animate-pulse'
+                                  : 'bg-black border border-gray-800 text-gray-400'
                           }`}>
                             <Gamepad2 className="w-4 h-4" />
                           </div>
@@ -863,7 +954,7 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
                         </div>
 
                         {/* Edit delete for config */}
-                        {!isPlaying && !isPaused && (
+                        {!isPlaying && !isPaused && !isExpired && (
                           <div className="flex items-center gap-1">
                             <button
                               onClick={() => handleOpenEditDevice(dev)}
@@ -883,19 +974,17 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
                         )}
                       </div>
 
-                      {/* Display live timer for playing or paused devices */}
-                      {(isPlaying || isPaused) && (() => {
+                      {/* Display live timer for playing, paused, or expired devices */}
+                      {(isPlaying || isPaused || isExpired) && (() => {
                         const sess = sessions.find(s => s.id === dev.current_session_id);
                         const isSessLimited = dev.is_limited || dev.session_notes.includes('محدد') || dev.session_notes.includes('دقيقة');
                         
-                        // Extract limit minutes from session_notes if not explicitly saved
                         let limitMin = dev.limit_minutes || 60;
                         if (!dev.limit_minutes) {
-                          const match = dev.session_notes.match(/(?:محدد|محددة|وقت مححدد):\s*(\d+)/) || dev.session_notes.match(/(\d+)\s*د/);
+                          const match = dev.session_notes.match(/(?:محدد|محددة|وقت محدد):\s*(\d+)/) || dev.session_notes.match(/(\d+)\s*د/);
                           if (match) limitMin = parseInt(match[1]);
                         }
 
-                        // Start & expected end times
                         const startTimeStr = dev.session_start_time ? new Date(dev.session_start_time).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: true }) : '---';
                         const expectedEndTimeStr = (dev.session_start_time && isSessLimited) 
                           ? new Date(new Date(dev.session_start_time).getTime() + limitMin * 60 * 1000).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: true })
@@ -905,8 +994,8 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
                           <div className="bg-black/45 p-3 rounded-2xl border border-gray-900/60 mb-3 space-y-2">
                             <div className="flex justify-between items-center text-[10px] text-gray-400 font-semibold">
                               <span>الـحـالة الحية:</span>
-                              <span className={isPaused ? 'text-amber-500 font-bold' : 'text-gold-500 font-black'}>
-                                {isPaused ? '⏸️ مؤقت متوقف' : dev.status === 'PLAYING_MULTI' ? '🎮 لعب زوجي (Multi)' : '🎮 لعب فردي (Single)'}
+                              <span className={isExpired ? 'text-amber-400 font-black flex items-center gap-1' : isPaused ? 'text-amber-500 font-bold' : 'text-gold-500 font-black'}>
+                                {isExpired ? '🟡 انتهى الوقت (بانتظار المحاسبة)' : isPaused ? '⏸️ مؤقت متوقف' : dev.status === 'PLAYING_MULTI' ? '🎮 لعب زوجي (Multi)' : '🎮 لعب فردي (Single)'}
                               </span>
                             </div>
 
@@ -936,8 +1025,22 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
                                 {formatDuration(playedSecs)}
                               </span>
                             </div>
+
                             <div className="flex justify-between items-center border-t border-gray-900/40 pt-1.5">
-                              <span className="text-[9px] text-gray-500">تكلفة اللعب التراكمية:</span>
+                              <span className="text-[9px] text-gray-500">الوقت المتبقي:</span>
+                              <span className="text-xs font-mono font-bold">
+                                {isExpired ? (
+                                  <span className="text-amber-400 font-bold">00:00:00 (انتهى الوقت)</span>
+                                ) : isSessLimited ? (
+                                  <span className="text-emerald-400">{formatDuration(Math.max(0, limitMin * 60 - playedSecs))}</span>
+                                ) : (
+                                  <span className="text-gray-400">مفتوح</span>
+                                )}
+                              </span>
+                            </div>
+
+                            <div className="flex justify-between items-center border-t border-gray-900/40 pt-1.5">
+                              <span className="text-[9px] text-gray-500">تكلفة اللعب المستحقة:</span>
                               <span className="text-xs font-mono font-bold text-gold-500">{playedCost} ج.م</span>
                             </div>
                             {dev.session_notes && (
@@ -965,7 +1068,11 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
                     {/* Bottom Action Triggers */}
                     <div className="mt-4 pt-3 border-t border-gray-900/30 flex items-center justify-between">
                       <div>
-                        {!isPlaying && !isPaused ? (
+                        {isExpired ? (
+                          <span className="text-[10px] text-amber-400 font-black flex items-center gap-1">
+                            🟡 بانتظار المحاسبة
+                          </span>
+                        ) : !isPlaying && !isPaused ? (
                           <span className="text-[10px] text-emerald-500 font-extrabold flex items-center gap-1">
                             🟢 مـتـاح الآن
                           </span>
@@ -976,7 +1083,7 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
 
                       <div className="flex gap-1.5">
                         {/* Start play if free */}
-                        {!isPlaying && !isPaused && (
+                        {!isPlaying && !isPaused && !isExpired && (
                           <button
                             onClick={() => handleOpenStartSession(dev)}
                             className="px-4 py-1.5 bg-gold-600 hover:bg-gold-500 text-black text-[10px] font-black rounded-lg cursor-pointer transition-all flex items-center gap-1 shadow"
@@ -986,9 +1093,45 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
                           </button>
                         )}
 
+                        {/* Expired session controls */}
+                        {isExpired && (
+                          <>
+                            <button
+                              onClick={() => handleOpenExtendSession(dev)}
+                              className="px-2.5 py-1.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 rounded-lg text-[9px] font-bold cursor-pointer transition-all flex items-center gap-1"
+                              title="تمديد الوقت"
+                            >
+                              <Clock className="w-3 h-3 text-amber-400" />
+                              تمديد
+                            </button>
+                            <button
+                              onClick={() => handleOpenAddProductsToSession(dev)}
+                              className="px-2 py-1 bg-purple-950/30 border border-purple-900/40 text-purple-400 hover:text-white hover:bg-purple-900 rounded-lg text-[9px] font-bold cursor-pointer transition-all"
+                              title="إضافة منتجات ومشروبات للجلسة"
+                            >
+                              🥤 + طلب
+                            </button>
+                            <button
+                              onClick={() => handleOpenStopSession(dev)}
+                              className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-[10px] font-black rounded-lg cursor-pointer transition-all flex items-center gap-1 shadow-md animate-pulse"
+                            >
+                              <StopCircle className="w-3 h-3" />
+                              محاسبة وإنهاء
+                            </button>
+                          </>
+                        )}
+
                         {/* Resume / Pause toggle if playing */}
                         {isPlaying && (
                           <>
+                            <button
+                              onClick={() => handleOpenExtendSession(dev)}
+                              className="px-2.5 py-1.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 rounded-lg text-[9px] font-bold cursor-pointer transition-all flex items-center gap-1"
+                              title="تمديد الوقت"
+                            >
+                              <Clock className="w-3 h-3 text-amber-400" />
+                              تمديد
+                            </button>
                             <button
                               onClick={() => handlePauseSession(dev)}
                               className="p-2 bg-amber-950/40 border border-amber-900/40 text-amber-500 hover:text-white hover:bg-amber-950 rounded-lg text-[9px] font-bold cursor-pointer transition-all"
@@ -1023,6 +1166,14 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
                         {/* Resume if paused */}
                         {isPaused && (
                           <>
+                            <button
+                              onClick={() => handleOpenExtendSession(dev)}
+                              className="px-2.5 py-1.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 rounded-lg text-[9px] font-bold cursor-pointer transition-all flex items-center gap-1"
+                              title="تمديد الوقت"
+                            >
+                              <Clock className="w-3 h-3 text-amber-400" />
+                              تمديد
+                            </button>
                             <button
                               onClick={() => handleResumeSession(dev)}
                               className="p-2 bg-emerald-950/40 border border-emerald-900/40 text-emerald-400 hover:text-white hover:bg-emerald-950 rounded-lg text-[9px] font-bold cursor-pointer transition-all"
@@ -1384,6 +1535,83 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
               <button
                 type="button"
                 onClick={() => setShowMoveModal(false)}
+                className="py-2.5 bg-luxury-bg border border-gray-800 hover:bg-gray-900 text-gray-400 font-bold rounded-xl transition-all cursor-pointer text-xs"
+              >
+                إلغاء التراجع
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* --- MODAL DIALOG: EXTEND PLAYSTATION SESSION --- */}
+      {showExtendModal && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 p-4 animate-fade-in" dir="rtl">
+          <form onSubmit={handleExtendSession} className="bg-luxury-card border border-luxury-border rounded-3xl w-full max-w-sm p-6 relative">
+            <button
+              type="button"
+              onClick={() => setShowExtendModal(false)}
+              className="absolute top-4 left-4 text-gray-500 hover:text-white cursor-pointer"
+            >
+              <XCircle className="w-5 h-5" />
+            </button>
+
+            <h4 className="text-sm font-extrabold text-white mb-1 flex items-center gap-2">
+              <Clock className="w-5 h-5 text-amber-400" />
+              تمديد وقت الجلسة: {selectedDevice?.name}
+            </h4>
+            <p className="text-[10px] text-gray-500 mb-4 pb-3 border-b border-gray-900">
+              إضافة دقائق إضافية لزيادة إجمالي وقت الجلسة الأصلي واستئناف عداد الوقت تلقائياً
+            </p>
+
+            <div className="space-y-4 text-xs">
+              <div>
+                <label className="text-[11px] text-gray-400 font-bold block mb-1">عدد الدقائق الإضافية للتمديد *</label>
+                <input
+                  type="number"
+                  min="5"
+                  step="5"
+                  required
+                  value={extendMinutes}
+                  onChange={(e) => setExtendMinutes(parseInt(e.target.value) || 0)}
+                  className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs text-center font-mono font-bold text-amber-400 focus:outline-none focus:border-amber-500"
+                />
+                <div className="flex gap-1.5 mt-2 justify-center">
+                  {[15, 30, 60, 120].map(m => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setExtendMinutes(m)}
+                      className="px-2.5 py-1 bg-black hover:bg-gray-900 text-gray-400 hover:text-amber-400 rounded text-[10px] font-bold border border-gray-900 transition-colors cursor-pointer"
+                    >
+                      +{m} دقيقة
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="p-3 bg-black/40 rounded-xl border border-gray-900/60 text-[10px] space-y-1.5">
+                <div className="flex justify-between text-gray-400">
+                  <span>الوقت المحدد الأصلي:</span>
+                  <span className="font-mono text-gray-300 font-bold">{selectedDevice?.limit_minutes || 60} دقيقة</span>
+                </div>
+                <div className="flex justify-between text-amber-400 font-bold border-t border-gray-900 pt-1">
+                  <span>إجمالي الوقت الجديد بعد التمديد:</span>
+                  <span className="font-mono text-amber-300 font-black">{(selectedDevice?.limit_minutes || 60) + (extendMinutes || 0)} دقيقة</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mt-6 border-t border-gray-900 pt-4">
+              <button
+                type="submit"
+                className="py-2.5 bg-amber-500 hover:bg-amber-400 text-black font-extrabold rounded-xl transition-all cursor-pointer text-xs flex items-center justify-center gap-1 shadow-md shadow-amber-950/40"
+              >
+                ⏰ تأكيد التمديد الآن
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowExtendModal(false)}
                 className="py-2.5 bg-luxury-bg border border-gray-800 hover:bg-gray-900 text-gray-400 font-bold rounded-xl transition-all cursor-pointer text-xs"
               >
                 إلغاء التراجع

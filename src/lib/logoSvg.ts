@@ -18,17 +18,17 @@ export function getEldeebLogoSvgString(
   return `
 <svg
   xmlns="http://www.w3.org/2000/svg"
-  viewBox="0 0 512 512"
+  viewBox="0 0 1024 1024"
   width="${width}"
-  height="${height}"
+  height="${width}"
   style="display: block; margin: 0 auto; max-width: 100%; height: auto;"
 >
   <image
     href="${logoUrl}"
     x="0"
     y="0"
-    width="512"
-    height="512"
+    width="1024"
+    height="1024"
     preserveAspectRatio="xMidYMid meet"
   />
 </svg>

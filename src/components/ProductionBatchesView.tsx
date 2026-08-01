@@ -173,7 +173,12 @@ export default function ProductionBatchesView({
 
     const yieldNum = parseInt(yieldCups, 10);
     if (isNaN(yieldNum) || yieldNum <= 0) {
-      onShowWarningAlert('يرجى إدخال الطاقة الإنتاجية بالأكواب (مثال: 50 كوب)!');
+      onShowWarningAlert('يرجى إدخال السعة الإنتاجية الصحيحة (مثال: 50)!');
+      return;
+    }
+
+    if (!yieldUnit.trim()) {
+      onShowWarningAlert('يرجى تحديد أو كتابة وحدة الإنتاج (مثال: كوب، كاس، بولة، حجر شيشة)!');
       return;
     }
 
@@ -251,10 +256,10 @@ export default function ProductionBatchesView({
         previous_quantity: 0,
         new_quantity: yieldNum,
         operator: 'مدير الإنتاج',
-        reason: `إنشاء دفعة إنتاج مستقلة تحتوي على ${rawQtyNum} ${rawUnit} بإنتاجية ${yieldNum} كوب وتكلفة ثابتة ${costNum} ج.م`
+        reason: `إنشاء دفعة إنتاج مستقلة تحتوي على ${rawQtyNum} ${rawUnit} بسعة إنتاجية ${yieldNum} ${yieldUnit.trim() || 'كوب'} وتكلفة ثابتة ${costNum} ج.م`
       });
 
-      onShowSuccessAlert(`تم إنشاء "${batchSerial}" بنجاح! 📦 (المادة الخام: ${rawQtyNum} ${rawUnit}، التكلفة: ${costNum} ج.م، الطاقة: ${yieldNum} كوب)`);
+      onShowSuccessAlert(`تم إنشاء "${batchSerial}" بنجاح! 📦 (المادة الخام: ${rawQtyNum} ${rawUnit}، التكلفة: ${costNum} ج.م، السعة الإنتاجية: ${yieldNum} ${yieldUnit.trim() || 'كوب'})`);
       setShowAddBatchModal(false);
       resetBatchForm();
       loadAllData();
@@ -706,8 +711,8 @@ export default function ProductionBatchesView({
                       <th className="py-3.5 px-4">المادة الخام</th>
                       <th className="py-3.5 px-4">كمية المادة الخام</th>
                       <th className="py-3.5 px-4">تكلفة الدفعة الثابتة</th>
-                      <th className="py-3.5 px-4">الطاقة الإنتاجية</th>
-                      <th className="py-3.5 px-4">الأكواب المتبقية</th>
+                      <th className="py-3.5 px-4">السعة الإنتاجية</th>
+                      <th className="py-3.5 px-4">الكمية المتبقية</th>
                       <th className="py-3.5 px-4">المباع</th>
                       <th className="py-3.5 px-4">الإيرادات المحققة</th>
                       <th className="py-3.5 px-4">صافي الربح</th>
@@ -792,7 +797,7 @@ export default function ProductionBatchesView({
 
                           {/* Sold Cups */}
                           <td className="py-3.5 px-4">
-                            <span className="text-gray-300 font-mono">{soldCups} كوب</span>
+                            <span className="text-gray-300 font-mono">{soldCups} {batch.yield_unit || 'كوب'}</span>
                           </td>
 
                           {/* Revenue */}
@@ -1292,7 +1297,7 @@ export default function ProductionBatchesView({
               </div>
 
               {/* Cost & Capacity Box */}
-              <div className="grid grid-cols-2 gap-3 bg-black/50 p-3 rounded-2xl border border-gold-900/50">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-black/50 p-3.5 rounded-2xl border border-gold-900/50">
                 <div>
                   <label className="text-[11px] text-gold-400 font-bold block mb-1">تكلفة الشراء الإجمالية للدفعة (EGP) *</label>
                   <input
@@ -1304,20 +1309,63 @@ export default function ProductionBatchesView({
                     onChange={(e) => setBatchCost(e.target.value)}
                     className="w-full bg-luxury-bg border border-gold-600/40 text-gold-300 font-black rounded-xl py-2 px-3 text-xs font-mono focus:outline-none focus:border-gold-500"
                   />
-                  <span className="text-[9px] text-gray-400 block mt-0.5">تكلفة الدفعة الكلية الثابتة</span>
+                  <span className="text-[9px] text-gray-400 block mt-0.5">تكلفة الشراء الكلية الثابتة</span>
                 </div>
 
                 <div>
-                  <label className="text-[11px] text-gold-400 font-bold block mb-1">الطاقة الإنتاجية بالأكواب *</label>
+                  <label className="text-[11px] text-gold-400 font-bold block mb-1">السعة الإنتاجية (الكمية) *</label>
                   <input
                     type="number"
                     required
+                    min="1"
                     placeholder="مثال: 50"
                     value={yieldCups}
                     onChange={(e) => setYieldCups(e.target.value)}
                     className="w-full bg-luxury-bg border border-gold-600/40 text-gold-300 font-black rounded-xl py-2 px-3 text-xs font-mono focus:outline-none focus:border-gold-500"
                   />
-                  <span className="text-[9px] text-gray-400 block mt-0.5">عدد الأكواب الكلية للدفعة</span>
+                  <span className="text-[9px] text-gray-400 block mt-0.5">إجمالي كمية الإنتاج من الدفعة</span>
+                </div>
+
+                <div>
+                  <label className="text-[11px] text-gold-400 font-bold block mb-1">وحدة الإنتاج / التقديم *</label>
+                  <input
+                    type="text"
+                    list="batch-yield-units-list"
+                    required
+                    placeholder="كوب، كاس، بولة، حجر..."
+                    value={yieldUnit}
+                    onChange={(e) => setYieldUnit(e.target.value)}
+                    className="w-full bg-luxury-bg border border-gold-600/40 text-gold-300 font-bold rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-500"
+                  />
+                  <datalist id="batch-yield-units-list">
+                    <option value="كوب">كوب (أكواب)</option>
+                    <option value="كاس">كاس</option>
+                    <option value="بولة">بولة (آيس كريم/شوربة)</option>
+                    <option value="حجر شيشة">حجر شيشة</option>
+                    <option value="قطعة">قطعة</option>
+                    <option value="زجاجة">زجاجة</option>
+                    <option value="براد">براد</option>
+                    <option value="جرعة">جرعة (Shot)</option>
+                    <option value="كجم">كيلوجرام</option>
+                    <option value="لتر">لتر</option>
+                    <option value="علبة">علبة</option>
+                  </datalist>
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {['كوب', 'كاس', 'بولة', 'حجر شيشة', 'قطعة', 'زجاجة', 'كجم'].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setYieldUnit(preset)}
+                        className={`text-[9px] px-1.5 py-0.5 rounded-md border transition-all cursor-pointer ${
+                          yieldUnit === preset
+                            ? 'bg-gold-500/20 text-gold-300 border-gold-500/50 font-bold'
+                            : 'bg-zinc-900/60 text-gray-400 border-gray-800 hover:text-white'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -1569,30 +1617,30 @@ export default function ProductionBatchesView({
               </div>
 
               <div className="bg-black/50 p-3 rounded-2xl border border-gray-800">
-                <span className="text-[10px] text-gray-400 block mb-1">الطاقة الإنتاجية الكلية</span>
+                <span className="text-[10px] text-gray-400 block mb-1">السعة الإنتاجية الكلية</span>
                 <span className="text-gray-200 font-mono text-sm">
                   {selectedBatchForReport.yield_capacity || selectedBatchForReport.original_quantity || 50} {selectedBatchForReport.yield_unit || 'كوب'}
                 </span>
               </div>
 
               <div className="bg-black/50 p-3 rounded-2xl border border-gray-800">
-                <span className="text-[10px] text-gray-400 block mb-1">الأكواب المباعة</span>
+                <span className="text-[10px] text-gray-400 block mb-1">الكمية المستهلكة / المباعة</span>
                 <span className="text-blue-400 font-mono text-sm">
-                  {selectedBatchForReport.consumed_quantity || 0} كوب
+                  {selectedBatchForReport.consumed_quantity || 0} {selectedBatchForReport.yield_unit || 'كوب'}
                 </span>
               </div>
 
               <div className="bg-black/50 p-3 rounded-2xl border border-gray-800">
-                <span className="text-[10px] text-gray-400 block mb-1">الأكواب المتبقية</span>
+                <span className="text-[10px] text-gray-400 block mb-1">الكمية المتبقية</span>
                 <span className="text-emerald-400 font-mono text-sm">
-                  {selectedBatchForReport.yield_capacity ? Math.max(0, selectedBatchForReport.yield_capacity - selectedBatchForReport.consumed_quantity) : selectedBatchForReport.remaining_quantity} كوب
+                  {selectedBatchForReport.yield_capacity ? Math.max(0, selectedBatchForReport.yield_capacity - selectedBatchForReport.consumed_quantity) : selectedBatchForReport.remaining_quantity} {selectedBatchForReport.yield_unit || 'كوب'}
                 </span>
               </div>
 
               <div className="bg-black/50 p-3 rounded-2xl border border-gray-800">
-                <span className="text-[10px] text-gray-400 block mb-1">متوسط تكلفة الكوب</span>
+                <span className="text-[10px] text-gray-400 block mb-1">متوسط تكلفة {selectedBatchForReport.yield_unit || 'البراد/الكوب'}</span>
                 <span className="text-gray-300 font-mono text-sm">
-                  {formatEGP(selectedBatchForReport.purchase_price / (selectedBatchForReport.yield_capacity || 50))} / كوب
+                  {formatEGP(selectedBatchForReport.purchase_price / (selectedBatchForReport.yield_capacity || selectedBatchForReport.original_quantity || 50))} / {selectedBatchForReport.yield_unit || 'وحدة'}
                 </span>
               </div>
             </div>
@@ -1693,12 +1741,12 @@ export default function ProductionBatchesView({
                     <span className="text-gray-200 font-bold">{batchToDeleteConfirm.item_name}</span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-400 font-bold">الأكواب المباعة:</span>
-                    <span className="text-emerald-400 font-bold">0 كوب</span>
+                    <span className="text-gray-400 font-bold">الكمية المباعة:</span>
+                    <span className="text-emerald-400 font-bold">{batchToDeleteConfirm.consumed_quantity || 0} {batchToDeleteConfirm.yield_unit || 'كوب'}</span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-400 font-bold">الأكواب المتبقية:</span>
-                    <span className="text-blue-400 font-bold">{batchToDeleteConfirm.original_quantity || batchToDeleteConfirm.yield_capacity || 50} كوب (العدد الأصلي)</span>
+                    <span className="text-gray-400 font-bold">الكمية المتبقية:</span>
+                    <span className="text-blue-400 font-bold">{batchToDeleteConfirm.original_quantity || batchToDeleteConfirm.yield_capacity || 50} {batchToDeleteConfirm.yield_unit || 'كوب'} (العدد الأصلي)</span>
                   </div>
                   <div className="flex justify-between items-center pt-2 border-t border-gray-800">
                     <span className="text-gray-400 font-bold">التكلفة الثابتة:</span>

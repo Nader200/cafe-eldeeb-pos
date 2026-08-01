@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">Cafe Eldeeb POS Enterprise</string>
-    <string name="title_activity_main">Cafe Eldeeb POS Enterprise</string>
-    <string name="package_name">com.eldeeb.pos</string>
-    <string name="custom_url_scheme">com.eldeeb.pos</string>
-</resources>

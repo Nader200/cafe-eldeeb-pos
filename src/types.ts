@@ -296,6 +296,24 @@ export interface AppSettings {
   enable_theme_animations?: boolean;
   custom_expense_categories?: string[];
   default_tax_percentage?: number;
+  // --- Version & Update Settings ---
+  auto_update_checks_enabled?: boolean;
+  last_update_check_date?: string;
+  last_installed_version?: string;
+  force_update_enabled?: boolean;
+  client_platform?: 'web' | 'android';
+}
+
+export interface UpdateLog {
+  id: string;
+  timestamp: string;
+  action: 'CHECK_FOR_UPDATES' | 'UPDATE_DETECTED' | 'UPDATE_APPLIED' | 'UPDATE_POSTPONED' | 'UPDATE_DISMISSED' | 'UPDATE_FAILED';
+  installed_version: string;
+  remote_version: string;
+  platform: 'web' | 'android';
+  status: 'SUCCESS' | 'INFO' | 'WARNING' | 'ERROR';
+  details?: string;
+  user_role?: string;
 }
 
 export interface PaymentNumber {
@@ -509,12 +527,16 @@ export interface PSDevice {
   name: string;
   hourly_price_single: number;
   hourly_price_multi: number;
-  status: 'FREE' | 'PLAYING_SINGLE' | 'PLAYING_MULTI' | 'PAUSED';
+  status: 'FREE' | 'PLAYING_SINGLE' | 'PLAYING_MULTI' | 'PAUSED' | 'TIME_EXPIRED';
   session_start_time: string | null;
   session_pause_time: string | null;
   session_accumulated_seconds: number;
   session_notes: string;
   current_session_id: string | null;
+  is_limited?: boolean;
+  limit_minutes?: number;
+  target_end_time?: string | null;
+  expired_notified?: boolean;
 }
 
 export interface PSSession {
@@ -530,9 +552,12 @@ export interface PSSession {
   discount: number;
   additional_charges: number;
   total_price: number;
-  status: 'ACTIVE' | 'PAUSED' | 'COMPLETED';
+  status: 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'EXPIRED';
   notes: string;
   created_at: string;
+  is_limited?: boolean;
+  limit_minutes?: number;
+  target_end_time?: string | null;
   products?: { product_id: string; product_name_ar: string; quantity: number; selling_price: number; discount_amount?: number }[];
 }export interface DailyRawMaterialItem {
   raw_material_id: string;
@@ -557,11 +582,11 @@ export interface InventoryBatch {
   item_id: string; // references raw material id or product id
   item_name: string; // e.g., "بن برازيلي" or "كولا"
   raw_material_qty?: number; // كمية المادة الخام بالمخزن المخصصة للدفعة (مثل 1 كجم) - لا تتغير أثناء البيع
-  original_quantity: number; // الطاقة الإنتاجية الكلية بالأكواب/الأعداد (مثل 50 كوب)
-  consumed_quantity: number; // عدد الأكواب المباعة/المستهلكة (0 -> 1 -> 2 -> 50)
-  remaining_quantity: number; // عدد الأكواب المتبقية (50 -> 49 -> 0)
+  original_quantity: number; // السعة الإنتاجية الكلية بالوحدات المحددة (مثل 50 كوب أو 20 حجر شيشة)
+  consumed_quantity: number; // الكمية المباعة/المستهلكة (0 -> 1 -> 2 -> 50)
+  remaining_quantity: number; // الكمية المتبقية (50 -> 49 -> 0)
   unit: string; // وحدة تخزين المادة الخام بالمخزن (مثل "كيلوجرام" / "لتر")
-  yield_unit?: string; // وحدة إنتاج الدفعة / البيع (مثل "كوب" / "براد" / "جرعة")
+  yield_unit?: string; // وحدة الإنتاج / التقديم المحسوبة (مثل "كوب"، "كاس"، "بولة"، "حجر شيشة"، "قطعة"، "زجاجة"...)
   purchase_price: number; // إجمالي تكلفة شراء الدفعة بالكامِل (مثل 380 جنيه) - لا تتغير مطلقا
   supplier: string;
   purchase_date: string;
@@ -570,9 +595,9 @@ export interface InventoryBatch {
   status: 'ACTIVE' | 'LOW' | 'COMPLETED'; // نشطة - قاربت على النفاد - منتهية
   created_at: string; // تاريخ البداية
   ended_at?: string; // تاريخ انتهاء الدفعة عند وصول المتبقي لصفر
-  yield_capacity?: number; // إنتاجية الدفعة بالأكواب (مثل 50 كوب من 1 كجم)
-  remaining_cups?: number; // الأكواب المتبقية من إنتاجية الدفعة
-  total_revenue?: number; // إجمالي الإيرادات المحققة من بيع أكواب هذه الدفعة
+  yield_capacity?: number; // السعة الإنتاجية للدفعة (مثل 50 كوب أو 100 حجر من 1 كجم)
+  remaining_cups?: number; // الوحدات/الأكواب المتبقية من إنتاجية الدفعة
+  total_revenue?: number; // إجمالي الإيرادات المحققة من بيع وحدات هذه الدفعة
   net_profit?: number; // صافي ربح الدفعة (الإيرادات - تكلفة الدفعة الثابتة)
   profit_margin?: number; // نسبة ربح الدفعة %
 }
