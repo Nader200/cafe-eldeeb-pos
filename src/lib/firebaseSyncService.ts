@@ -182,8 +182,9 @@ class FirebaseSyncService {
         }
       },
       (error) => {
-        console.warn('Firestore sync listener notice (operating in offline cache mode):', error?.message || error);
-        this.status = 'offline';
+        console.error('Firestore sync error:', error);
+        handleFirestoreError(error, OperationType.LIST, `cafes/${this.cafeId}/sync_store`);
+        this.status = 'error';
         this.notifyState();
       }
     );
@@ -229,8 +230,9 @@ class FirebaseSyncService {
       });
       this.status = 'connected';
     } catch (error) {
-      console.warn(`Firestore push key ${key} notice (operating in offline cache mode):`, error);
-      this.status = 'offline';
+      console.error(`Failed to push key ${key} to cloud:`, error);
+      handleFirestoreError(error, OperationType.WRITE, `cafes/${this.cafeId}/sync_store/${key}`);
+      this.status = 'error';
     } finally {
       this.notifyState();
     }
