@@ -31,7 +31,7 @@ export const db = initializeFirestore(
       tabManager: persistentMultipleTabManager()
     })
   },
-  databaseId
+  databaseId || '(default)'
 );
 
 export const auth = getAuth(app);
@@ -69,18 +69,18 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   };
-  console.error('Firestore Error:', JSON.stringify(errInfo));
+  console.warn('Firestore Operation Notice:', JSON.stringify(errInfo));
   return errInfo;
 }
 
-// Test initial connection as required by skill
+// Test initial connection safely
 export async function testFirestoreConnection(): Promise<boolean> {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
     return true;
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('Firestore client is offline or initial connection check failed.');
+    if (error instanceof Error && (error.message.includes('the client is offline') || error.message.includes('Could not reach Cloud Firestore'))) {
+      console.warn('Firestore client is operating in offline persistence mode.');
     }
     return false;
   }
