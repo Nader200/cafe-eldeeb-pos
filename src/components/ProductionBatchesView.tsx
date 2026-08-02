@@ -32,6 +32,7 @@ import {
   ArrowUpRight,
   PieChart,
   ShieldAlert,
+  AlertTriangle,
   Box
 } from 'lucide-react';
 import { dbService, isSugarMaterial } from '../dbService';
@@ -91,6 +92,20 @@ export default function ProductionBatchesView({
   const [prodStock, setProdStock] = useState<string>('24');
   const [prodMinStock, setProdMinStock] = useState<string>('5');
   const [prodBarcode, setProdBarcode] = useState<string>('');
+
+  // Edit Batch state
+  const [showEditBatchModal, setShowEditBatchModal] = useState<boolean>(false);
+  const [editingBatch, setEditingBatch] = useState<InventoryBatch | null>(null);
+  const [editItemName, setEditItemName] = useState<string>('');
+  const [editSupplier, setEditSupplier] = useState<string>('');
+  const [editPurchaseDate, setEditPurchaseDate] = useState<string>('');
+  const [editExpiryDate, setEditExpiryDate] = useState<string>('');
+  const [editInvoiceNumber, setEditInvoiceNumber] = useState<string>('');
+  const [editNotes, setEditNotes] = useState<string>('');
+  const [editPurchasePrice, setEditPurchasePrice] = useState<string>('');
+  const [editRawMaterialQty, setEditRawMaterialQty] = useState<string>('');
+  const [editYieldCapacity, setEditYieldCapacity] = useState<string>('');
+  const [editYieldUnit, setEditYieldUnit] = useState<string>('');
 
   // Load Database Data
   const loadAllData = () => {
@@ -278,6 +293,72 @@ export default function ProductionBatchesView({
     }
     // Open custom confirmation modal
     setBatchToDeleteConfirm(batch);
+  };
+
+  const handleOpenEditBatchModal = (batch: InventoryBatch) => {
+    setEditingBatch(batch);
+    setEditItemName(batch.item_name || '');
+    setEditSupplier(batch.supplier || '');
+    setEditPurchaseDate(batch.purchase_date || new Date().toISOString().split('T')[0]);
+    setEditExpiryDate(batch.expiry_date || '');
+    setEditInvoiceNumber(batch.invoice_number || '');
+    setEditNotes(batch.notes || '');
+    setEditPurchasePrice(batch.purchase_price ? batch.purchase_price.toString() : '0');
+    setEditRawMaterialQty(batch.raw_material_qty ? batch.raw_material_qty.toString() : '1');
+    setEditYieldCapacity((batch.yield_capacity || batch.original_quantity || 50).toString());
+    setEditYieldUnit(batch.yield_unit || 'كوب');
+    setShowEditBatchModal(true);
+  };
+
+  const handleSaveEditBatch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingBatch) return;
+
+    const isConsumed = (editingBatch.consumed_quantity || 0) > 0;
+    const priceNum = parseFloat(editPurchasePrice);
+    const rawQtyNum = parseFloat(editRawMaterialQty);
+    const yieldNum = parseFloat(editYieldCapacity);
+
+    if (!isConsumed) {
+      if (isNaN(priceNum) || priceNum < 0) {
+        onShowWarningAlert('يرجى إدخال تكلفة شراء صحيحة!');
+        return;
+      }
+      if (isNaN(rawQtyNum) || rawQtyNum <= 0) {
+        onShowWarningAlert('يرجى إدخال كمية مادة خام أكبر من الصفر!');
+        return;
+      }
+      if (isNaN(yieldNum) || yieldNum <= 0) {
+        onShowWarningAlert('يرجى إدخال سعة إنتاجية أكبر من الصفر!');
+        return;
+      }
+    }
+
+    const res = dbService.editInventoryBatch(
+      editingBatch.id,
+      {
+        item_name: editItemName,
+        supplier: editSupplier,
+        purchase_date: editPurchaseDate,
+        expiry_date: editExpiryDate,
+        invoice_number: editInvoiceNumber,
+        notes: editNotes,
+        purchase_price: isConsumed ? undefined : priceNum,
+        raw_material_qty: isConsumed ? undefined : rawQtyNum,
+        yield_capacity: isConsumed ? undefined : yieldNum,
+        yield_unit: editYieldUnit
+      },
+      'مدير الإنتاج'
+    );
+
+    if (res.success) {
+      onShowSuccessAlert(`تم تعديل الدفعة "${editingBatch.batch_serial}" بنجاح!`);
+      setShowEditBatchModal(false);
+      setEditingBatch(null);
+      loadAllData();
+    } else {
+      onShowWarningAlert(res.message || 'حدث خطأ أثناء تعديل الدفعة!');
+    }
   };
 
   const handleConfirmDeleteBatch = () => {
@@ -845,12 +926,22 @@ export default function ProductionBatchesView({
                           {/* Actions */}
                           <td className="py-3.5 px-4 text-center">
                             <div className="flex items-center justify-center gap-1.5">
+                              {/* Report Button */}
                               <button
                                 onClick={() => setSelectedBatchForReport(batch)}
                                 className="p-1.5 bg-gray-800 hover:bg-gray-700 text-gold-400 rounded-lg cursor-pointer transition-all"
                                 title="تقرير الدفعة"
                               >
                                 <FileText className="w-3.5 h-3.5" />
+                              </button>
+
+                              {/* Edit Button */}
+                              <button
+                                onClick={() => handleOpenEditBatchModal(batch)}
+                                className="p-1.5 bg-gray-800 hover:bg-gray-700 text-blue-400 rounded-lg cursor-pointer transition-all"
+                                title="تعديل بيانات الدفعة"
+                              >
+                                <Edit className="w-3.5 h-3.5" />
                               </button>
 
                               {batch.status !== 'COMPLETED' && (
@@ -1438,6 +1529,198 @@ export default function ProductionBatchesView({
       )}
 
       {/* ========================================================================= */}
+      {/* MODAL: EDIT BATCH (Raw Material Batch)                                    */}
+      {/* ========================================================================= */}
+      {showEditBatchModal && editingBatch && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 p-4 animate-fade-in overflow-y-auto" dir="rtl">
+          <form onSubmit={handleSaveEditBatch} className="bg-luxury-card border border-luxury-border rounded-3xl w-full max-w-lg p-6 relative my-auto shadow-2xl space-y-4">
+            <button
+              type="button"
+              onClick={() => {
+                setShowEditBatchModal(false);
+                setEditingBatch(null);
+              }}
+              className="absolute top-4 left-4 text-gray-500 hover:text-white cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 border-b border-gray-800 pb-3">
+              <div className="w-10 h-10 rounded-xl bg-gold-500/20 border border-gold-500/40 text-gold-400 flex items-center justify-center shrink-0 font-bold">
+                <Edit className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-white">
+                  تعديل بيانات الدفعة: <span className="text-gold-400 font-mono">{editingBatch.batch_serial}</span>
+                </h3>
+                <p className="text-[10px] text-gray-400">{editingBatch.item_name}</p>
+              </div>
+            </div>
+
+            {/* Consumed Batch status notice */}
+            {(editingBatch.consumed_quantity || 0) > 0 ? (
+              <div className="bg-amber-950/40 border border-amber-800/60 rounded-2xl p-3 flex items-start gap-2 text-xs text-amber-300">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold block">دفعة مستهلكة جزئياً أو كلياً:</span>
+                  <p className="text-[10px] text-amber-200/80 mt-0.5 leading-relaxed">
+                    تم استهلاك ({editingBatch.consumed_quantity} كوب/وحدة) من هذه الدفعة. حُظِر تعديل التكلفة والسعة الإنتاجية للحفاظ على التوازن المحاسبي. يمكنك تعديل المورد، التاريخ، الفاتورة والملاحظات بأمان.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-emerald-950/40 border border-emerald-800/60 rounded-2xl p-3 flex items-start gap-2 text-xs text-emerald-300">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold block">دفعة جديدة لم تُستغل بعد:</span>
+                  <p className="text-[10px] text-emerald-200/80 mt-0.5 leading-relaxed">
+                    يمكنك تعديل التكلفة المادية، السعة الإنتاجية، المورد، التاريخ، والملاحظات بحرية وسوف تتحدث الأرقام الحسابية فوراً.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="text-[11px] text-gray-400 font-bold block mb-1">اسم المادة الخام / الدفعة *</label>
+                <input
+                  type="text"
+                  required
+                  disabled={(editingBatch.consumed_quantity || 0) > 0}
+                  value={editItemName}
+                  onChange={(e) => setEditItemName(e.target.value)}
+                  className={`w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-500 ${
+                    (editingBatch.consumed_quantity || 0) > 0 ? 'opacity-60 cursor-not-allowed bg-gray-900' : ''
+                  }`}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] text-gray-400 font-bold block mb-1">اسم المورد المعتمد</label>
+                  <input
+                    type="text"
+                    placeholder="اسم المورد"
+                    value={editSupplier}
+                    onChange={(e) => setEditSupplier(e.target.value)}
+                    className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] text-gray-400 font-bold block mb-1">رقم الفاتورة (إن وجد)</label>
+                  <input
+                    type="text"
+                    placeholder="رقم الفاتورة"
+                    value={editInvoiceNumber}
+                    onChange={(e) => setEditInvoiceNumber(e.target.value)}
+                    className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs font-mono focus:outline-none focus:border-gold-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] text-gray-400 font-bold block mb-1">تاريخ التوريد / الشراء</label>
+                  <input
+                    type="date"
+                    value={editPurchaseDate}
+                    onChange={(e) => setEditPurchaseDate(e.target.value)}
+                    className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs font-mono focus:outline-none focus:border-gold-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] text-gray-400 font-bold block mb-1">تاريخ انتهاء الصلاحية</label>
+                  <input
+                    type="date"
+                    value={editExpiryDate}
+                    onChange={(e) => setEditExpiryDate(e.target.value)}
+                    className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs font-mono focus:outline-none focus:border-gold-500"
+                  />
+                </div>
+              </div>
+
+              {/* Cost and Capacity Fields (Editable only if unused) */}
+              <div className="grid grid-cols-3 gap-2 bg-black/40 p-3 rounded-2xl border border-gold-500/10">
+                <div>
+                  <label className="text-[10px] text-amber-400 font-bold block mb-1">تكلفة الشراء (EGP)</label>
+                  <input
+                    type="number"
+                    step="any"
+                    disabled={(editingBatch.consumed_quantity || 0) > 0}
+                    value={editPurchasePrice}
+                    onChange={(e) => setEditPurchasePrice(e.target.value)}
+                    className={`w-full bg-luxury-bg border border-gray-800 text-amber-300 font-bold font-mono rounded-xl py-2 px-2 text-xs text-center focus:outline-none focus:border-gold-500 ${
+                      (editingBatch.consumed_quantity || 0) > 0 ? 'opacity-60 cursor-not-allowed bg-gray-900' : ''
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-blue-400 font-bold block mb-1">كمية المادة بالمخزن</label>
+                  <input
+                    type="number"
+                    step="any"
+                    disabled={(editingBatch.consumed_quantity || 0) > 0}
+                    value={editRawMaterialQty}
+                    onChange={(e) => setEditRawMaterialQty(e.target.value)}
+                    className={`w-full bg-luxury-bg border border-gray-800 text-blue-300 font-bold font-mono rounded-xl py-2 px-2 text-xs text-center focus:outline-none focus:border-gold-500 ${
+                      (editingBatch.consumed_quantity || 0) > 0 ? 'opacity-60 cursor-not-allowed bg-gray-900' : ''
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-emerald-400 font-bold block mb-1">السعة الإنتاجية (أكواب)</label>
+                  <input
+                    type="number"
+                    step="any"
+                    disabled={(editingBatch.consumed_quantity || 0) > 0}
+                    value={editYieldCapacity}
+                    onChange={(e) => setEditYieldCapacity(e.target.value)}
+                    className={`w-full bg-luxury-bg border border-gray-800 text-emerald-300 font-bold font-mono rounded-xl py-2 px-2 text-xs text-center focus:outline-none focus:border-gold-500 ${
+                      (editingBatch.consumed_quantity || 0) > 0 ? 'opacity-60 cursor-not-allowed bg-gray-900' : ''
+                    }`}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[11px] text-gray-400 font-bold block mb-1">ملاحظات إضافية</label>
+                <textarea
+                  rows={2}
+                  placeholder="أي ملاحظات حول التوريد أو جودة الدفعة"
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2 border-t border-gray-800">
+              <button
+                type="submit"
+                className="flex-1 py-3 bg-gradient-to-r from-gold-600 to-gold-500 hover:from-gold-500 hover:to-gold-400 text-black font-extrabold text-xs rounded-xl shadow-lg cursor-pointer transition-all active:scale-95"
+              >
+                حفظ التعديلات والتحديث
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEditBatchModal(false);
+                  setEditingBatch(null);
+                }}
+                className="py-3 px-4 bg-gray-900 hover:bg-gray-800 text-gray-400 rounded-xl text-xs font-bold cursor-pointer"
+              >
+                إلغاء
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
       {/* MODAL: CREATE / EDIT READY PRODUCT                                        */}
       {/* ========================================================================= */}
       {showAddProductModal && (
@@ -1508,7 +1791,7 @@ export default function ProductionBatchesView({
                   <label className="text-[11px] text-amber-400 font-bold block mb-1">سعر الشراء للقطعة (EGP) *</label>
                   <input
                     type="number"
-                    step="0.01"
+                    step="any"
                     required
                     placeholder="مثال: 8"
                     value={prodCostPrice}
@@ -1521,7 +1804,7 @@ export default function ProductionBatchesView({
                   <label className="text-[11px] text-blue-400 font-bold block mb-1">سعر البيع للقطعة (EGP) *</label>
                   <input
                     type="number"
-                    step="0.01"
+                    step="any"
                     required
                     placeholder="مثال: 12"
                     value={prodSellingPrice}

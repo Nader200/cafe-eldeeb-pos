@@ -2,6 +2,7 @@ import jsPDF from 'jspdf';
 import { safeHtml2Canvas } from './html2canvasHelper';
 import { Invoice, InvoiceItem, Customer, AppSettings } from '../types';
 import { getEldeebLogoDataUrl } from '../lib/logoSvg';
+import { getPaymentMethodLabel } from './paymentUtils';
 
 export interface GenerateInvoicePDFOptions {
   invoice: Invoice;
@@ -65,12 +66,7 @@ export async function createInvoicePDF({
   const custName = customer?.full_name || (invoice.customer_id ? 'عميل مسجل' : 'عميل عام / نقدي');
 
   // Payment Method text
-  let paymentMethodText = 'نقدي (كاش)';
-  if (invoice.payment_type === 'CREDIT') {
-    paymentMethodText = 'ذمم بالآجل';
-  } else if ((invoice.payment_type as string) === 'SPLIT' || (invoice.payment_type as string) === 'PARTIAL') {
-    paymentMethodText = 'مجزأ (نقدي + آجل)';
-  }
+  const paymentMethodText = getPaymentMethodLabel(invoice);
 
   const currency = settings?.currency || 'ج.م';
   const cafeName = settings?.cafe_name || 'كافيه الديب POS';

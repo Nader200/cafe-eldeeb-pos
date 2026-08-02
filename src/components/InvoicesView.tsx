@@ -17,7 +17,9 @@ import {
   AlertTriangle,
   X,
   CreditCard,
-  Coins
+  Coins,
+  Eye,
+  Download
 } from 'lucide-react';
 import { dbService } from '../dbService';
 import { Invoice, InvoiceItem, Customer, AppSettings, InvoiceStatus, PaymentType } from '../types';
@@ -41,6 +43,7 @@ export default function InvoicesView({ onShowSuccessAlert, onShowWarningAlert }:
   // Receipt popup state
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState<boolean>(false);
+  const [viewReceiptModalUrl, setViewReceiptModalUrl] = useState<string | null>(null);
   const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>([]);
 
   // Reload data
@@ -359,6 +362,33 @@ export default function InvoicesView({ onShowSuccessAlert, onShowWarningAlert }:
                 <p>التاريخ: {new Date(selectedInvoice.invoice_date).toLocaleDateString('ar-EG')} - {new Date(selectedInvoice.invoice_date).toLocaleTimeString('ar-EG')}</p>
                 <p>الكاشير: {selectedInvoice.cashier_name}</p>
                 <p>الحالة المالي: <span className="font-bold text-black">{selectedInvoice.invoice_status === 'PAID' ? 'مقبوضة ومقفلة' : (selectedInvoice.invoice_status === 'CANCELLED' ? 'ملغية ومرتجعة' : 'آجل بالذمة')}</span></p>
+                {(selectedInvoice.sender_phone || selectedInvoice.senderPhone) && (
+                  <p className="font-bold text-black">رقم المحول: <span className="font-mono dir-ltr">{selectedInvoice.sender_phone || selectedInvoice.senderPhone}</span></p>
+                )}
+                {(selectedInvoice.reference_number || selectedInvoice.referenceNumber) && (
+                  <p className="font-bold text-gray-800">رقم المرجع: <span className="font-mono">{selectedInvoice.reference_number || selectedInvoice.referenceNumber}</span></p>
+                )}
+                {(selectedInvoice.receipt_image_url || selectedInvoice.receiptImageUrl) && (
+                  <div className="pt-1 flex items-center justify-between bg-gray-100 p-1.5 rounded-lg border border-gray-300 my-1">
+                    <div className="flex items-center gap-1.5">
+                      <img
+                        src={selectedInvoice.receipt_image_url || selectedInvoice.receiptImageUrl}
+                        alt="Receipt Thumbnail"
+                        className="w-8 h-8 object-cover rounded border border-gray-400 cursor-pointer"
+                        onClick={() => setViewReceiptModalUrl(selectedInvoice.receipt_image_url || selectedInvoice.receiptImageUrl || null)}
+                      />
+                      <span className="text-[9px] font-bold text-gray-700">إيصال تحويل</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setViewReceiptModalUrl(selectedInvoice.receipt_image_url || selectedInvoice.receiptImageUrl || null)}
+                      className="px-2 py-0.5 bg-black text-gold-400 rounded text-[9px] font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <Eye className="w-3 h-3" />
+                      <span>عرض</span>
+                    </button>
+                  </div>
+                )}
                 {selectedInvoice.customer_id && (
                   <p>اسم العميل: {(customers.find(c => c.id === selectedInvoice.customer_id))?.full_name}</p>
                 )}
@@ -441,6 +471,58 @@ export default function InvoicesView({ onShowSuccessAlert, onShowWarningAlert }:
                 إغلاق
               </button>
 
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full Screen Electronic Transfer Receipt Viewer Modal */}
+      {viewReceiptModalUrl && (
+        <div
+          className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-4 animate-fade-in"
+          onClick={() => setViewReceiptModalUrl(null)}
+          dir="rtl"
+        >
+          <div
+            className="relative max-w-4xl max-h-[90vh] w-full flex flex-col items-center justify-center bg-luxury-card border border-gold-600/30 rounded-3xl p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-full flex items-center justify-between pb-3 border-b border-gray-800 mb-3">
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-gold-500" />
+                <h3 className="text-sm font-bold text-white">إيصال التحويل الإلكتروني - معاينة كاملة</h3>
+              </div>
+              <button
+                onClick={() => setViewReceiptModalUrl(null)}
+                className="p-1.5 bg-gray-800 hover:bg-red-600 text-gray-300 hover:text-white rounded-full transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="w-full overflow-auto max-h-[75vh] flex items-center justify-center rounded-2xl bg-black/80 p-2">
+              <img
+                src={viewReceiptModalUrl}
+                alt="Full Size Receipt"
+                className="max-w-full max-h-[70vh] object-contain rounded-xl shadow-lg"
+              />
+            </div>
+            <div className="w-full flex items-center justify-between pt-3 mt-3 border-t border-gray-800">
+              <a
+                href={viewReceiptModalUrl}
+                download="electronic_receipt.jpg"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="py-2 px-4 bg-luxury-card border border-gold-600/40 hover:bg-gray-800 text-gold-400 text-xs font-bold rounded-xl flex items-center gap-2 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                تحميل صورة الإيصال
+              </a>
+              <button
+                onClick={() => setViewReceiptModalUrl(null)}
+                className="py-2 px-6 bg-gold-600 hover:bg-gold-500 text-black font-extrabold text-xs rounded-xl cursor-pointer"
+              >
+                إغلاق النافذة
+              </button>
             </div>
           </div>
         </div>

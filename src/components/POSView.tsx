@@ -40,7 +40,11 @@ import {
   Settings,
   Home,
   History,
-  Calculator
+  Calculator,
+  Upload,
+  Eye,
+  FileText,
+  Download
 } from 'lucide-react';
 import { dbService, safeStorage } from '../dbService';
 const localStorage = safeStorage;
@@ -49,6 +53,8 @@ import { safeHtml2Canvas } from '../utils/html2canvasHelper';
 import { shareInvoicePDFToWhatsApp } from '../utils/pdfInvoiceGenerator';
 import { useAuth } from '../contexts/AuthContext';
 import SyncStatusIndicator from './SyncStatusIndicator';
+import { uploadReceiptImage } from '../lib/receiptStorage';
+import { getPaymentMethodLabel } from '../utils/paymentUtils';
 
 interface POSViewProps {
   onNavigate: (tab: string) => void;
@@ -311,6 +317,12 @@ export default function POSView({
         setSelectedCustomer(invoice.customer_id || 'c_general');
         setTableNumber(invoice.table_number || '');
         setInvoiceNotes(invoice.notes || '');
+        setPaymentType(invoice.payment_type || 'CASH');
+        setPaymentMethod(invoice.payment_method || (invoice.payment_type === 'CREDIT' ? 'CREDIT' : 'CASH'));
+        setReferenceNumber(invoice.reference_number || invoice.referenceNumber || '');
+        setSenderPhone(invoice.sender_phone || invoice.senderPhone || '');
+        setReceiptImageUrl(invoice.receipt_image_url || invoice.receiptImageUrl || '');
+        setPaymentNumber(invoice.payment_number || '');
         const totalItemDiscount = items.reduce((acc, it) => acc + (it.item_discount_amount || 0), 0);
         const invoiceLevelDiscount = Math.max(0, invoice.discount - totalItemDiscount);
         setDiscount(invoiceLevelDiscount);
@@ -367,6 +379,12 @@ export default function POSView({
       setSelectedCustomer(invoice.customer_id || 'c_general');
       setTableNumber(invoice.table_number || '');
       setInvoiceNotes(invoice.notes || '');
+      setPaymentType(invoice.payment_type || 'CASH');
+      setPaymentMethod(invoice.payment_method || (invoice.payment_type === 'CREDIT' ? 'CREDIT' : 'CASH'));
+      setReferenceNumber(invoice.reference_number || invoice.referenceNumber || '');
+      setSenderPhone(invoice.sender_phone || invoice.senderPhone || '');
+      setReceiptImageUrl(invoice.receipt_image_url || invoice.receiptImageUrl || '');
+      setPaymentNumber(invoice.payment_number || '');
       const totalItemDiscount = items.reduce((acc, it) => acc + (it.item_discount_amount || 0), 0);
       const invoiceLevelDiscount = Math.max(0, invoice.discount - totalItemDiscount);
       setDiscount(invoiceLevelDiscount);
@@ -451,6 +469,10 @@ export default function POSView({
   const [paymentMethod, setPaymentMethod] = useState<string>('CASH');
   const [paymentNumber, setPaymentNumber] = useState<string>('');
   const [referenceNumber, setReferenceNumber] = useState<string>('');
+  const [senderPhone, setSenderPhone] = useState<string>('');
+  const [receiptImageUrl, setReceiptImageUrl] = useState<string>('');
+  const [isUploadingReceipt, setIsUploadingReceipt] = useState<boolean>(false);
+  const [viewReceiptModalUrl, setViewReceiptModalUrl] = useState<string | null>(null);
   const [paymentNotes, setPaymentNotes] = useState<string>('');
   
   // Credit Limit Warning Modal States
@@ -779,9 +801,13 @@ export default function POSView({
     setUseWallet(false);
     setWalletDeductionAmount(0);
     setCashReceived(String(cartTotals.total));
-    setPaymentMethod(paymentType === 'CREDIT' ? 'CREDIT' : 'CASH');
-    setReferenceNumber('');
-    setPaymentNotes('');
+    if (!paymentMethod || paymentMethod === 'CASH') {
+      if (senderPhone || referenceNumber || receiptImageUrl) {
+        setPaymentMethod(paymentNumber === settings.instapay_number ? 'BANK_TRANSFER' : 'VODAFONE_CASH');
+      } else {
+        setPaymentMethod(paymentType === 'CREDIT' ? 'CREDIT' : 'CASH');
+      }
+    }
     setShowCheckoutModal(true);
   };
 
@@ -861,6 +887,14 @@ export default function POSView({
       return;
     }
 
+    // Validate electronic payment required fields
+    if (paymentMethod === 'VODAFONE_CASH' || paymentMethod === 'BANK_TRANSFER') {
+      if (!senderPhone || !/^01[0125]\d{8}$/.test(senderPhone.trim())) {
+        onShowWarningAlert('يرجى إدخال رقم هاتف محول محلي صحيح مكون من 11 رقم يبدأ بـ 010 أو 011 أو 012 أو 015!');
+        return;
+      }
+    }
+
     // Validate that Vodafone Cash or InstaPay numbers are configured if selected
     if (paymentMethod === 'VODAFONE_CASH' && !settings.vodafone_cash_number) {
       onShowWarningAlert('يرجى تهيئة رقم فودافون كاش أولاً من إعدادات النظام لإتمام عملية الدفع!');
@@ -922,7 +956,9 @@ export default function POSView({
           referenceNumber,
           paymentNotes,
           walletAmt,
-          paymentNumber
+          paymentNumber,
+          senderPhone,
+          receiptImageUrl
         );
       } else {
         res = dbService.createInvoice(
@@ -939,7 +975,9 @@ export default function POSView({
           referenceNumber,
           paymentNotes,
           walletAmt,
-          paymentNumber
+          paymentNumber,
+          senderPhone,
+          receiptImageUrl
         );
       }
 
@@ -957,6 +995,8 @@ export default function POSView({
       setSelectedCustomer('c_general');
       setPaymentMethod('CASH');
       setReferenceNumber('');
+      setSenderPhone('');
+      setReceiptImageUrl('');
       setPaymentNotes('');
       setActiveInvoiceId(undefined);
       if (clearReopenedInvoiceId) {
@@ -988,7 +1028,10 @@ export default function POSView({
         tableNumber,
         paymentMethod,
         referenceNumber,
-        paymentNotes
+        paymentNotes,
+        'OPEN',
+        senderPhone,
+        receiptImageUrl
       );
 
       onShowSuccessAlert(`تم حفظ الفاتورة بنجاح كـ فاتورة مفتوحة برقم: ${res.invoice.invoice_number}`);
@@ -1002,6 +1045,8 @@ export default function POSView({
       setSelectedCustomer('c_general');
       setPaymentMethod('CASH');
       setReferenceNumber('');
+      setSenderPhone('');
+      setReceiptImageUrl('');
       setPaymentNotes('');
       setActiveInvoiceId(undefined);
       if (clearReopenedInvoiceId) {
@@ -1991,7 +2036,9 @@ export default function POSView({
                 id="paytype-cash"
                 onClick={() => {
                   setPaymentType('CASH');
-                  setPaymentMethod('CASH');
+                  if (paymentMethod === 'CREDIT') {
+                    setPaymentMethod('CASH');
+                  }
                   setCashReceived(String(cartTotals.total - walletDeductionAmount));
                 }}
                 className={`py-2 px-1 rounded-xl text-center font-black text-[10px] border transition-all cursor-pointer flex flex-col items-center justify-center gap-1 ${
@@ -2027,7 +2074,9 @@ export default function POSView({
                 id="paytype-split"
                 onClick={() => {
                   setPaymentType('SPLIT');
-                  setPaymentMethod('CASH');
+                  if (paymentMethod === 'CREDIT') {
+                    setPaymentMethod('CASH');
+                  }
                   setCashReceived(String(cartTotals.total - walletDeductionAmount));
                 }}
                 className={`py-2 px-1 rounded-xl text-center font-black text-[10px] border transition-all cursor-pointer flex flex-col items-center justify-center gap-1 ${
@@ -2341,9 +2390,37 @@ export default function POSView({
                     </div>
                   )}
 
-                  {/* Transaction Reference & Notes */}
-                  {paymentMethod !== 'CASH' && (
-                    <div className="space-y-2 pt-2 border-t border-gray-950">
+                  {/* Electronic Payment Specific Fields (Vodafone Cash / InstaPay) */}
+                  {(paymentMethod === 'VODAFONE_CASH' || paymentMethod === 'BANK_TRANSFER') && (
+                    <div className="space-y-3 pt-3 border-t border-gray-950">
+                      {/* Required Sender Phone Number */}
+                      <div>
+                        <label className="text-[11px] text-amber-400 font-extrabold flex items-center justify-between mb-1">
+                          <span>رقم هاتف المحول (Sender Phone Number) <span className="text-red-500">*</span></span>
+                          <span className="text-[9px] text-gray-400 font-normal">(11 رقم يبدأ بـ 010, 011, 012, 015)</span>
+                        </label>
+                        <input
+                          id="sender-phone-number"
+                          type="tel"
+                          maxLength={11}
+                          placeholder="010XXXXXXXX"
+                          value={senderPhone}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/[^0-9]/g, '');
+                            setSenderPhone(val);
+                          }}
+                          className={`w-full bg-luxury-card border text-white rounded-xl py-2 px-3 text-xs focus:outline-none font-bold font-mono text-center tracking-wider transition-colors ${
+                            senderPhone && !/^01[0125]\d{8}$/.test(senderPhone)
+                              ? 'border-red-500 focus:border-red-400'
+                              : 'border-gray-800 focus:border-gold-600'
+                          }`}
+                        />
+                        {senderPhone && !/^01[0125]\d{8}$/.test(senderPhone) && (
+                          <p className="text-[9px] text-red-400 font-bold mt-1">⚠️ رقم هاتف محلي غير صحيح (يجب أن يكون 11 رقم ويبدأ بـ 010 أو 011 أو 012 أو 015)</p>
+                        )}
+                      </div>
+
+                      {/* Existing Reference Number */}
                       <div>
                         <label className="text-[10px] text-gray-400 font-bold block mb-1">رقم مرجع المعاملة (Reference Number):</label>
                         <input
@@ -2355,6 +2432,131 @@ export default function POSView({
                           className="w-full bg-luxury-card border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-600 text-center font-bold font-mono"
                         />
                       </div>
+
+                      {/* Electronic Transfer Receipt Section */}
+                      <div className="bg-luxury-card/60 border border-gray-850 p-3.5 rounded-2xl space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] text-gold-400 font-extrabold flex items-center gap-1.5">
+                            <FileText className="w-4 h-4 text-gold-500" />
+                            <span>إيصال التحويل الإلكتروني (Electronic Transfer Receipt)</span>
+                          </label>
+                          {receiptImageUrl && (
+                            <span className="text-[9px] bg-emerald-950/60 text-emerald-400 border border-emerald-800 px-2 py-0.5 rounded-full font-bold">
+                              ✓ تم إرفاق الإيصال
+                            </span>
+                          )}
+                        </div>
+
+                        {!receiptImageUrl ? (
+                          <div>
+                            <label className="w-full py-2.5 px-4 bg-gradient-to-r from-gold-600/20 to-amber-600/20 hover:from-gold-600/30 hover:to-amber-600/30 border border-gold-600/40 text-gold-300 rounded-xl font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md active:scale-98">
+                              <Upload className="w-4 h-4 text-gold-500" />
+                              <span>{isUploadingReceipt ? 'جاري رفع صورة الإيصال...' : 'إرفاق إيصال التحويل (Attach Receipt)'}</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                disabled={isUploadingReceipt}
+                                className="hidden"
+                                onChange={async (e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    setIsUploadingReceipt(true);
+                                    const reader = new FileReader();
+                                    reader.onload = async (ev) => {
+                                      const base64 = ev.target?.result as string;
+                                      if (base64) {
+                                        try {
+                                          const uploadedUrl = await uploadReceiptImage(base64, `receipt_${paymentMethod.toLowerCase()}`);
+                                          setReceiptImageUrl(uploadedUrl);
+                                          onShowSuccessAlert('تم تحميل وإرفاق إيصال التحويل بنجاح!');
+                                        } catch (err: any) {
+                                          onShowWarningAlert('تعذر رفع الصورة، تم الحفظ مؤقتاً.');
+                                        }
+                                      }
+                                      setIsUploadingReceipt(false);
+                                    };
+                                    reader.readAsDataURL(file);
+                                  }
+                                }}
+                              />
+                            </label>
+                            <p className="text-[9px] text-gray-500 text-center mt-1">يمكن التقاط صورة الإيصال بالكاميرا أو اختيارها من المعرض</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="relative group rounded-xl overflow-hidden border border-gold-600/30 bg-black/50 p-1 flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-3">
+                                <img
+                                  src={receiptImageUrl}
+                                  alt="Receipt Preview"
+                                  className="w-14 h-14 object-cover rounded-lg border border-gray-800 cursor-pointer hover:opacity-90 transition-opacity"
+                                  onClick={() => setViewReceiptModalUrl(receiptImageUrl)}
+                                />
+                                <div>
+                                  <p className="text-xs font-bold text-white">إيصال تحويل مرفق</p>
+                                  <p className="text-[9px] text-gray-400">انقر للرؤية بالحجم الكامل</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5 pl-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setViewReceiptModalUrl(receiptImageUrl)}
+                                  className="p-1.5 bg-gray-800 hover:bg-gray-700 text-gold-400 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                                  title="عرض الإيصال"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  <span>عرض</span>
+                                </button>
+                                <label className="p-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer" title="تغيير الصورة">
+                                  <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
+                                  <span>تغيير</span>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    disabled={isUploadingReceipt}
+                                    className="hidden"
+                                    onChange={async (e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        setIsUploadingReceipt(true);
+                                        const reader = new FileReader();
+                                        reader.onload = async (ev) => {
+                                          const base64 = ev.target?.result as string;
+                                          if (base64) {
+                                            try {
+                                              const uploadedUrl = await uploadReceiptImage(base64, `receipt_${paymentMethod.toLowerCase()}`);
+                                              setReceiptImageUrl(uploadedUrl);
+                                              onShowSuccessAlert('تم استبدال وتحديث إيصال التحويل بنجاح!');
+                                            } catch (err: any) {
+                                              onShowWarningAlert('تعذر استبدال الصورة حالياً.');
+                                            }
+                                          }
+                                          setIsUploadingReceipt(false);
+                                        };
+                                        reader.readAsDataURL(file);
+                                      }
+                                    }}
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setReceiptImageUrl('');
+                                    onShowSuccessAlert('تم حذف إيصال التحويل المرفق.');
+                                  }}
+                                  className="p-1.5 bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-900/30 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                                  title="حذف الإيصال"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <span>حذف</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Payment Notes */}
                       <div>
                         <label className="text-[10px] text-gray-400 font-bold block mb-1">ملاحظات الدفع الإلكتروني (Notes):</label>
                         <input
@@ -2989,12 +3191,39 @@ export default function POSView({
                 <p>رقم الفاتورة: <span className="font-bold">{recentInvoice.invoice_number}</span></p>
                 <p>التاريخ: {new Date(recentInvoice.invoice_date).toLocaleDateString('ar-EG')} - {new Date(recentInvoice.invoice_date).toLocaleTimeString('ar-EG')}</p>
                 <p>الكاشير: {recentInvoice.cashier_name}</p>
-                <p>طريقة الدفع: {recentInvoice.payment_type === 'CASH' ? 'كاش ونقدي' : (recentInvoice.payment_type === 'CREDIT' ? 'آجل على الحساب' : 'دفع مركب')}</p>
+                <p>طريقة الدفع: <span className="font-bold text-black">{getPaymentMethodLabel(recentInvoice)}</span></p>
                 {recentInvoice.payment_method === 'VODAFONE_CASH' && (
-                  <p className="font-bold">الحساب: فودافون كاش ({recentInvoice.payment_number || settings.vodafone_cash_number})</p>
+                  <p className="font-bold text-red-700">الحساب: فودافون كاش ({recentInvoice.payment_number || settings.vodafone_cash_number})</p>
                 )}
                 {recentInvoice.payment_method === 'BANK_TRANSFER' && (
-                  <p className="font-bold">الحساب: إنستا باي ({recentInvoice.payment_number || settings.instapay_number})</p>
+                  <p className="font-bold text-emerald-700">الحساب: إنستا باي ({recentInvoice.payment_number || settings.instapay_number})</p>
+                )}
+                {(recentInvoice.sender_phone || recentInvoice.senderPhone) && (
+                  <p className="font-bold text-black">رقم المحول: <span className="font-mono dir-ltr">{recentInvoice.sender_phone || recentInvoice.senderPhone}</span></p>
+                )}
+                {(recentInvoice.reference_number || recentInvoice.referenceNumber) && (
+                  <p className="font-bold text-gray-800">رقم المرجع: <span className="font-mono">{recentInvoice.reference_number || recentInvoice.referenceNumber}</span></p>
+                )}
+                {(recentInvoice.receipt_image_url || recentInvoice.receiptImageUrl) && (
+                  <div className="pt-1.5 flex items-center justify-between bg-gray-100 p-1.5 rounded-lg border border-gray-300 my-1">
+                    <div className="flex items-center gap-2">
+                      <img
+                        src={recentInvoice.receipt_image_url || recentInvoice.receiptImageUrl}
+                        alt="Receipt Thumbnail"
+                        className="w-10 h-10 object-cover rounded border border-gray-400 cursor-pointer"
+                        onClick={() => setViewReceiptModalUrl(recentInvoice.receipt_image_url || recentInvoice.receiptImageUrl || null)}
+                      />
+                      <span className="text-[9px] font-bold text-gray-700">إيصال تحويل مرفق</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setViewReceiptModalUrl(recentInvoice.receipt_image_url || recentInvoice.receiptImageUrl || null)}
+                      className="px-2 py-1 bg-black text-gold-400 rounded text-[9px] font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <Eye className="w-3 h-3" />
+                      <span>عرض الإيصال</span>
+                    </button>
+                  </div>
                 )}
                 {recentInvoice.customer_id && (
                   <p>العميل: {(customers.find(c => c.id === recentInvoice.customer_id))?.full_name}</p>
@@ -3133,6 +3362,58 @@ export default function POSView({
           </span>
         )}
       </button>
+
+      {/* --- Full Screen Electronic Transfer Receipt Viewer Modal --- */}
+      {viewReceiptModalUrl && (
+        <div
+          className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-4 animate-fade-in"
+          onClick={() => setViewReceiptModalUrl(null)}
+          dir="rtl"
+        >
+          <div
+            className="relative max-w-4xl max-h-[90vh] w-full flex flex-col items-center justify-center bg-luxury-card border border-gold-600/30 rounded-3xl p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-full flex items-center justify-between pb-3 border-b border-gray-800 mb-3">
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-gold-500" />
+                <h3 className="text-sm font-bold text-white">إيصال التحويل الإلكتروني - معاينة كاملة</h3>
+              </div>
+              <button
+                onClick={() => setViewReceiptModalUrl(null)}
+                className="p-1.5 bg-gray-800 hover:bg-red-600 text-gray-300 hover:text-white rounded-full transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="w-full overflow-auto max-h-[75vh] flex items-center justify-center rounded-2xl bg-black/80 p-2">
+              <img
+                src={viewReceiptModalUrl}
+                alt="Full Size Receipt"
+                className="max-w-full max-h-[70vh] object-contain rounded-xl shadow-lg"
+              />
+            </div>
+            <div className="w-full flex items-center justify-between pt-3 mt-3 border-t border-gray-800">
+              <a
+                href={viewReceiptModalUrl}
+                download="electronic_receipt.jpg"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="py-2 px-4 bg-luxury-card border border-gold-600/40 hover:bg-gray-800 text-gold-400 text-xs font-bold rounded-xl flex items-center gap-2 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                تحميل صورة الإيصال
+              </a>
+              <button
+                onClick={() => setViewReceiptModalUrl(null)}
+                className="py-2 px-6 bg-gold-600 hover:bg-gold-500 text-black font-extrabold text-xs rounded-xl cursor-pointer"
+              >
+                إغلاق النافذة
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

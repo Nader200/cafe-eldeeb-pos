@@ -19,7 +19,7 @@ import {
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Initialize Firebase App
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
 const databaseId = (firebaseConfig as any).firestoreDatabaseId;
 

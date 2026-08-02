@@ -145,6 +145,11 @@ export interface Invoice {
   payment_method?: string; // 'CASH' | 'VODAFONE_CASH' | 'BANK_CARD' | 'BANK_TRANSFER' | 'CREDIT'
   payment_number?: string; // selected Vodafone Cash / InstaPay phone number
   reference_number?: string;
+  referenceNumber?: string;
+  sender_phone?: string;
+  senderPhone?: string;
+  receipt_image_url?: string;
+  receiptImageUrl?: string;
   payment_date?: string;
   payment_time?: string;
   created_at: string;
@@ -600,6 +605,7 @@ export interface InventoryBatch {
   total_revenue?: number; // إجمالي الإيرادات المحققة من بيع وحدات هذه الدفعة
   net_profit?: number; // صافي ربح الدفعة (الإيرادات - تكلفة الدفعة الثابتة)
   profit_margin?: number; // نسبة ربح الدفعة %
+  notes?: string; // ملاحظات الشراء أو الدفعة
 }
 
 export interface InventoryBatchLog {

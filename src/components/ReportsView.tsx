@@ -21,7 +21,10 @@ import {
   Smartphone,
   RefreshCw,
   CreditCard,
-  Users
+  Users,
+  Eye,
+  FileText,
+  X
 } from 'lucide-react';
 import { dbService, isPurchaseExpense } from '../dbService';
 import { Invoice, Expense, Product, CashDrawer, InvoiceItem, ReturnTransaction, Partner, PartnerDrawing } from '../types';
@@ -46,6 +49,7 @@ export default function ReportsView({ onShowSuccessAlert }: ReportsViewProps) {
   const [timeframe, setTimeframe] = useState<'WEEK' | 'MONTH'>('WEEK');
   const [activeReportTab, setActiveReportTab] = useState<'daily_raw_materials' | 'general' | 'batch_profit' | 'partners_statement'>('batch_profit');
   const [selectedDate, setSelectedDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [viewReceiptModalUrl, setViewReceiptModalUrl] = useState<string | null>(null);
 
   useEffect(() => {
     const loadData = () => {
@@ -340,7 +344,12 @@ export default function ReportsView({ onShowSuccessAlert }: ReportsViewProps) {
     const validInvoices = invoices.filter(i => i.invoice_status !== 'CANCELLED');
 
     validInvoices.forEach(inv => {
-      const method = inv.payment_method || (inv.payment_type === 'CREDIT' ? 'CREDIT' : 'CASH');
+      let method = inv.payment_method || (inv.payment_type === 'CREDIT' ? 'CREDIT' : 'CASH');
+      const hasDigitalMetadata = !!(inv.sender_phone || inv.senderPhone || inv.reference_number || inv.referenceNumber || inv.receipt_image_url || inv.receiptImageUrl);
+      if ((!method || method === 'CASH') && hasDigitalMetadata) {
+        method = (inv.payment_number && inv.payment_number.includes('insta')) ? 'BANK_TRANSFER' : 'VODAFONE_CASH';
+      }
+
       const amount = inv.paid_amount || 0;
       const remaining = inv.remaining_amount || 0;
 
@@ -1203,7 +1212,7 @@ export default function ReportsView({ onShowSuccessAlert }: ReportsViewProps) {
           {/* BANK TRANSFER CARD */}
           <div className="bg-luxury-bg/50 border border-gray-900 rounded-2xl p-4 space-y-3">
             <div className="flex justify-between items-center">
-              <span className="text-xs text-gray-300 font-bold">تحويل بنكي</span>
+              <span className="text-xs text-gray-300 font-bold">إنستا باي / تحويل بنكي</span>
               <span className="text-xs font-mono font-bold text-purple-500">{paymentMethodStats.BANK_TRANSFER.percentage}%</span>
             </div>
             <div className="h-2 bg-gray-950 rounded-full overflow-hidden">
@@ -1327,7 +1336,9 @@ export default function ReportsView({ onShowSuccessAlert }: ReportsViewProps) {
                   <th className="pb-2 px-1">رقم الفاتورة</th>
                   <th className="pb-2 px-1">التاريخ والوقت</th>
                   <th className="pb-2 px-1 text-center">الوسيلة</th>
-                  <th className="pb-2 px-1">رقم مرجع التحويل</th>
+                  <th className="pb-2 px-1">رقم المحول</th>
+                  <th className="pb-2 px-1">رقم المرجع</th>
+                  <th className="pb-2 px-1">الإيصال</th>
                   <th className="pb-2 px-1">العميل</th>
                   <th className="pb-2 px-1">ملاحظات الدفع</th>
                   <th className="pb-2 px-1 text-left">المبلغ المسدد</th>
@@ -1336,34 +1347,54 @@ export default function ReportsView({ onShowSuccessAlert }: ReportsViewProps) {
               <tbody className="divide-y divide-gray-900/30">
                 {invoices.filter(i => i.invoice_status !== 'CANCELLED' && i.payment_method && i.payment_method !== 'CASH').length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-6 text-gray-600 font-semibold">
+                    <td colSpan={9} className="text-center py-6 text-gray-600 font-semibold">
                       لم يتم استقبال مدفوعات إلكترونية أو تحويلات فودافون كاش حتى الآن
                     </td>
                   </tr>
                 ) : (
                   invoices
                     .filter(i => i.invoice_status !== 'CANCELLED' && i.payment_method && i.payment_method !== 'CASH')
-                    .slice(0, 10)
-                    .map((inv, idx) => (
-                      <tr key={idx} className="hover:bg-gray-950/20">
-                        <td className="py-2.5 px-1 font-mono text-gold-500 font-bold">{inv.invoice_number}</td>
-                        <td className="py-2.5 px-1 text-gray-400">{inv.payment_date || inv.invoice_date} {inv.payment_time}</td>
-                        <td className="py-2.5 px-1 text-center">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            inv.payment_method === 'VODAFONE_CASH' ? 'bg-red-950/30 text-red-400 border border-red-950' :
-                            inv.payment_method === 'BANK_CARD' ? 'bg-cyan-950/30 text-cyan-400 border border-cyan-950' :
-                            'bg-purple-950/30 text-purple-400 border border-purple-950'
-                          }`}>
-                            {inv.payment_method === 'VODAFONE_CASH' ? 'فودافون كاش' :
-                             inv.payment_method === 'BANK_CARD' ? 'بطاقة بنكية' : 'تحويل بنكي'}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-1 font-mono text-gray-300 font-bold select-all">{inv.reference_number || 'N/A'}</td>
-                        <td className="py-2.5 px-1 text-gray-300">{inv.customer_name || 'زبون عام'}</td>
-                        <td className="py-2.5 px-1 text-gray-400 max-w-xs truncate">{inv.payment_notes || '-'}</td>
-                        <td className="py-2.5 px-1 text-left font-mono text-white font-bold">{(inv.paid_amount || inv.total).toLocaleString()} ج.م</td>
-                      </tr>
-                    ))
+                    .slice(0, 15)
+                    .map((inv, idx) => {
+                      const receiptUrl = inv.receipt_image_url || inv.receiptImageUrl;
+                      const senderP = inv.sender_phone || inv.senderPhone;
+                      const refNo = inv.reference_number || inv.referenceNumber;
+                      return (
+                        <tr key={idx} className="hover:bg-gray-950/20">
+                          <td className="py-2.5 px-1 font-mono text-gold-500 font-bold">{inv.invoice_number}</td>
+                          <td className="py-2.5 px-1 text-gray-400">{inv.payment_date || inv.invoice_date} {inv.payment_time}</td>
+                          <td className="py-2.5 px-1 text-center">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              inv.payment_method === 'VODAFONE_CASH' ? 'bg-red-950/30 text-red-400 border border-red-950' :
+                              inv.payment_method === 'BANK_CARD' ? 'bg-cyan-950/30 text-cyan-400 border border-cyan-950' :
+                              'bg-purple-950/30 text-purple-400 border border-purple-950'
+                            }`}>
+                              {inv.payment_method === 'VODAFONE_CASH' ? 'فودافون كاش' :
+                               inv.payment_method === 'BANK_CARD' ? 'بطاقة بنكية' : 'إنستا باي / تحويل'}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-1 font-mono text-amber-400 font-bold select-all">{senderP || '-'}</td>
+                          <td className="py-2.5 px-1 font-mono text-gray-300 font-bold select-all">{refNo || '-'}</td>
+                          <td className="py-2.5 px-1">
+                            {receiptUrl ? (
+                              <button
+                                type="button"
+                                onClick={() => setViewReceiptModalUrl(receiptUrl)}
+                                className="flex items-center gap-1.5 px-2 py-1 bg-luxury-card border border-gold-600/40 text-gold-400 hover:bg-gray-800 rounded-lg text-[10px] font-bold transition-all cursor-pointer"
+                              >
+                                <img src={receiptUrl} alt="Thumbnail" className="w-5 h-5 object-cover rounded" />
+                                <span>عرض</span>
+                              </button>
+                            ) : (
+                              <span className="text-gray-600 text-[10px]">بدون إيصال</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-1 text-gray-300">{inv.customer_name || 'زبون عام'}</td>
+                          <td className="py-2.5 px-1 text-gray-400 max-w-xs truncate">{inv.payment_notes || '-'}</td>
+                          <td className="py-2.5 px-1 text-left font-mono text-white font-bold">{(inv.paid_amount || inv.total).toLocaleString()} ج.م</td>
+                        </tr>
+                      );
+                    })
                 )}
               </tbody>
             </table>
@@ -1605,6 +1636,58 @@ export default function ReportsView({ onShowSuccessAlert }: ReportsViewProps) {
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Full Screen Receipt Preview Modal */}
+      {viewReceiptModalUrl && (
+        <div
+          className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-4 animate-fade-in"
+          onClick={() => setViewReceiptModalUrl(null)}
+          dir="rtl"
+        >
+          <div
+            className="relative max-w-4xl max-h-[90vh] w-full flex flex-col items-center justify-center bg-luxury-card border border-gold-600/30 rounded-3xl p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-full flex items-center justify-between pb-3 border-b border-gray-800 mb-3">
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-gold-500" />
+                <h3 className="text-sm font-bold text-white">إيصال التحويل الإلكتروني - معاينة كاملة</h3>
+              </div>
+              <button
+                onClick={() => setViewReceiptModalUrl(null)}
+                className="p-1.5 bg-gray-800 hover:bg-red-600 text-gray-300 hover:text-white rounded-full transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="w-full overflow-auto max-h-[75vh] flex items-center justify-center rounded-2xl bg-black/80 p-2">
+              <img
+                src={viewReceiptModalUrl}
+                alt="Full Size Receipt"
+                className="max-w-full max-h-[70vh] object-contain rounded-xl shadow-lg"
+              />
+            </div>
+            <div className="w-full flex items-center justify-between pt-3 mt-3 border-t border-gray-800">
+              <a
+                href={viewReceiptModalUrl}
+                download="electronic_receipt.jpg"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="py-2 px-4 bg-luxury-card border border-gold-600/40 hover:bg-gray-800 text-gold-400 text-xs font-bold rounded-xl flex items-center gap-2 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                تحميل صورة الإيصال
+              </a>
+              <button
+                onClick={() => setViewReceiptModalUrl(null)}
+                className="py-2 px-6 bg-gold-600 hover:bg-gold-500 text-black font-extrabold text-xs rounded-xl cursor-pointer"
+              >
+                إغلاق النافذة
+              </button>
+            </div>
           </div>
         </div>
       )}

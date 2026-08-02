@@ -35,6 +35,7 @@ import {
 import { dbService } from '../dbService';
 import { Invoice, InvoiceItem, Customer, AppSettings, PaymentType, ReturnTransaction } from '../types';
 import { createInvoicePDF, shareInvoicePDFToWhatsApp } from '../utils/pdfInvoiceGenerator';
+import { getPaymentMethodLabel, getPaymentMethodBadgeClass } from '../utils/paymentUtils';
 
 interface InvoiceHistoryViewProps {
   onShowSuccessAlert: (msg: string) => void;
@@ -78,6 +79,7 @@ export default function InvoiceHistoryView({
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>([]);
   const [showDetailModal, setShowDetailModal] = useState<boolean>(false);
+  const [viewReceiptModalUrl, setViewReceiptModalUrl] = useState<string | null>(null);
 
   // Admin Archive Dialog
   const [showArchiveConfirm, setShowArchiveConfirm] = useState<boolean>(false);
@@ -430,7 +432,15 @@ export default function InvoiceHistoryView({
 
       // 5. Search Payment Type
       if (searchPaymentType !== 'ALL') {
-        if (inv.payment_type !== searchPaymentType) {
+        if (searchPaymentType === 'VODAFONE_CASH') {
+          if (inv.payment_method !== 'VODAFONE_CASH') return false;
+        } else if (searchPaymentType === 'INSTAPAY' || searchPaymentType === 'BANK_TRANSFER') {
+          if (inv.payment_method !== 'BANK_TRANSFER' && inv.payment_method !== 'INSTAPAY') return false;
+        } else if (searchPaymentType === 'CASH') {
+          if (inv.payment_type !== 'CASH' && inv.payment_method !== 'CASH') return false;
+        } else if (searchPaymentType === 'CREDIT') {
+          if (inv.payment_type !== 'CREDIT' && inv.payment_method !== 'CREDIT') return false;
+        } else if (inv.payment_type !== searchPaymentType && inv.payment_method !== searchPaymentType) {
           return false;
         }
       }
@@ -512,7 +522,9 @@ export default function InvoiceHistoryView({
             <div>رقم الفاتورة: <b>${invoice.invoice_number}</b></div>
             <div>التاريخ: ${originalDate.toLocaleDateString('ar-EG')} - ${originalDate.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}</div>
             <div>الكاشير: ${invoice.cashier_name}</div>
-            <div>طريقة الدفع: ${invoice.payment_type === 'CASH' ? 'كاش نقدي' : invoice.payment_type === 'CREDIT' ? 'ذمم بالآجل' : 'مجزأ نقدي + آجل'}</div>
+            <div>طريقة الدفع: <b>${getPaymentMethodLabel(invoice)}</b></div>
+            ${(invoice.sender_phone || invoice.senderPhone) ? `<div>رقم المحول: <b>${invoice.sender_phone || invoice.senderPhone}</b></div>` : ''}
+            ${(invoice.reference_number || invoice.referenceNumber) ? `<div>رقم المرجع: <b>${invoice.reference_number || invoice.referenceNumber}</b></div>` : ''}
             <div>حالة السداد: <b>${
               invoice.payment_status === 'PAID' ? 'مدفوعة بالكامل' :
               invoice.payment_status === 'PARTIAL' ? 'مدفوعة جزئياً' :
@@ -629,7 +641,9 @@ export default function InvoiceHistoryView({
           <div class="meta-item"><span>تاريخ الإصدار:</span><span>${originalDate.toLocaleDateString('ar-EG')} ${originalDate.toLocaleTimeString('ar-EG')}</span></div>
           <div class="meta-item"><span>رقم الطاولة:</span><b>${invoice.table_number || 'غير متوفر'}</b></div>
           <div class="meta-item"><span>الكاشير المسؤول:</span><span>${invoice.cashier_name}</span></div>
-          <div class="meta-item"><span>طريقة الدفع:</span><span>${invoice.payment_type === 'CASH' ? 'نقدي كاش' : 'آجل على الحساب'}</span></div>
+          <div class="meta-item"><span>طريقة الدفع:</span><b>${getPaymentMethodLabel(invoice)}</b></div>
+          ${(invoice.sender_phone || invoice.senderPhone) ? `<div class="meta-item"><span>رقم المحول:</span><b>${invoice.sender_phone || invoice.senderPhone}</b></div>` : ''}
+          ${(invoice.reference_number || invoice.referenceNumber) ? `<div class="meta-item"><span>رقم المرجع:</span><b>${invoice.reference_number || invoice.referenceNumber}</b></div>` : ''}
           <div class="meta-item"><span>حالة السداد:</span><b>${
             invoice.payment_status === 'PAID' ? 'مدفوعة بالكامل' :
             invoice.payment_status === 'PARTIAL' ? 'مدفوعة جزئياً' :
@@ -858,6 +872,8 @@ export default function InvoiceHistoryView({
             >
               <option value="ALL">جميع طرق السداد</option>
               <option value="CASH">دفع نقدي كاش (CASH)</option>
+              <option value="VODAFONE_CASH">📱 فودافون كاش (Vodafone Cash)</option>
+              <option value="INSTAPAY">⚡ إنستا باي (InstaPay)</option>
               <option value="CREDIT">آجل على الذمم (CREDIT)</option>
               <option value="SPLIT">دفع مجزأ / مركب</option>
             </select>
@@ -994,22 +1010,9 @@ export default function InvoiceHistoryView({
                         )}
                       </td>
                       <td className="py-4 px-3">
-                        {inv.payment_type === 'CASH' ? (
-                          <span className="px-2 py-0.5 bg-emerald-950/40 text-emerald-400 border border-emerald-950 text-[10px] font-bold rounded-md inline-flex items-center gap-1">
-                            <Coins className="w-3 h-3" />
-                            كاش نقدي
-                          </span>
-                        ) : inv.payment_type === 'CREDIT' ? (
-                          <span className="px-2 py-0.5 bg-amber-950/40 text-amber-500 border border-amber-950 text-[10px] font-bold rounded-md inline-flex items-center gap-1">
-                            <User className="w-3 h-3" />
-                            ذمم آجلة
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 bg-purple-950/40 text-purple-400 border border-purple-950 text-[10px] font-bold rounded-md inline-flex items-center gap-1">
-                            <CreditCard className="w-3 h-3" />
-                            دفع مركب
-                          </span>
-                        )}
+                        <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md inline-flex items-center gap-1 ${getPaymentMethodBadgeClass(inv.payment_method, inv.payment_type)}`}>
+                          {getPaymentMethodLabel(inv)}
+                        </span>
                       </td>
                       <td className="py-4 px-3">
                         {inv.payment_status === 'PAID' ? (
@@ -1094,7 +1097,7 @@ export default function InvoiceHistoryView({
                 <p>تاريخ المعاملة: {new Date(selectedInvoice.invoice_date).toLocaleDateString('ar-EG')} - {new Date(selectedInvoice.invoice_date).toLocaleTimeString('ar-EG')}</p>
                 <p>الكاشير المسؤول: <span className="font-bold text-black">{selectedInvoice.cashier_name}</span></p>
                 <p>رقم الطاولة: <span className="font-extrabold text-black">{selectedInvoice.table_number || 'غير محدد'}</span></p>
-                <p>طريقة الدفع: <span className="font-bold text-black">{selectedInvoice.payment_type === 'CASH' ? 'كاش نقدي' : selectedInvoice.payment_type === 'CREDIT' ? 'ذمم آجلة بالكامل' : 'مركب نقدي/آجل'}</span></p>
+                <p>طريقة الدفع: <span className="font-bold text-black">{getPaymentMethodLabel(selectedInvoice)}</span></p>
                 <p>حالة السداد: <span className={`font-bold ${
                   selectedInvoice.payment_status === 'PAID' ? 'text-emerald-600' :
                   selectedInvoice.payment_status === 'PARTIAL' ? 'text-amber-600' :
@@ -1108,6 +1111,33 @@ export default function InvoiceHistoryView({
                 }</span></p>
                 {selectedInvoice.customer_id && (
                   <p>العميل: <span className="font-bold text-black">{(customers.find(c => c.id === selectedInvoice.customer_id))?.full_name}</span></p>
+                )}
+                {(selectedInvoice.sender_phone || selectedInvoice.senderPhone) && (
+                  <p className="font-bold text-black">رقم المحول: <span className="font-mono dir-ltr">{selectedInvoice.sender_phone || selectedInvoice.senderPhone}</span></p>
+                )}
+                {(selectedInvoice.reference_number || selectedInvoice.referenceNumber) && (
+                  <p className="font-bold text-gray-800">رقم المرجع: <span className="font-mono">{selectedInvoice.reference_number || selectedInvoice.referenceNumber}</span></p>
+                )}
+                {(selectedInvoice.receipt_image_url || selectedInvoice.receiptImageUrl) && (
+                  <div className="pt-1 flex items-center justify-between bg-gray-100 p-1.5 rounded-lg border border-gray-300 my-1">
+                    <div className="flex items-center gap-1.5">
+                      <img
+                        src={selectedInvoice.receipt_image_url || selectedInvoice.receiptImageUrl}
+                        alt="Receipt Thumbnail"
+                        className="w-8 h-8 object-cover rounded border border-gray-400 cursor-pointer"
+                        onClick={() => setViewReceiptModalUrl(selectedInvoice.receipt_image_url || selectedInvoice.receiptImageUrl || null)}
+                      />
+                      <span className="text-[9px] font-bold text-gray-700">إيصال تحويل مرفق</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setViewReceiptModalUrl(selectedInvoice.receipt_image_url || selectedInvoice.receiptImageUrl || null)}
+                      className="px-2 py-0.5 bg-black text-gold-400 rounded text-[9px] font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <Eye className="w-3 h-3" />
+                      <span>عرض الإيصال</span>
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -1722,6 +1752,58 @@ export default function InvoiceHistoryView({
                   تأكيد وإعادة الفتح
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full Screen Electronic Transfer Receipt Viewer Modal */}
+      {viewReceiptModalUrl && (
+        <div
+          className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-4 animate-fade-in"
+          onClick={() => setViewReceiptModalUrl(null)}
+          dir="rtl"
+        >
+          <div
+            className="relative max-w-4xl max-h-[90vh] w-full flex flex-col items-center justify-center bg-luxury-card border border-gold-600/30 rounded-3xl p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-full flex items-center justify-between pb-3 border-b border-gray-800 mb-3">
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-gold-500" />
+                <h3 className="text-sm font-bold text-white">إيصال التحويل الإلكتروني - معاينة كاملة</h3>
+              </div>
+              <button
+                onClick={() => setViewReceiptModalUrl(null)}
+                className="p-1.5 bg-gray-800 hover:bg-red-600 text-gray-300 hover:text-white rounded-full transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="w-full overflow-auto max-h-[75vh] flex items-center justify-center rounded-2xl bg-black/80 p-2">
+              <img
+                src={viewReceiptModalUrl}
+                alt="Full Size Receipt"
+                className="max-w-full max-h-[70vh] object-contain rounded-xl shadow-lg"
+              />
+            </div>
+            <div className="w-full flex items-center justify-between pt-3 mt-3 border-t border-gray-800">
+              <a
+                href={viewReceiptModalUrl}
+                download="electronic_receipt.jpg"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="py-2 px-4 bg-luxury-card border border-gold-600/40 hover:bg-gray-800 text-gold-400 text-xs font-bold rounded-xl flex items-center gap-2 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                تحميل صورة الإيصال
+              </a>
+              <button
+                onClick={() => setViewReceiptModalUrl(null)}
+                className="py-2 px-6 bg-gold-600 hover:bg-gold-500 text-black font-extrabold text-xs rounded-xl cursor-pointer"
+              >
+                إغلاق النافذة
+              </button>
             </div>
           </div>
         </div>

@@ -52,6 +52,7 @@ import {
   PartnerDrawing,
   UpdateLog
 } from './types';
+import { sanitizePaymentMethod } from './utils/paymentUtils';
 
 import { safeStorage } from './lib/safeStorage';
 export { safeStorage };
@@ -1164,7 +1165,9 @@ export const dbService = {
     referenceNumber?: string,
     paymentNotes?: string,
     walletDeduction = 0,
-    paymentNumber?: string
+    paymentNumber?: string,
+    senderPhone?: string,
+    receiptImageUrl?: string
   ): { invoice: Invoice; items: InvoiceItem[] } => {
     const invoices = dbService.getInvoices();
     const invoiceItemsList = dbService.getInvoiceItems();
@@ -1218,6 +1221,17 @@ export const dbService = {
     const invoiceId = `inv_${Date.now()}`;
     const invoiceDate = new Date().toISOString();
 
+    const appSettings = dbService.getSettings();
+    const sanitizedMethod = sanitizePaymentMethod(
+      paymentMethod,
+      senderPhone,
+      referenceNumber,
+      receiptImageUrl,
+      paymentNumber,
+      appSettings.vodafone_cash_number,
+      appSettings.instapay_number
+    );
+
     const newInvoice: Invoice = {
       id: invoiceId,
       invoice_number: invoiceNum,
@@ -1241,8 +1255,12 @@ export const dbService = {
       invoice_date: invoiceDate,
       notes: invoiceNotes,
       table_number: tableNumber,
-      payment_method: paymentMethod || (paymentType === 'CREDIT' ? 'CREDIT' : 'CASH'),
+      payment_method: sanitizedMethod || (paymentType === 'CREDIT' ? 'CREDIT' : 'CASH'),
       reference_number: referenceNumber || '',
+      sender_phone: senderPhone || '',
+      senderPhone: senderPhone || '',
+      receipt_image_url: receiptImageUrl || '',
+      receiptImageUrl: receiptImageUrl || '',
       payment_number: paymentNumber,
       payment_date: new Date().toISOString().split('T')[0],
       payment_time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
@@ -1557,7 +1575,9 @@ export const dbService = {
     paymentMethod?: string,
     referenceNumber?: string,
     paymentNotes?: string,
-    status: InvoiceStatus = 'OPEN'
+    status: InvoiceStatus = 'OPEN',
+    senderPhone?: string,
+    receiptImageUrl?: string
   ): { invoice: Invoice; items: InvoiceItem[] } => {
     const invoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
     const invoiceItemsList = getLocal<InvoiceItem[]>(KEYS.INVOICE_ITEMS, []);
@@ -1580,10 +1600,29 @@ export const dbService = {
     let invoiceId = id || `inv_${Date.now()}`;
     let existingInvIdx = id ? invoices.findIndex(i => i.id === id) : -1;
 
+    const appSettings = dbService.getSettings();
+
     let invoice: Invoice;
     if (existingInvIdx > -1) {
+      const existingInv = invoices[existingInvIdx];
+      const effSenderPhone = senderPhone !== undefined ? senderPhone : (existingInv.sender_phone || existingInv.senderPhone || '');
+      const effRefNo = referenceNumber !== undefined ? referenceNumber : (existingInv.reference_number || existingInv.referenceNumber || '');
+      const effReceiptUrl = receiptImageUrl !== undefined ? receiptImageUrl : (existingInv.receipt_image_url || existingInv.receiptImageUrl || '');
+      const effPayNum = existingInv.payment_number || '';
+      const effMethod = paymentMethod || existingInv.payment_method;
+
+      const sanitizedMethod = sanitizePaymentMethod(
+        effMethod,
+        effSenderPhone,
+        effRefNo,
+        effReceiptUrl,
+        effPayNum,
+        appSettings.vodafone_cash_number,
+        appSettings.instapay_number
+      );
+
       invoice = {
-        ...invoices[existingInvIdx],
+        ...existingInv,
         customer_id: customerId,
         payment_type: paymentType,
         subtotal,
@@ -1595,8 +1634,12 @@ export const dbService = {
         invoice_status: status,
         notes: invoiceNotes,
         table_number: tableNumber,
-        payment_method: paymentMethod || 'CASH',
-        reference_number: referenceNumber || '',
+        payment_method: sanitizedMethod || 'CASH',
+        reference_number: effRefNo,
+        sender_phone: effSenderPhone,
+        senderPhone: effSenderPhone,
+        receipt_image_url: effReceiptUrl,
+        receiptImageUrl: effReceiptUrl,
         updated_at: dateStr
       };
       invoices[existingInvIdx] = invoice;
@@ -1604,6 +1647,16 @@ export const dbService = {
       const year = new Date().getFullYear();
       const seq = String(invoices.length + 1).padStart(5, '0');
       const invoiceNum = `INV-${year}-${seq}`;
+
+      const sanitizedMethod = sanitizePaymentMethod(
+        paymentMethod,
+        senderPhone,
+        referenceNumber,
+        receiptImageUrl,
+        '',
+        appSettings.vodafone_cash_number,
+        appSettings.instapay_number
+      );
 
       invoice = {
         id: invoiceId,
@@ -1621,8 +1674,12 @@ export const dbService = {
         invoice_date: dateStr,
         notes: invoiceNotes,
         table_number: tableNumber,
-        payment_method: paymentMethod || 'CASH',
+        payment_method: sanitizedMethod || 'CASH',
         reference_number: referenceNumber || '',
+        sender_phone: senderPhone || '',
+        senderPhone: senderPhone || '',
+        receipt_image_url: receiptImageUrl || '',
+        receiptImageUrl: receiptImageUrl || '',
         payment_date: dateStr.split('T')[0],
         payment_time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         created_at: dateStr,
@@ -1678,7 +1735,9 @@ export const dbService = {
     referenceNumber?: string,
     paymentNotes?: string,
     walletDeduction = 0,
-    paymentNumber?: string
+    paymentNumber?: string,
+    senderPhone?: string,
+    receiptImageUrl?: string
   ): { invoice: Invoice; items: InvoiceItem[] } => {
     const invoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
     const invoiceItemsList = getLocal<InvoiceItem[]>(KEYS.INVOICE_ITEMS, []);
@@ -1727,6 +1786,23 @@ export const dbService = {
       actualPaid = total;
     }
 
+    const appSettings = dbService.getSettings();
+    const effSenderPhone = senderPhone !== undefined ? senderPhone : (existingInvoice.sender_phone || existingInvoice.senderPhone || '');
+    const effRefNo = referenceNumber || existingInvoice.reference_number || existingInvoice.referenceNumber || '';
+    const effReceiptUrl = receiptImageUrl !== undefined ? receiptImageUrl : (existingInvoice.receipt_image_url || existingInvoice.receiptImageUrl || '');
+    const effPayNum = paymentNumber || existingInvoice.payment_number || '';
+    const effMethod = paymentMethod || existingInvoice.payment_method;
+
+    const sanitizedMethod = sanitizePaymentMethod(
+      effMethod,
+      effSenderPhone,
+      effRefNo,
+      effReceiptUrl,
+      effPayNum,
+      appSettings.vodafone_cash_number,
+      appSettings.instapay_number
+    );
+
     const updatedInvoice: Invoice = {
       ...existingInvoice,
       customer_id: customerId,
@@ -1748,9 +1824,13 @@ export const dbService = {
       cashier_name: cashierName,
       notes: invoiceNotes,
       table_number: tableNumber,
-      payment_method: paymentMethod || (paymentType === 'CREDIT' ? 'CREDIT' : 'CASH'),
-      reference_number: referenceNumber || '',
-      payment_number: paymentNumber,
+      payment_method: sanitizedMethod || (paymentType === 'CREDIT' ? 'CREDIT' : 'CASH'),
+      reference_number: effRefNo,
+      sender_phone: effSenderPhone,
+      senderPhone: effSenderPhone,
+      receipt_image_url: effReceiptUrl,
+      receiptImageUrl: effReceiptUrl,
+      payment_number: effPayNum,
       payment_date: dateStr.split('T')[0],
       payment_time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       updated_at: dateStr,
@@ -4245,7 +4325,7 @@ export const dbService = {
     return list;
   },
 
-  deleteInventoryBatch: (id: string): { success: boolean; message?: string; list: InventoryBatch[] } => {
+  deleteInventoryBatch: (id: string, operator: string = 'المالك'): { success: boolean; message?: string; list: InventoryBatch[] } => {
     const list = dbService.getInventoryBatches();
     const batchToDelete = list.find(b => b.id === id);
     if (!batchToDelete) {
@@ -4289,11 +4369,139 @@ export const dbService = {
       quantity_changed: -batchToDelete.original_quantity,
       previous_quantity: batchToDelete.original_quantity,
       new_quantity: 0,
-      operator: 'المالك',
+      operator: operator || 'المالك',
       reason: 'حذف الدفعة قبل الاستخدام'
     });
 
     return { success: true, list: filtered };
+  },
+
+  editInventoryBatch: (
+    batchId: string,
+    updatedData: {
+      item_name?: string;
+      supplier?: string;
+      purchase_date?: string;
+      expiry_date?: string;
+      invoice_number?: string;
+      notes?: string;
+      purchase_price?: number;
+      raw_material_qty?: number;
+      yield_capacity?: number;
+      yield_unit?: string;
+      unit?: string;
+    },
+    operator: string = 'المالك'
+  ): { success: boolean; message?: string; list: InventoryBatch[]; batch?: InventoryBatch } => {
+    const list = dbService.getInventoryBatches();
+    const idx = list.findIndex(b => b.id === batchId);
+    if (idx === -1) {
+      return { success: false, message: 'الدفعة غير موجودة!', list };
+    }
+
+    const b = { ...list[idx] };
+    const isConsumed = (b.consumed_quantity || 0) > 0;
+    const oldYieldCap = b.yield_capacity || b.original_quantity || 0;
+    const oldRawQty = b.raw_material_qty || 1;
+
+    if (isConsumed) {
+      // Safe fields edit ONLY when batch is already consumed
+      if (updatedData.supplier !== undefined) b.supplier = updatedData.supplier.trim();
+      if (updatedData.purchase_date !== undefined) b.purchase_date = updatedData.purchase_date;
+      if (updatedData.expiry_date !== undefined) b.expiry_date = updatedData.expiry_date;
+      if (updatedData.invoice_number !== undefined) b.invoice_number = updatedData.invoice_number.trim();
+      if (updatedData.notes !== undefined) b.notes = updatedData.notes.trim();
+    } else {
+      // Full fields edit allowed when batch has not been used yet
+      if (updatedData.item_name !== undefined && updatedData.item_name.trim()) {
+        b.item_name = updatedData.item_name.trim();
+      }
+      if (updatedData.supplier !== undefined) b.supplier = updatedData.supplier.trim();
+      if (updatedData.purchase_date !== undefined) b.purchase_date = updatedData.purchase_date;
+      if (updatedData.expiry_date !== undefined) b.expiry_date = updatedData.expiry_date;
+      if (updatedData.invoice_number !== undefined) b.invoice_number = updatedData.invoice_number.trim();
+      if (updatedData.notes !== undefined) b.notes = updatedData.notes.trim();
+
+      if (updatedData.purchase_price !== undefined && !isNaN(updatedData.purchase_price) && updatedData.purchase_price >= 0) {
+        b.purchase_price = updatedData.purchase_price;
+      }
+
+      if (updatedData.raw_material_qty !== undefined && !isNaN(updatedData.raw_material_qty) && updatedData.raw_material_qty > 0) {
+        const newRawQty = updatedData.raw_material_qty;
+        // Adjust Raw Material stock if linked
+        if (b.item_id || b.item_name) {
+          const rawMaterials = dbService.getRawMaterials();
+          const rm = rawMaterials.find(r =>
+            r.id === b.item_id ||
+            r.name.trim().toLowerCase() === b.item_name.trim().toLowerCase()
+          );
+          if (rm) {
+            const diff = newRawQty - oldRawQty;
+            const newRmQty = Math.max(0, rm.current_quantity + diff);
+            const newUnitCost = b.purchase_price > 0 && newRawQty > 0 ? b.purchase_price / newRawQty : rm.unit_cost;
+            dbService.saveRawMaterial({
+              ...rm,
+              current_quantity: newRmQty,
+              unit_cost: newUnitCost
+            });
+          }
+        }
+        b.raw_material_qty = newRawQty;
+      }
+
+      if (updatedData.yield_capacity !== undefined && !isNaN(updatedData.yield_capacity) && updatedData.yield_capacity > 0) {
+        b.yield_capacity = updatedData.yield_capacity;
+        b.original_quantity = updatedData.yield_capacity;
+      }
+
+      if (updatedData.yield_unit !== undefined && updatedData.yield_unit.trim()) {
+        b.yield_unit = updatedData.yield_unit.trim();
+      }
+
+      if (updatedData.unit !== undefined && updatedData.unit.trim()) {
+        b.unit = updatedData.unit.trim();
+      }
+    }
+
+    // Recalculate remaining quantities and financial metrics
+    const cap = b.yield_capacity || b.original_quantity;
+    b.remaining_quantity = Math.max(0, cap - (b.consumed_quantity || 0));
+    b.remaining_cups = b.remaining_quantity;
+
+    const isSugar = isSugarMaterial(b.item_name);
+    b.total_revenue = isSugar ? 0 : (b.total_revenue || 0);
+    b.net_profit = isSugar ? 0 : (b.total_revenue - b.purchase_price);
+    b.profit_margin = isSugar ? 0 : (b.purchase_price > 0 ? ((b.total_revenue - b.purchase_price) / b.purchase_price) * 100 : 0);
+
+    // Auto status
+    if (b.remaining_quantity <= 0) {
+      b.status = 'COMPLETED';
+      if (!b.ended_at) b.ended_at = new Date().toISOString();
+    } else if (b.remaining_quantity / cap <= 0.2) {
+      b.status = 'LOW';
+    } else {
+      b.status = 'ACTIVE';
+    }
+
+    list[idx] = b;
+    setLocal(KEYS.INVENTORY_BATCHES, list);
+
+    // Log edit operation
+    dbService.addInventoryBatchLog({
+      batch_id: b.id,
+      batch_serial: b.batch_serial,
+      item_name: b.item_name,
+      action_type: 'EDIT_BATCH',
+      quantity_changed: (b.yield_capacity || b.original_quantity) - oldYieldCap,
+      previous_quantity: oldYieldCap,
+      new_quantity: b.yield_capacity || b.original_quantity,
+      operator: operator || 'المالك',
+      reason: isConsumed
+        ? `تعديل معلومات عامة آمنة للدفعة المستهلكة (المورد: ${b.supplier || 'بدون'}, التوريد: ${b.purchase_date})`
+        : `تعديل كافة بيانات الدفعة غير المستهلكة (التكلفة: ${b.purchase_price} ج.م, السعة: ${b.original_quantity} ${b.yield_unit || 'كوب'})`
+    });
+
+    return { success: true, list, batch: b };
   },
 
   getInventoryBatchLogs: (): InventoryBatchLog[] => {

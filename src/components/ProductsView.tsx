@@ -44,10 +44,10 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
   const [pCategoryId, setPCategoryId] = useState<string>('');
   const [pBarcode, setPBarcode] = useState<string>('');
   const [pIcon, setPIcon] = useState<string>('☕');
-  const [pSellingPrice, setPSellingPrice] = useState<number>(35);
-  const [pCostPrice, setPCostPrice] = useState<number>(12);
-  const [pCurrentStock, setPCurrentStock] = useState<number>(100);
-  const [pMinStock, setPMinStock] = useState<number>(10);
+  const [pSellingPrice, setPSellingPrice] = useState<string>('35');
+  const [pCostPrice, setPCostPrice] = useState<string>('12');
+  const [pCurrentStock, setPCurrentStock] = useState<string>('0');
+  const [pMinStock, setPMinStock] = useState<string>('5');
   const [pUnit, setPUnit] = useState<string>('كوب');
   const [pNotes, setPNotes] = useState<string>('');
 
@@ -99,10 +99,10 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
     setPCategoryId(categories[0]?.id || '');
     setPBarcode(`622${Date.now().toString().slice(-4)}`);
     setPIcon('☕');
-    setPSellingPrice(0);
-    setPCostPrice(0);
-    setPCurrentStock(0); // Default opening stock to 0 actual count
-    setPMinStock(5);
+    setPSellingPrice('35');
+    setPCostPrice('12');
+    setPCurrentStock('0'); // Default opening stock to 0 actual count
+    setPMinStock('5');
     setPUnit('كوب');
     setPNotes('');
     setPRecipeIngredients([]);
@@ -116,10 +116,10 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
     setPCategoryId(prod.category_id);
     setPBarcode(prod.barcode);
     setPIcon(prod.image);
-    setPSellingPrice(prod.selling_price);
-    setPCostPrice(prod.cost_price);
-    setPCurrentStock(prod.current_stock);
-    setPMinStock(prod.minimum_stock);
+    setPSellingPrice(prod.selling_price.toString());
+    setPCostPrice(prod.cost_price.toString());
+    setPCurrentStock(prod.current_stock.toString());
+    setPMinStock(prod.minimum_stock.toString());
     setPUnit(prod.unit);
     setPNotes(prod.notes);
     setPRecipeIngredients(prod.recipe_ingredients || []);
@@ -141,7 +141,8 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
 
   // Calculate actual dynamic available stock based on raw material inventory
   const calculatedStockFromRaw = useMemo(() => {
-    if (pRecipeIngredients.length === 0) return pCurrentStock;
+    const numStock = parseFloat(pCurrentStock) || 0;
+    if (pRecipeIngredients.length === 0) return numStock;
     let minStock = Infinity;
     pRecipeIngredients.forEach(ing => {
       const rm = allRawMaterials.find(r => r.id === ing.raw_material_id);
@@ -155,13 +156,26 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
 
   const handleSaveProduct = (e: React.FormEvent) => {
     e.preventDefault();
+
+    const sellingPriceNum = parseFloat(pSellingPrice);
+    const costPriceNum = parseFloat(pCostPrice);
+    const currentStockNum = parseFloat(pCurrentStock);
+    const minStockNum = parseFloat(pMinStock);
     
-    if (pSellingPrice < 0 || pCostPrice < 0) {
-      onShowWarningAlert('الأسعار لا يمكن أن تكون قيم سالبة!');
+    if (isNaN(sellingPriceNum) || sellingPriceNum < 0) {
+      onShowWarningAlert('يرجى إدخال سعر بيع صحيح ومقبول (أرقام صحيحة أو عشرية، مثل: 35 أو 35.50)!');
       return;
     }
-    if (pCurrentStock < 0 || pMinStock < 0) {
+    if (isNaN(costPriceNum) || costPriceNum < 0) {
+      onShowWarningAlert('يرجى إدخال سعر تكلفة صحيح (أرقام صحيحة أو عشرية، مثل: 12 أو 12.25)!');
+      return;
+    }
+    if (isNaN(currentStockNum) || currentStockNum < 0) {
       onShowWarningAlert('كميات المخزون لا يمكن أن تكون سالبة!');
+      return;
+    }
+    if (isNaN(minStockNum) || minStockNum < 0) {
+      onShowWarningAlert('حد التنبيه للمخزون لا يمكن أن يكون سالباً!');
       return;
     }
 
@@ -172,10 +186,10 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
       name_en: pNameEn,
       barcode: pBarcode,
       image: pIcon,
-      selling_price: pSellingPrice,
-      cost_price: pCostPrice,
-      current_stock: pCurrentStock,
-      minimum_stock: pMinStock,
+      selling_price: sellingPriceNum,
+      cost_price: costPriceNum,
+      current_stock: currentStockNum,
+      minimum_stock: minStockNum,
       unit: pUnit,
       is_favorite: editingProduct ? editingProduct.is_favorite : false,
       is_available: true,
@@ -626,10 +640,10 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
                 <input
                   id="p-cost-price"
                   type="number"
-                  step="0.01"
+                  step="any"
                   required
                   value={pCostPrice}
-                  onChange={(e) => setPCostPrice(parseFloat(e.target.value) || 0)}
+                  onChange={(e) => setPCostPrice(e.target.value)}
                   className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-600 font-mono text-center"
                 />
                 <span className="text-[9px] text-gray-500 block mt-1">
@@ -642,10 +656,10 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
                 <input
                   id="p-selling-price"
                   type="number"
-                  step="0.5"
+                  step="any"
                   required
                   value={pSellingPrice}
-                  onChange={(e) => setPSellingPrice(parseFloat(e.target.value) || 0)}
+                  onChange={(e) => setPSellingPrice(e.target.value)}
                   className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-600 font-mono text-center text-gold-500 font-bold"
                 />
               </div>
@@ -658,7 +672,7 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
                   step="any"
                   required
                   value={pCurrentStock}
-                  onChange={(e) => setPCurrentStock(parseFloat(e.target.value) || 0)}
+                  onChange={(e) => setPCurrentStock(e.target.value)}
                   placeholder="أدخل رصيد المخزون المتوفر فعلياً"
                   className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-600 font-mono text-center"
                 />
@@ -675,7 +689,7 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
                   step="any"
                   required
                   value={pMinStock}
-                  onChange={(e) => setPMinStock(parseFloat(e.target.value) || 0)}
+                  onChange={(e) => setPMinStock(e.target.value)}
                   placeholder="الحد الأدنى"
                   className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-600 font-mono text-center"
                 />
