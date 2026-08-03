@@ -262,7 +262,7 @@ const defaultSettings: AppSettings = {
   custom_expense_categories: [],
   auto_update_checks_enabled: true,
   last_update_check_date: new Date().toISOString(),
-  last_installed_version: '4.2.5',
+  last_installed_version: '4.3.0',
   force_update_enabled: false,
 };
 
