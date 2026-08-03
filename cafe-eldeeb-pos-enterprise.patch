@@ -152,7 +152,7 @@ index 0000000..bb06f0b
 @@ -0,0 +1,6 @@
 +# Google Cloud Project "Cafe-Eldeeb-POS" Client ID for Google Drive & Gmail OAuth
 +# Obtain from Google Cloud Console -> APIs & Services -> Credentials -> OAuth 2.0 Client IDs
-+VITE_GOOGLE_CLIENT_ID=365176394209-jd43on2d9q2s4vb4h6crpbbebnhckiet.apps.googleusercontent.com
++VITE_GOOGLE_CLIENT_ID=864337937711-gi69esgs44rn7d2li3mb6bfjhdspe2pv.apps.googleusercontent.com
 +
 +# Server-side Gemini AI Key
 +GEMINI_API_KEY=
@@ -1989,14 +1989,14 @@ index 0000000..b3a272c
 +++ b/firebase-applet-config.json
 @@ -0,0 +1,11 @@
 +{
-+  "projectId": "subtle-chimera-kpwwt",
-+  "appId": "1:365176394209:web:23b3813b66220be24f82a0",
-+  "apiKey": "AIzaSyBbeG0-PbuAWMLQUx4mgkvGpA_YSsHK37Y",
-+  "authDomain": "subtle-chimera-kpwwt.firebaseapp.com",
-+  "storageBucket": "subtle-chimera-kpwwt.firebasestorage.app",
-+  "messagingSenderId": "365176394209",
-+  "measurementId": "",
-+  "oAuthClientId": "365176394209-jd43on2d9q2s4vb4h6crpbbebnhckiet.apps.googleusercontent.com",
++  "projectId": "cafe-eldeeb-pos",
++  "appId": "1:864337937711:web:6ac0c52e98515f602a4dda",
++  "apiKey": "AIzaSyA-rOKaAUEmfuNsObbduYLQcDLY2s8WAes",
++  "authDomain": "cafe-eldeeb-pos.firebaseapp.com",
++  "storageBucket": "cafe-eldeeb-pos.firebasestorage.app",
++  "messagingSenderId": "864337937711",
++  "measurementId": "G-6JK5ZJFMH0",
++  "oAuthClientId": "864337937711-gi69esgs44rn7d2li3mb6bfjhdspe2pv.apps.googleusercontent.com",
 +  "recaptchaSiteKey": ""
 +}
 \ No newline at end of file
