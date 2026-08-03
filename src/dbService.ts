@@ -50,9 +50,14 @@ import {
   UserRole,
   Partner,
   PartnerDrawing,
-  UpdateLog
+  UpdateLog,
+  BaristaOrder,
+  BaristaOrderItem,
+  BaristaOrderStatus,
+  OperationalStatus
 } from './types';
 import { sanitizePaymentMethod } from './utils/paymentUtils';
+import { playBaristaNewOrderSound, playOrderReadySound } from './lib/audioService';
 
 import { safeStorage } from './lib/safeStorage';
 export { safeStorage };
@@ -167,6 +172,7 @@ const KEYS = {
   PARTNERS: 'cafe_partners',
   PARTNER_DRAWINGS: 'cafe_partner_drawings',
   UPDATE_LOGS: 'cafe_update_logs',
+  BARISTA_ORDERS: 'cafe_barista_orders',
 };
 
 // Sync current client database state to the server
@@ -505,8 +511,121 @@ export const defaultAuthUsers: AuthUser[] = [
     phone: '01100000000',
     is_active: true,
     created_at: new Date().toISOString()
+  },
+  {
+    id: 'user_barista',
+    username: 'barista',
+    name: 'محضر المشروبات / البارستا',
+    role: 'Barista',
+    passwordHash: '123456',
+    phone: '01200000000',
+    is_active: true,
+    created_at: new Date().toISOString()
   }
 ];
+
+export const getItemCategoryIcon = (categoryName = '', productName = ''): string => {
+  const cat = (categoryName || '').toLowerCase();
+  const prod = (productName || '').toLowerCase();
+  const combined = `${cat} ${prod}`;
+
+  // 1. Shisha / Smoke
+  if (
+    combined.includes('شيشة') ||
+    combined.includes('شيشه') ||
+    combined.includes('معسل') ||
+    combined.includes('سلوم') ||
+    combined.includes('حجر') ||
+    combined.includes('قص') ||
+    combined.includes('فاخر') ||
+    combined.includes('تفاحتين') ||
+    combined.includes('shisha') ||
+    combined.includes('hookah')
+  ) {
+    return '💨';
+  }
+
+  // 2. Juice / Cocktails / Soft Drinks
+  if (
+    combined.includes('عصير') ||
+    combined.includes('عصائر') ||
+    combined.includes('كوكتيل') ||
+    combined.includes('فرابيه') ||
+    combined.includes('سموذي') ||
+    combined.includes('مانجو') ||
+    combined.includes('فراولة') ||
+    combined.includes('جوافة') ||
+    combined.includes('برتقال') ||
+    combined.includes('ليمون') ||
+    combined.includes('موخيتو') ||
+    combined.includes('موهيتو') ||
+    combined.includes('بيبسي') ||
+    combined.includes('كولا') ||
+    combined.includes('سبرايت') ||
+    combined.includes('فانتا') ||
+    combined.includes('ريدبول') ||
+    combined.includes('ريد بول') ||
+    combined.includes('شويبس') ||
+    combined.includes('مياه') ||
+    combined.includes('ماء') ||
+    combined.includes('soda') ||
+    combined.includes('juice') ||
+    combined.includes('smoothie') ||
+    combined.includes('cocktail') ||
+    combined.includes('frappe')
+  ) {
+    return '🥤';
+  }
+
+  // 3. Cold Drinks / Ice
+  if (
+    combined.includes('بارد') ||
+    combined.includes('ايس') ||
+    combined.includes('أيس') ||
+    combined.includes('مكس') ||
+    combined.includes('كولد') ||
+    combined.includes('iced') ||
+    combined.includes('cold') ||
+    combined.includes('ice')
+  ) {
+    return '🧊';
+  }
+
+  // 4. Hot Drinks
+  if (
+    combined.includes('ساخن') ||
+    combined.includes('قهوة') ||
+    combined.includes('شاي') ||
+    combined.includes('اسبريسو') ||
+    combined.includes('إسبريسو') ||
+    combined.includes('أمريكانو') ||
+    combined.includes('كابتشينو') ||
+    combined.includes('لاتيه') ||
+    combined.includes('نسكافيه') ||
+    combined.includes('ميكاتو') ||
+    combined.includes('ماكياتو') ||
+    combined.includes('موكا') ||
+    combined.includes('هوت شوكليت') ||
+    combined.includes('أعشاب') ||
+    combined.includes('اعشاب') ||
+    combined.includes('ينسون') ||
+    combined.includes('نعناع') ||
+    combined.includes('سحلب') ||
+    combined.includes('كرك') ||
+    combined.includes('تركية') ||
+    combined.includes('تركي') ||
+    combined.includes('hot') ||
+    combined.includes('coffee') ||
+    combined.includes('tea') ||
+    combined.includes('espresso') ||
+    combined.includes('cappuccino') ||
+    combined.includes('latte')
+  ) {
+    return '☕';
+  }
+
+  return '☕';
+};
 
 // Database Engine Interface
 export const isSugarMaterial = (itemOrName?: any): boolean => {
@@ -521,10 +640,20 @@ export const isSugarMaterial = (itemOrName?: any): boolean => {
 export const dbService = {
   // --- Employee Authentication & Roles ---
   getAuthUsers: (): AuthUser[] => {
-    const users = getLocal<AuthUser[]>(KEYS.AUTH_USERS, []);
+    let users = getLocal<AuthUser[]>(KEYS.AUTH_USERS, []);
     if (!users || users.length === 0) {
       setLocal(KEYS.AUTH_USERS, defaultAuthUsers);
       return defaultAuthUsers;
+    }
+    let updated = false;
+    defaultAuthUsers.forEach(defUser => {
+      if (!users.some(u => u.username.toLowerCase() === defUser.username.toLowerCase())) {
+        users.push(defUser);
+        updated = true;
+      }
+    });
+    if (updated) {
+      setLocal(KEYS.AUTH_USERS, users);
     }
     return users;
   },
@@ -1095,25 +1224,37 @@ export const dbService = {
 
   getInvoices: (includeOpen = false): Invoice[] => {
     const list = getLocal<Invoice[]>(KEYS.INVOICES, []);
+    const baristaOrders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
     const mapped = list.map(inv => {
       if (!inv.payment_status) {
         inv.payment_status = dbService.determinePaymentStatus(inv);
+      }
+      if (!inv.operational_status) {
+        const bo = baristaOrders.find(b => b.invoice_id === inv.id || b.order_number === inv.invoice_number);
+        inv.operational_status = bo ? bo.status : 'NEW';
       }
       return inv;
     });
     if (includeOpen) {
       return mapped;
     }
-    return mapped.filter(inv => inv.invoice_status !== 'OPEN');
+    return mapped.filter(inv => inv.invoice_status !== 'OPEN' && inv.invoice_status !== 'DRAFT');
   },
   getOpenInvoices: (): Invoice[] => {
     const list = getLocal<Invoice[]>(KEYS.INVOICES, []);
-    return list.filter(inv => inv.invoice_status === 'OPEN' || inv.invoice_status === 'DRAFT').map(inv => {
-      if (!inv.payment_status) {
-        inv.payment_status = dbService.determinePaymentStatus(inv);
-      }
-      return inv;
-    });
+    const baristaOrders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
+    return list
+      .filter(inv => inv.invoice_status === 'OPEN' || inv.invoice_status === 'DRAFT')
+      .map(inv => {
+        if (!inv.payment_status) {
+          inv.payment_status = dbService.determinePaymentStatus(inv);
+        }
+        if (!inv.operational_status) {
+          const bo = baristaOrders.find(b => b.invoice_id === inv.id || b.order_number === inv.invoice_number);
+          inv.operational_status = bo ? bo.status : 'NEW';
+        }
+        return inv;
+      });
   },
   getInvoiceById: (id: string): { invoice: Invoice; items: InvoiceItem[] } | null => {
     const list = getLocal<Invoice[]>(KEYS.INVOICES, []);
@@ -5173,5 +5314,155 @@ export const dbService = {
     const trimmed = logs.slice(0, 100);
     setLocal(KEYS.UPDATE_LOGS, trimmed);
     return newLog;
+  },
+
+  // --- BARISTA ORDER MANAGEMENT ---
+  getBaristaOrders: (): BaristaOrder[] => {
+    return getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
+  },
+
+  addBaristaOrder: (orderData: {
+    order_number: string;
+    invoice_id?: string;
+    table_number?: string;
+    customer_name?: string;
+    cashier_name?: string;
+    items: BaristaOrderItem[];
+    notes?: string;
+    status?: BaristaOrderStatus;
+    sent_time?: string;
+  }): BaristaOrder => {
+    const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+
+    const newOrder: BaristaOrder = {
+      id: `bar_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      order_number: orderData.order_number,
+      invoice_id: orderData.invoice_id,
+      table_number: orderData.table_number || '',
+      customer_name: orderData.customer_name || 'عميل مباشر',
+      cashier_name: orderData.cashier_name || 'الكاشير',
+      status: orderData.status || 'NEW',
+      items: orderData.items || [],
+      created_at: now.toISOString(),
+      updated_at: now.toISOString(),
+      sent_time: orderData.sent_time || timeStr,
+      notes: orderData.notes || ''
+    };
+
+    // If active order already exists for same order_number or invoice_id, update items and timestamp
+    const existingIdx = orders.findIndex(o =>
+      (orderData.invoice_id && o.invoice_id === orderData.invoice_id) ||
+      (o.order_number === newOrder.order_number && o.status !== 'DELIVERED')
+    );
+
+    if (existingIdx >= 0) {
+      orders[existingIdx] = {
+        ...orders[existingIdx],
+        ...newOrder,
+        id: orders[existingIdx].id,
+        updated_at: now.toISOString()
+      };
+    } else {
+      orders.unshift(newOrder);
+    }
+
+    setLocal(KEYS.BARISTA_ORDERS, orders);
+
+    // Play notification chime
+    playBaristaNewOrderSound();
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('barista_orders_updated'));
+      window.dispatchEvent(new CustomEvent('barista_new_order', { detail: { order: newOrder } }));
+    }
+
+    return newOrder;
+  },
+
+  updateBaristaOrderStatus: (orderId: string, status: BaristaOrderStatus): BaristaOrder | null => {
+    const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
+    const index = orders.findIndex(o => o.id === orderId || o.invoice_id === orderId || o.order_number === orderId);
+    if (index === -1) return null;
+
+    const updatedOrder: BaristaOrder = {
+      ...orders[index],
+      status,
+      updated_at: new Date().toISOString()
+    };
+    orders[index] = updatedOrder;
+    setLocal(KEYS.BARISTA_ORDERS, orders);
+
+    // Sync operational_status on corresponding invoice without changing invoice_status
+    const invoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
+    const invIdx = invoices.findIndex(i =>
+      (updatedOrder.invoice_id && i.id === updatedOrder.invoice_id) ||
+      i.id === updatedOrder.id ||
+      i.invoice_number === updatedOrder.order_number ||
+      i.invoice_number === `INV-${updatedOrder.order_number}` ||
+      updatedOrder.order_number.endsWith(i.invoice_number)
+    );
+    if (invIdx > -1) {
+      invoices[invIdx].operational_status = status;
+      invoices[invIdx].updated_at = new Date().toISOString();
+      setLocal(KEYS.INVOICES, invoices);
+    }
+
+    if (status === 'READY') {
+      playOrderReadySound();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('barista_order_ready', { detail: { order: updatedOrder } }));
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('barista_orders_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
+    return updatedOrder;
+  },
+
+  updateInvoiceOperationalStatus: (invoiceId: string, status: OperationalStatus): Invoice | null => {
+    const invoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
+    const idx = invoices.findIndex(i => i.id === invoiceId || i.invoice_number === invoiceId);
+    if (idx === -1) return null;
+
+    invoices[idx].operational_status = status;
+    invoices[idx].updated_at = new Date().toISOString();
+    setLocal(KEYS.INVOICES, invoices);
+
+    // Sync matching Barista order if found
+    const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
+    const baristaIdx = orders.findIndex(o =>
+      o.invoice_id === invoices[idx].id ||
+      o.order_number === invoices[idx].invoice_number ||
+      o.id === invoices[idx].id
+    );
+
+    if (baristaIdx > -1) {
+      orders[baristaIdx].status = status as BaristaOrderStatus;
+      orders[baristaIdx].updated_at = new Date().toISOString();
+      setLocal(KEYS.BARISTA_ORDERS, orders);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('barista_orders_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
+    return invoices[idx];
+  },
+
+  deleteBaristaOrder: (orderId: string): boolean => {
+    const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
+    const filtered = orders.filter(o => o.id !== orderId && o.invoice_id !== orderId && o.order_number !== orderId);
+    setLocal(KEYS.BARISTA_ORDERS, filtered);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('barista_orders_updated'));
+    }
+    return true;
   }
 };

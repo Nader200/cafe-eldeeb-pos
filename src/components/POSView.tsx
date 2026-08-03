@@ -44,11 +44,12 @@ import {
   Upload,
   Eye,
   FileText,
-  Download
+  Download,
+  Coffee
 } from 'lucide-react';
-import { dbService, safeStorage } from '../dbService';
+import { dbService, safeStorage, getItemCategoryIcon } from '../dbService';
 const localStorage = safeStorage;
-import { Product, Category, Customer, CartItem, PaymentType, Invoice } from '../types';
+import { Product, Category, Customer, CartItem, PaymentType, Invoice, BaristaOrderItem } from '../types';
 import { safeHtml2Canvas } from '../utils/html2canvasHelper';
 import { shareInvoicePDFToWhatsApp } from '../utils/pdfInvoiceGenerator';
 import { useAuth } from '../contexts/AuthContext';
@@ -510,6 +511,46 @@ export default function POSView({
       window.removeEventListener('cafe_db_synced_remote', refreshData);
     };
   }, []);
+
+  const handleSendToBarista = () => {
+    if (cart.length === 0) {
+      onShowWarningAlert('يرجى إضافة سلع أو مشروبات أولاً لإرسال طلب التحضير للبارستا!');
+      return;
+    }
+
+    const tableNumberStr = tableNumber ? (tableNumber.includes('طاولة') ? tableNumber : `طاولة ${tableNumber}`) : '';
+
+    const customerObj = customers.find(c => c.id === selectedCustomer);
+    const customerNameStr = customerObj ? customerObj.full_name : 'عميل مباشر';
+
+    const orderNumberStr = String(dbService.getInvoices(true).length + 1001);
+
+    const baristaItems: BaristaOrderItem[] = cart.map((item, idx) => ({
+      id: `bitm_${Date.now()}_${idx}`,
+      product_id: item.product.id,
+      product_name_ar: item.product.name_ar,
+      product_name_en: item.product.name_en,
+      category_id: item.product.category_id,
+      category_name: categories.find(c => c.id === item.product.category_id)?.name_ar || '',
+      quantity: item.quantity,
+      notes: item.notes || '',
+      category_icon: getItemCategoryIcon(categories.find(c => c.id === item.product.category_id)?.name_ar, item.product.name_ar)
+    }));
+
+    const cashierName = currentUser?.name || 'الكاشير';
+
+    dbService.addBaristaOrder({
+      order_number: orderNumberStr,
+      table_number: tableNumberStr,
+      customer_name: customerNameStr,
+      cashier_name: cashierName,
+      items: baristaItems,
+      notes: invoiceNotes,
+      status: 'NEW'
+    });
+
+    onShowSuccessAlert(`تم إرسال الطلب رقم #${orderNumberStr} لشاشة البارستا بنجاح ☕!`);
+  };
 
   const activeDrawer = useMemo(() => dbService.getActiveDrawer(), []);
   const settings = useMemo(() => dbService.getSettings(), []);
@@ -1542,20 +1583,37 @@ export default function POSView({
             </div>
 
             {/* Core Direct Selling CTAs */}
-            <div className="flex flex-col gap-1">
-              <button
-                id="pos-quick-cash-btn"
-                onClick={handleQuickCashCheckout}
-                disabled={cart.length === 0}
-                className={`w-full py-1.5 md:py-3 text-[10px] md:text-xs font-black rounded-lg md:rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-lg cursor-pointer ${
-                  cart.length === 0
-                    ? 'bg-gray-900/40 text-gray-600 border border-gray-950 cursor-not-allowed shadow-none'
-                    : 'bg-gradient-to-r from-emerald-600 to-emerald-700 text-white hover:opacity-90 active:scale-[0.98]'
-                }`}
-              >
-                <DollarSign className="w-3.5 h-3.5 text-emerald-300 stroke-[2.5]" />
-                سداد نقدي سريع فوري كاش ⚡
-              </button>
+            <div className="flex flex-col gap-1.5">
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  id="pos-send-barista-btn"
+                  type="button"
+                  onClick={handleSendToBarista}
+                  disabled={cart.length === 0}
+                  className={`py-2 px-2 text-[10px] md:text-xs font-black rounded-xl border transition-all flex items-center justify-center gap-1.5 shadow-md cursor-pointer ${
+                    cart.length === 0
+                      ? 'bg-transparent border-gray-800 text-gray-600 cursor-not-allowed'
+                      : 'bg-amber-950/40 border-amber-500/50 hover:bg-amber-900 text-amber-300 active:scale-[0.98]'
+                  }`}
+                >
+                  <Coffee className="w-4 h-4 text-amber-400 stroke-[2.5]" />
+                  <span>إرسال للبارستا ☕</span>
+                </button>
+
+                <button
+                  id="pos-quick-cash-btn"
+                  onClick={handleQuickCashCheckout}
+                  disabled={cart.length === 0}
+                  className={`py-2 px-2 text-[10px] md:text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-lg cursor-pointer ${
+                    cart.length === 0
+                      ? 'bg-gray-900/40 text-gray-600 border border-gray-950 cursor-not-allowed shadow-none'
+                      : 'bg-gradient-to-r from-emerald-600 to-emerald-700 text-white hover:opacity-90 active:scale-[0.98]'
+                  }`}
+                >
+                  <DollarSign className="w-4 h-4 text-emerald-300 stroke-[2.5]" />
+                  <span>سداد كاش ⚡</span>
+                </button>
+              </div>
 
               <div className="grid grid-cols-3 gap-1">
                 <button

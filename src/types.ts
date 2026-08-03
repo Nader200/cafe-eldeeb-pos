@@ -116,6 +116,7 @@ export interface SupplierPayment {
 export type PaymentType = 'CASH' | 'CREDIT' | 'SPLIT';
 export type InvoiceStatus = 'PAID' | 'CREDIT' | 'CANCELLED' | 'DRAFT' | 'REFUNDED' | 'OPEN' | 'CLOSED' | 'PREPARING' | 'READY' | 'SERVED' | 'RETURNED';
 export type PaymentStatus = 'PAID' | 'PARTIAL' | 'UNPAID' | 'CANCELLED';
+export type OperationalStatus = 'NEW' | 'PREPARING' | 'READY' | 'DELIVERED';
 
 export interface InvoiceTimelineEvent {
   status: InvoiceStatus | string;
@@ -137,6 +138,7 @@ export interface Invoice {
   remaining_amount: number;
   invoice_status: InvoiceStatus;
   payment_status?: PaymentStatus;
+  operational_status?: OperationalStatus;
   cashier_name: string;
   invoice_date: string; // ISO String
   notes?: string;
@@ -624,7 +626,36 @@ export interface InventoryBatchLog {
 }
 
 // Authentication & Employee User Roles
-export type UserRole = 'Admin' | 'Cashier';
+export type UserRole = 'Admin' | 'Cashier' | 'Barista';
+
+export type BaristaOrderStatus = 'NEW' | 'PREPARING' | 'READY' | 'DELIVERED';
+
+export interface BaristaOrderItem {
+  id: string;
+  product_id: string;
+  product_name_ar: string;
+  product_name_en?: string;
+  category_id?: string;
+  category_name?: string;
+  quantity: number;
+  notes?: string;
+  category_icon?: string;
+}
+
+export interface BaristaOrder {
+  id: string;
+  order_number: string;
+  invoice_id?: string;
+  table_number?: string;
+  customer_name?: string;
+  cashier_name: string;
+  status: BaristaOrderStatus;
+  items: BaristaOrderItem[];
+  created_at: string;
+  updated_at: string;
+  sent_time: string;
+  notes?: string;
+}
 
 export interface AuthUser {
   id: string;

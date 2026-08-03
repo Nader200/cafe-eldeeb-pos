@@ -758,7 +758,7 @@
     "printer_name": "Bluetooth-Thermal-XP80",
     "pin_code": "1234",
     "pin_protection_enabled": false,
-    "updated_at": "2026-08-02T09:51:48.226Z",
+    "updated_at": "2026-08-03T09:52:38.298Z",
     "reminder_days_friendly": 7,
     "reminder_days_statement": 15,
     "reminder_days_final": 30,
@@ -794,7 +794,7 @@
     "employee_consumption_policy": "DEDUCT",
     "custom_expense_categories": [],
     "auto_update_checks_enabled": true,
-    "last_update_check_date": "2026-08-02T09:51:48.225Z",
+    "last_update_check_date": "2026-08-03T09:52:38.297Z",
     "last_installed_version": "4.2.5",
     "force_update_enabled": false
   },
@@ -2268,9 +2268,49 @@
       "phone": "01100000000",
       "is_active": true,
       "created_at": "2026-07-29T14:15:36.407Z"
+    },
+    {
+      "id": "user_barista",
+      "username": "barista",
+      "name": "محضر المشروبات / البارستا",
+      "role": "Barista",
+      "passwordHash": "123456",
+      "phone": "01200000000",
+      "is_active": true,
+      "created_at": "2026-08-03T09:40:00.000Z"
     }
   ],
   "cafe_auth_audit_logs": [
+    {
+      "id": "auth_log_1785750540334_2kp5",
+      "employee_name": "أدمن النظام / نادر الديب",
+      "username": "admin",
+      "role": "Admin",
+      "action": "LOGOUT",
+      "date": "2026-08-03",
+      "time": "12:49:00",
+      "timestamp": "2026-08-03T09:49:00.334Z"
+    },
+    {
+      "id": "auth_log_1785750536841_xgcp",
+      "employee_name": "أدمن النظام / نادر الديب",
+      "username": "admin",
+      "role": "Admin",
+      "action": "LOGIN",
+      "date": "2026-08-03",
+      "time": "12:48:56",
+      "timestamp": "2026-08-03T09:48:56.840Z"
+    },
+    {
+      "id": "auth_log_1785750480749_kg6j",
+      "employee_name": "أدمن النظام / نادر الديب",
+      "username": "admin",
+      "role": "Admin",
+      "action": "LOGOUT",
+      "date": "2026-08-03",
+      "time": "12:48:00",
+      "timestamp": "2026-08-03T09:48:00.742Z"
+    },
     {
       "id": "auth_log_1785334582771_2ijb",
       "employee_name": "أدمن النظام / نادر الديب",
@@ -2295,6 +2335,325 @@
   ],
   "cafe_partner_drawings": [],
   "cafe_update_logs": [
+    {
+      "id": "upd_1785750758354_cik4",
+      "timestamp": "2026-08-03T09:52:38.354Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785750758160_x814",
+      "timestamp": "2026-08-03T09:52:38.160Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785750215209_1mw9",
+      "timestamp": "2026-08-03T09:43:35.209Z",
+      "action": "UPDATE_DISMISSED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "INFO",
+      "details": "تم تأجيل تثبيت التحديث (4.3.0) بواسطة Admin",
+      "user_role": "Admin"
+    },
+    {
+      "id": "upd_1785750210826_wj06",
+      "timestamp": "2026-08-03T09:43:30.826Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785750210441_pa11",
+      "timestamp": "2026-08-03T09:43:30.441Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785750029370_p9uj",
+      "timestamp": "2026-08-03T09:40:29.370Z",
+      "action": "UPDATE_DISMISSED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "INFO",
+      "details": "تم تأجيل تثبيت التحديث (4.3.0) بواسطة Admin",
+      "user_role": "Admin"
+    },
+    {
+      "id": "upd_1785749664604_9bra",
+      "timestamp": "2026-08-03T09:34:24.604Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785749664046_27g3",
+      "timestamp": "2026-08-03T09:34:24.046Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785749401991_gvbq",
+      "timestamp": "2026-08-03T09:30:01.991Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785749401551_ub7j",
+      "timestamp": "2026-08-03T09:30:01.551Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785747873649_x8g9",
+      "timestamp": "2026-08-03T09:04:33.649Z",
+      "action": "UPDATE_DISMISSED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "INFO",
+      "details": "تم تأجيل تثبيت التحديث (4.3.0) بواسطة Admin",
+      "user_role": "Admin"
+    },
+    {
+      "id": "upd_1785747869887_fa3p",
+      "timestamp": "2026-08-03T09:04:29.887Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785747869497_4i4s",
+      "timestamp": "2026-08-03T09:04:29.497Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785747489798_pxb2",
+      "timestamp": "2026-08-03T08:58:09.798Z",
+      "action": "UPDATE_DISMISSED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "INFO",
+      "details": "تم تأجيل تثبيت التحديث (4.3.0) بواسطة Admin",
+      "user_role": "Admin"
+    },
+    {
+      "id": "upd_1785747481802_q7zv",
+      "timestamp": "2026-08-03T08:58:01.802Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785747481198_gohe",
+      "timestamp": "2026-08-03T08:58:01.198Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785747363635_za8g",
+      "timestamp": "2026-08-03T08:56:03.636Z",
+      "action": "UPDATE_DISMISSED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "INFO",
+      "details": "تم تأجيل تثبيت التحديث (4.3.0) بواسطة Admin",
+      "user_role": "Admin"
+    },
+    {
+      "id": "upd_1785747352927_xk20",
+      "timestamp": "2026-08-03T08:55:52.927Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785747352588_s0cz",
+      "timestamp": "2026-08-03T08:55:52.588Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785747311674_tg1g",
+      "timestamp": "2026-08-03T08:55:11.674Z",
+      "action": "UPDATE_DISMISSED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "INFO",
+      "details": "تم تأجيل تثبيت التحديث (4.3.0) بواسطة Admin",
+      "user_role": "Admin"
+    },
+    {
+      "id": "upd_1785747302276_595k",
+      "timestamp": "2026-08-03T08:55:02.276Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785747301678_xcrk",
+      "timestamp": "2026-08-03T08:55:01.678Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785747091626_uw43",
+      "timestamp": "2026-08-03T08:51:31.626Z",
+      "action": "UPDATE_DISMISSED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "INFO",
+      "details": "تم تأجيل تثبيت التحديث (4.3.0) بواسطة Admin",
+      "user_role": "Admin"
+    },
+    {
+      "id": "upd_1785745555405_ryvs",
+      "timestamp": "2026-08-03T08:25:55.405Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785745554313_vgi0",
+      "timestamp": "2026-08-03T08:25:54.313Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785745102421_mrxt",
+      "timestamp": "2026-08-03T08:18:22.421Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785745102387_nd40",
+      "timestamp": "2026-08-03T08:18:22.387Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785744989231_jvq2",
+      "timestamp": "2026-08-03T08:16:29.231Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1785744988440_66ps",
+      "timestamp": "2026-08-03T08:16:28.440Z",
+      "action": "UPDATE_DETECTED",
+      "installed_version": "4.2.5",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "WARNING",
+      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
+      "user_role": "Cashier"
+    },
     {
       "id": "upd_1785664310695_5onx",
       "timestamp": "2026-08-02T09:51:50.695Z",
@@ -3075,61 +3434,44 @@
       "status": "WARNING",
       "details": "يتوفر تحديث جديد (4.3.0) لمنصة أندرويد",
       "user_role": "Admin"
-    },
+    }
+  ],
+  "cafe_barista_orders": [
     {
-      "id": "upd_1785582373297_t5uq",
-      "timestamp": "2026-08-01T11:06:13.297Z",
-      "action": "UPDATE_DISMISSED",
-      "installed_version": "4.2.5",
-      "remote_version": "4.3.0",
-      "platform": "web",
-      "status": "INFO",
-      "details": "تم تأجيل تثبيت التحديث (4.3.0) بواسطة Admin",
-      "user_role": "Admin"
-    },
-    {
-      "id": "upd_1785582223367_e26s",
-      "timestamp": "2026-08-01T11:03:43.367Z",
-      "action": "UPDATE_DETECTED",
-      "installed_version": "4.2.5",
-      "remote_version": "4.3.0",
-      "platform": "web",
-      "status": "WARNING",
-      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
-      "user_role": "Cashier"
-    },
-    {
-      "id": "upd_1785582223105_2ih5",
-      "timestamp": "2026-08-01T11:03:43.105Z",
-      "action": "UPDATE_DETECTED",
-      "installed_version": "4.2.5",
-      "remote_version": "4.3.0",
-      "platform": "web",
-      "status": "WARNING",
-      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
-      "user_role": "Cashier"
-    },
-    {
-      "id": "upd_1785582012903_j7qb",
-      "timestamp": "2026-08-01T11:00:12.903Z",
-      "action": "UPDATE_DETECTED",
-      "installed_version": "4.2.5",
-      "remote_version": "4.3.0",
-      "platform": "web",
-      "status": "WARNING",
-      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
-      "user_role": "Cashier"
-    },
-    {
-      "id": "upd_1785582012349_dmd6",
-      "timestamp": "2026-08-01T11:00:12.349Z",
-      "action": "UPDATE_DETECTED",
-      "installed_version": "4.2.5",
-      "remote_version": "4.3.0",
-      "platform": "web",
-      "status": "WARNING",
-      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
-      "user_role": "Cashier"
+      "id": "bar_1785750226886_qbpz",
+      "order_number": "1010",
+      "table_number": "",
+      "customer_name": "عميل مباشر",
+      "cashier_name": "أدمن النظام / نادر الديب",
+      "status": "NEW",
+      "items": [
+        {
+          "id": "bitm_1785750226882_0",
+          "product_id": "prod_1785570929284_388",
+          "product_name_ar": "معسل خطاط ",
+          "product_name_en": "",
+          "category_id": "cat_1785570879457_573",
+          "category_name": "الشيشة ",
+          "quantity": 1,
+          "notes": "",
+          "category_icon": "💨"
+        },
+        {
+          "id": "bitm_1785750226884_1",
+          "product_id": "prod_1784983378291_768",
+          "product_name_ar": "بن سادة فاتح ( وسط )",
+          "product_name_en": "",
+          "category_id": "cat_1784983348132_125",
+          "category_name": "مشروبات ساخنة ",
+          "quantity": 1,
+          "notes": "",
+          "category_icon": "☕"
+        }
+      ],
+      "created_at": "2026-08-03T09:43:46.885Z",
+      "updated_at": "2026-08-03T09:43:46.885Z",
+      "sent_time": "١٢:٤٣ م",
+      "notes": ""
     }
   ]
 }

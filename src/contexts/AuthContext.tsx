@@ -67,7 +67,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const hasPermission = (tab: string): boolean => {
     if (!currentUser) return false;
+    if (tab === 'user_manual' || tab === 'manual' || tab === 'help') return true;
     if (currentUser.role === 'Admin') return true;
+
+    // Barista allowed tabs (incoming orders only, no prices, no inventory, no financial reports)
+    if (currentUser.role === 'Barista') {
+      return tab === 'barista' || tab === 'user_manual';
+    }
 
     // Cashier allowed tabs
     if (currentUser.role === 'Cashier') {
@@ -76,7 +82,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         'open-invoices',
         'invoice-history',
         'invoices',
-        'playstation'
+        'playstation',
+        'barista',
+        'user_manual'
       ];
       return allowedCashierTabs.includes(tab);
     }

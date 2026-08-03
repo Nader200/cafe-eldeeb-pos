@@ -193,9 +193,20 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               >
                 <div>
                   <span className="font-extrabold text-emerald-400 block">☕ كاشير المبيعات (Cashier POS)</span>
-                  <span className="text-[10px] text-gray-400 font-mono">cashier / 123456 أو cashier123</span>
+                  <span className="text-[10px] text-gray-400 font-mono">cashier / 123456</span>
                 </div>
                 <span className="text-[10px] bg-emerald-600/20 text-emerald-400 px-2 py-0.5 rounded-lg border border-emerald-500/30 font-bold">تعبئة</span>
+              </div>
+
+              <div
+                onClick={() => handleQuickFill('barista', '123456')}
+                className="p-2 bg-black/60 border border-blue-500/30 hover:border-blue-500 rounded-xl flex justify-between items-center cursor-pointer transition-all hover:scale-[1.02]"
+              >
+                <div>
+                  <span className="font-extrabold text-blue-400 block">🍹 محضر المشروبات (Barista Screen)</span>
+                  <span className="text-[10px] text-gray-400 font-mono">barista / 123456</span>
+                </div>
+                <span className="text-[10px] bg-blue-600/20 text-blue-400 px-2 py-0.5 rounded-lg border border-blue-500/30 font-bold">تعبئة</span>
               </div>
             </div>
           )}

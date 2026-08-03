@@ -62,6 +62,7 @@ export default function OpenInvoicesView({
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [tables, setTables] = useState<TableSystem[]>([]);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [operationalFilter, setOperationalFilter] = useState<'ALL' | 'NEW' | 'PREPARING' | 'READY' | 'DELIVERED'>('ALL');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>([]);
   
@@ -274,7 +275,12 @@ export default function OpenInvoicesView({
       const numMatch = inv.invoice_number.toLowerCase().includes(searchQuery.toLowerCase());
       const custMatch = getCustomerName(inv.customer_id).toLowerCase().includes(searchQuery.toLowerCase());
       const tableMatch = (inv.table_number || '').toLowerCase().includes(searchQuery.toLowerCase());
-      return numMatch || custMatch || tableMatch;
+      const matchSearch = numMatch || custMatch || tableMatch;
+
+      const opStatus = inv.operational_status || 'NEW';
+      const matchOp = operationalFilter === 'ALL' || opStatus === operationalFilter;
+
+      return matchSearch && matchOp;
     });
 
     if (sortBy === 'NEWEST') {
@@ -292,7 +298,7 @@ export default function OpenInvoicesView({
     }
 
     return result;
-  }, [openInvoices, searchQuery, customers, sortBy]);
+  }, [openInvoices, searchQuery, customers, sortBy, operationalFilter]);
 
   // --- Table Reservation Actions ---
   const handleReserveSubmit = () => {
@@ -694,35 +700,61 @@ export default function OpenInvoicesView({
           {activeMainTab === 'invoices' ? (
             <>
               {/* Controls Bar: Searching & Filters */}
-              <div className="flex flex-col md:flex-row gap-3">
-                <div className="flex-1 flex items-center gap-3 bg-luxury-bg border border-gray-900 rounded-2xl px-4 py-3">
-                  <Search className="w-4 h-4 text-gray-500 shrink-0" />
-                  <input
-                    type="text"
-                    placeholder="البحث برقم الفاتورة، العميل، أو رقم الطاولة المفتوحة..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="bg-transparent border-none text-white text-xs w-full focus:outline-none text-right placeholder-gray-600 font-medium"
-                  />
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col md:flex-row gap-3">
+                  <div className="flex-1 flex items-center gap-3 bg-luxury-bg border border-gray-900 rounded-2xl px-4 py-3">
+                    <Search className="w-4 h-4 text-gray-500 shrink-0" />
+                    <input
+                      type="text"
+                      placeholder="البحث برقم الفاتورة، العميل، أو رقم الطاولة المفتوحة..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="bg-transparent border-none text-white text-xs w-full focus:outline-none text-right placeholder-gray-600 font-medium"
+                    />
+                  </div>
+
+                  <div className="flex bg-luxury-bg border border-gray-950 p-1 rounded-2xl gap-1 shrink-0 overflow-x-auto">
+                    {[
+                      { type: 'NEWEST', label: 'أحدث تعليق' },
+                      { type: 'OLDEST', label: 'أقدم تعليق' },
+                      { type: 'CUSTOMER', label: 'اسم العميل' },
+                      { type: 'TABLE', label: 'رقم الطاولة' }
+                    ].map(opt => (
+                      <button
+                        key={opt.type}
+                        onClick={() => setSortBy(opt.type as SortType)}
+                        className={`px-3 py-1.5 text-[10px] font-extrabold rounded-xl transition-all cursor-pointer whitespace-nowrap ${
+                          sortBy === opt.type
+                            ? 'bg-gold-600 text-black font-black'
+                            : 'text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                <div className="flex bg-luxury-bg border border-gray-950 p-1 rounded-2xl gap-1 shrink-0 overflow-x-auto">
+                {/* Operational Status Filter Bar */}
+                <div className="flex bg-luxury-bg/70 border border-gray-900 p-1 rounded-xl gap-1 overflow-x-auto">
+                  <span className="text-[10px] font-bold text-gray-500 self-center px-2 shrink-0">الحالة التشغيلية:</span>
                   {[
-                    { type: 'NEWEST', label: 'أحدث تعليق' },
-                    { type: 'OLDEST', label: 'أقدم تعليق' },
-                    { type: 'CUSTOMER', label: 'اسم العميل' },
-                    { type: 'TABLE', label: 'رقم الطاولة' }
-                  ].map(opt => (
+                    { id: 'ALL', label: 'الكل' },
+                    { id: 'NEW', label: '🆕 جديد' },
+                    { id: 'PREPARING', label: '🍳 جاري التحضير' },
+                    { id: 'READY', label: '🔔 جاهز للاستلام' },
+                    { id: 'DELIVERED', label: '🚶 تم التسليم' }
+                  ].map(tab => (
                     <button
-                      key={opt.type}
-                      onClick={() => setSortBy(opt.type as SortType)}
-                      className={`px-3 py-1.5 text-[10px] font-extrabold rounded-xl transition-all cursor-pointer whitespace-nowrap ${
-                        sortBy === opt.type
-                          ? 'bg-gold-600 text-black font-black'
+                      key={tab.id}
+                      onClick={() => setOperationalFilter(tab.id as any)}
+                      className={`px-3 py-1 text-[10px] font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
+                        operationalFilter === tab.id
+                          ? 'bg-gold-600/20 text-gold-400 border border-gold-500/40 font-extrabold'
                           : 'text-gray-400 hover:text-white'
                       }`}
                     >
-                      {opt.label}
+                      {tab.label}
                     </button>
                   ))}
                 </div>
@@ -741,6 +773,7 @@ export default function OpenInvoicesView({
                 ) : (
                   sortedAndFilteredInvoices.map(inv => {
                     const totalItems = getInvoiceItemsCount(inv.id);
+                    const opStatus = inv.operational_status || 'NEW';
                     return (
                       <div
                         key={inv.id}
@@ -755,12 +788,29 @@ export default function OpenInvoicesView({
                           <div>
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-xs font-black text-white font-mono">{inv.invoice_number}</span>
+                              {/* Financial Status Badge */}
                               <span className={`text-[8px] font-bold px-2 py-0.5 rounded-md border ${
                                 inv.invoice_status === 'DRAFT'
                                   ? 'bg-amber-600/15 text-amber-400 border-amber-500/20'
                                   : 'bg-emerald-600/15 text-emerald-400 border-emerald-500/20'
                               }`}>
-                                {inv.invoice_status === 'DRAFT' ? 'DRAFT' : 'OPEN'}
+                                {inv.invoice_status === 'DRAFT' ? '📝 مسودة' : '📂 فاتورة مفتوحة'}
+                              </span>
+
+                              {/* Operational Status Badge */}
+                              <span className={`text-[8px] font-bold px-2 py-0.5 rounded-md border flex items-center gap-1 ${
+                                opStatus === 'NEW'
+                                  ? 'bg-blue-600/15 text-blue-400 border-blue-500/30'
+                                  : opStatus === 'PREPARING'
+                                  ? 'bg-amber-600/15 text-amber-400 border-amber-500/30'
+                                  : opStatus === 'READY'
+                                  ? 'bg-emerald-600/20 text-emerald-300 border-emerald-500/40 animate-pulse'
+                                  : 'bg-purple-600/15 text-purple-300 border-purple-500/30'
+                              }`}>
+                                {opStatus === 'NEW' && '🆕 جديد'}
+                                {opStatus === 'PREPARING' && '🍳 جاري التحضير'}
+                                {opStatus === 'READY' && '🔔 جاهز للاستلام'}
+                                {opStatus === 'DELIVERED' && '🚶 تم التسليم للعميل'}
                               </span>
                             </div>
                             
@@ -962,20 +1012,103 @@ export default function OpenInvoicesView({
                 <div className="flex-1 overflow-y-auto space-y-4 pr-1">
                   
                   {/* Meta Grid */}
-                  <div className="bg-luxury-bg/50 border border-gray-900/60 rounded-2xl p-4 space-y-2.5 text-[11px]">
-                    <div className="flex justify-between">
+                  <div className="bg-luxury-bg/50 border border-gray-900/60 rounded-2xl p-4 space-y-3 text-[11px]">
+                    <div className="flex justify-between items-center">
                       <span className="text-gray-500">رقم الفاتورة المفتوحة:</span>
                       <span className="text-white font-black font-mono">{selectedInvoice.invoice_number}</span>
                     </div>
-                    <div className="flex justify-between">
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-500">الحالة المالية:</span>
+                      <span className="text-emerald-400 font-bold bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-md">
+                        {selectedInvoice.invoice_status === 'DRAFT' ? '📝 مسودة (غير محصلة)' : '📂 فاتورة مفتوحة (غير مدفوعة)'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-500">الحالة التشغيلية:</span>
+                      <span className="text-gold-400 font-bold bg-gold-500/10 border border-gold-500/30 px-2 py-0.5 rounded-md">
+                        {(selectedInvoice.operational_status || 'NEW') === 'NEW' && '🆕 جديد'}
+                        {selectedInvoice.operational_status === 'PREPARING' && '🍳 جاري التحضير'}
+                        {selectedInvoice.operational_status === 'READY' && '🔔 جاهز للاستلام'}
+                        {selectedInvoice.operational_status === 'DELIVERED' && '🚶 تم التسليم للعميل'}
+                      </span>
+                    </div>
+
+                    {/* Operational Status Quick Change Controls */}
+                    <div className="pt-2 border-t border-gray-900/60 space-y-1.5">
+                      <p className="text-[10px] text-gray-400 font-bold">تغيير الحالة التشغيلية (البارستا / الصالة):</p>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          onClick={() => {
+                            dbService.updateInvoiceOperationalStatus(selectedInvoice.id, 'NEW');
+                            loadData();
+                            setSelectedInvoice({ ...selectedInvoice, operational_status: 'NEW' });
+                            onShowSuccessAlert('تم تغيير الحالة التشغيلية إلى (جديد 🆕)');
+                          }}
+                          className={`px-2 py-1.5 rounded-lg text-[9px] font-bold border transition-all cursor-pointer ${
+                            (selectedInvoice.operational_status || 'NEW') === 'NEW'
+                              ? 'bg-blue-600/30 text-blue-300 border-blue-500'
+                              : 'bg-gray-900/40 text-gray-400 border-gray-800 hover:text-white'
+                          }`}
+                        >
+                          🆕 جديد
+                        </button>
+                        <button
+                          onClick={() => {
+                            dbService.updateInvoiceOperationalStatus(selectedInvoice.id, 'PREPARING');
+                            loadData();
+                            setSelectedInvoice({ ...selectedInvoice, operational_status: 'PREPARING' });
+                            onShowSuccessAlert('تم تغيير الحالة التشغيلية إلى (جاري التحضير 🍳)');
+                          }}
+                          className={`px-2 py-1.5 rounded-lg text-[9px] font-bold border transition-all cursor-pointer ${
+                            selectedInvoice.operational_status === 'PREPARING'
+                              ? 'bg-amber-600/30 text-amber-300 border-amber-500'
+                              : 'bg-gray-900/40 text-gray-400 border-gray-800 hover:text-white'
+                          }`}
+                        >
+                          🍳 جاري التحضير
+                        </button>
+                        <button
+                          onClick={() => {
+                            dbService.updateInvoiceOperationalStatus(selectedInvoice.id, 'READY');
+                            loadData();
+                            setSelectedInvoice({ ...selectedInvoice, operational_status: 'READY' });
+                            onShowSuccessAlert('تم تغيير الحالة التشغيلية إلى (جاهز للاستلام 🔔)');
+                          }}
+                          className={`px-2 py-1.5 rounded-lg text-[9px] font-bold border transition-all cursor-pointer ${
+                            selectedInvoice.operational_status === 'READY'
+                              ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500'
+                              : 'bg-gray-900/40 text-gray-400 border-gray-800 hover:text-white'
+                          }`}
+                        >
+                          🔔 جاهز للاستلام
+                        </button>
+                        <button
+                          onClick={() => {
+                            dbService.updateInvoiceOperationalStatus(selectedInvoice.id, 'DELIVERED');
+                            loadData();
+                            setSelectedInvoice({ ...selectedInvoice, operational_status: 'DELIVERED' });
+                            onShowSuccessAlert('تم التسليم للعميل 🚶 (الفاتورة لا تزال قائمة في الفواتير المفتوحة بانتظار التحصيل)');
+                          }}
+                          className={`px-2 py-1.5 rounded-lg text-[9px] font-bold border transition-all cursor-pointer ${
+                            selectedInvoice.operational_status === 'DELIVERED'
+                              ? 'bg-purple-600/30 text-purple-300 border-purple-500'
+                              : 'bg-gray-900/40 text-gray-400 border-gray-800 hover:text-white'
+                          }`}
+                        >
+                          🚶 تم التسليم للعميل
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center pt-2 border-t border-gray-900/60">
                       <span className="text-gray-500">العميل الحالي:</span>
                       <span className="text-white font-bold">{getCustomerName(selectedInvoice.customer_id)}</span>
                     </div>
-                    <div className="flex justify-between">
+                    <div className="flex justify-between items-center">
                       <span className="text-gray-500">موقع الطاولة:</span>
                       <span className="text-gold-500 font-extrabold">{selectedInvoice.table_number || 'طلب خارجي كاونتر'}</span>
                     </div>
-                    <div className="flex justify-between">
+                    <div className="flex justify-between items-center">
                       <span className="text-gray-500">مفتوحة بواسطة:</span>
                       <span className="text-gray-400">{selectedInvoice.cashier_name}</span>
                     </div>

@@ -48,6 +48,7 @@ import { CURRENT_APP_VERSION, CURRENT_RELEASE_DATE, detectClientPlatform, Client
 import { checkForUpdates, publishRemoteVersionConfig } from '../services/updateService';
 import UpdateModal from './UpdateModal';
 import { useAuth } from '../contexts/AuthContext';
+import UserManualView from './UserManualView';
 
 interface SettingsViewProps {
   onShowSuccessAlert: (msg: string) => void;
@@ -95,7 +96,7 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
   const { currentUser } = useAuth();
 
   // Tab Control
-  const [activeTab, setActiveTab] = useState<'general' | 'backup' | 'gmail' | 'brand' | 'accounting' | 'payments' | 'partners' | 'updates'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'backup' | 'gmail' | 'brand' | 'accounting' | 'payments' | 'partners' | 'updates' | 'manual'>('general');
 
   // Version & Updates Management State
   const [autoUpdateEnabled, setAutoUpdateEnabled] = useState<boolean>(true);
@@ -863,7 +864,19 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
               : 'text-gray-400 hover:text-white hover:bg-gray-900/60'
           }`}
         >
-          🚀 التحديثات والإصدارات (Updates)
+          🚀 التحديثات (Updates)
+        </button>
+        <button
+          id="tab-settings-manual"
+          type="button"
+          onClick={() => setActiveTab('manual')}
+          className={`flex-1 py-3 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+            activeTab === 'manual'
+              ? 'bg-gold-600 text-black font-extrabold shadow-md'
+              : 'text-gray-400 hover:text-white hover:bg-gray-900/60'
+          }`}
+        >
+          📖 دليل المستخدم (Manual)
         </button>
       </div>
 
@@ -2321,6 +2334,11 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
             </div>
           </div>
         </div>
+      )}
+
+      {/* 9. User Manual Tab */}
+      {activeTab === 'manual' && (
+        <UserManualView currentUser={currentUser} />
       )}
 
       {/* Update Modal */}
