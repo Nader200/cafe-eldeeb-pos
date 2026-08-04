@@ -8,19 +8,23 @@ import {
   BellRing,
   CheckCheck,
   Search,
-  Filter,
   Volume2,
   RefreshCw,
   User,
-  Shield,
   Layers,
   Sparkles,
-  UtensilsCrossed,
-  Flame
+  Edit3,
+  AlertTriangle,
+  FileText,
+  History,
+  Lock,
+  X,
+  Plus,
+  Save
 } from 'lucide-react';
 import { dbService, getItemCategoryIcon } from '../dbService';
 import { BaristaOrder, BaristaOrderStatus, BaristaOrderItem } from '../types';
-import { playBaristaNewOrderSound, playOrderReadySound } from '../lib/audioService';
+import { playBaristaNewOrderSound, playOrderReadySound, playBaristaNoteUpdatedSound } from '../lib/audioService';
 
 interface BaristaViewProps {
   onShowSuccessAlert?: (msg: string) => void;
@@ -32,6 +36,29 @@ export default function BaristaView({ onShowSuccessAlert, onShowWarningAlert }: 
   const [activeTab, setActiveTab] = useState<'ALL' | 'NEW' | 'PREPARING' | 'READY' | 'DELIVERED'>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+
+  // Note editing state (Cashier/Admin permissions)
+  const [editingOrder, setEditingOrder] = useState<BaristaOrder | null>(null);
+  const [editGeneralNotes, setEditGeneralNotes] = useState<string>('');
+  const [editItemNotesMap, setEditItemNotesMap] = useState<{ [itemId: string]: string }>({});
+
+  // History timeline expansion toggles
+  const [expandedHistoryMap, setExpandedHistoryMap] = useState<{ [orderId: string]: boolean }>({});
+
+  // Get current logged-in user and permissions
+  const currentUser = dbService.getCurrentUser();
+  const isEditable = currentUser?.role === 'Admin' || currentUser?.role === 'Cashier';
+
+  // Quick note preset suggestions
+  const notePresets = [
+    'بدون سكر',
+    'سكر زيادة',
+    'ثلج خفيف',
+    'كوب سفري',
+    'بعد الأكل',
+    'بدون نعناع',
+    'لبن خالي الدسم'
+  ];
 
   // Load Barista Orders
   const loadOrders = () => {
@@ -50,16 +77,29 @@ export default function BaristaView({ onShowSuccessAlert, onShowWarningAlert }: 
       }
     };
 
+    const handleNotesUpdated = (e: any) => {
+      loadOrders();
+      if (soundEnabled) {
+        playBaristaNoteUpdatedSound();
+      }
+      const orderNum = e.detail?.order_number || e.detail?.order?.order_number || '';
+      if (onShowSuccessAlert) {
+        onShowSuccessAlert(`تم تحديث ملاحظات الطلب #${orderNum} 🔔`);
+      }
+    };
+
     window.addEventListener('barista_orders_updated', handleUpdate);
     window.addEventListener('barista_new_order', handleNewOrder as EventListener);
+    window.addEventListener('barista_notes_updated', handleNotesUpdated as EventListener);
     window.addEventListener('storage', handleUpdate);
 
     return () => {
       window.removeEventListener('barista_orders_updated', handleUpdate);
       window.removeEventListener('barista_new_order', handleNewOrder as EventListener);
+      window.removeEventListener('barista_notes_updated', handleNotesUpdated as EventListener);
       window.removeEventListener('storage', handleUpdate);
     };
-  }, [soundEnabled]);
+  }, [soundEnabled, onShowSuccessAlert]);
 
   // Handle status update
   const handleUpdateStatus = (orderId: string, newStatus: BaristaOrderStatus) => {
@@ -73,6 +113,50 @@ export default function BaristaView({ onShowSuccessAlert, onShowWarningAlert }: 
       } else if (newStatus === 'DELIVERED') {
         if (onShowSuccessAlert) onShowSuccessAlert(`تم تسجيل تسليم الطلب رقم #${updated.order_number} بنجاح.`);
       }
+    }
+  };
+
+  // Open Edit Notes Modal
+  const handleOpenEditModal = (order: BaristaOrder) => {
+    setEditingOrder(order);
+    setEditGeneralNotes(order.notes || '');
+
+    const itemMap: { [itemId: string]: string } = {};
+    order.items.forEach(it => {
+      itemMap[it.id] = it.notes || '';
+    });
+    setEditItemNotesMap(itemMap);
+  };
+
+  // Save updated notes
+  const handleSaveNotes = () => {
+    if (!editingOrder) return;
+
+    const authorName = currentUser?.name || 'الكاشير';
+    const updated = dbService.updateBaristaOrderNotes(
+      editingOrder.id,
+      editGeneralNotes,
+      authorName,
+      editItemNotesMap
+    );
+
+    if (updated) {
+      if (onShowSuccessAlert) {
+        onShowSuccessAlert(`تم تحديث ملاحظات الطلب #${editingOrder.order_number} بنجاح! 📝`);
+      }
+      setEditingOrder(null);
+      loadOrders();
+    }
+  };
+
+  // Append preset to general notes
+  const handleAddPreset = (preset: string) => {
+    if (!editGeneralNotes.trim()) {
+      setEditGeneralNotes(preset);
+    } else if (editGeneralNotes.includes(preset)) {
+      return; // Already added
+    } else {
+      setEditGeneralNotes(`${editGeneralNotes.trim()} - ${preset}`);
     }
   };
 
@@ -93,12 +177,13 @@ export default function BaristaView({ onShowSuccessAlert, onShowWarningAlert }: 
         const matchesTable = (order.table_number || '').toLowerCase().includes(q);
         const matchesCustomer = (order.customer_name || '').toLowerCase().includes(q);
         const matchesCashier = (order.cashier_name || '').toLowerCase().includes(q);
+        const matchesNotes = (order.notes || '').toLowerCase().includes(q);
         const matchesItem = order.items.some(it =>
           it.product_name_ar.toLowerCase().includes(q) ||
           (it.notes || '').toLowerCase().includes(q)
         );
 
-        if (!matchesNum && !matchesTable && !matchesCustomer && !matchesCashier && !matchesItem) {
+        if (!matchesNum && !matchesTable && !matchesCustomer && !matchesCashier && !matchesNotes && !matchesItem) {
           return false;
         }
       }
@@ -167,7 +252,7 @@ export default function BaristaView({ onShowSuccessAlert, onShowWarningAlert }: 
               <Sparkles className="w-4 h-4 text-gold-500 animate-pulse" />
             </h2>
             <p className="text-gray-400 text-xs font-semibold mt-0.5">
-              استقبال المشروبات والشيشة فورياً مع متابعة وتحديث حالات التحضير
+              استقبال المشروبات المباشرة مع إظهار ملاحظات الطلب والمنتجات بوضوح عالي
             </p>
           </div>
         </div>
@@ -177,7 +262,7 @@ export default function BaristaView({ onShowSuccessAlert, onShowWarningAlert }: 
           <button
             onClick={() => {
               playBaristaNewOrderSound();
-              if (onShowSuccessAlert) onShowSuccessAlert('تم اختبار صوت التنبيهات بنجاح! 🔔');
+              if (onShowSuccessAlert) onShowSuccessAlert('تم اختبار جرس التنبيهات بنجاح! 🔔');
             }}
             className="px-3 py-2 bg-luxury-bg border border-gold-500/30 hover:border-gold-500 text-gold-400 hover:text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
             title="اختبار جرس التنبيهات"
@@ -294,7 +379,7 @@ export default function BaristaView({ onShowSuccessAlert, onShowWarningAlert }: 
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="بحث برقم الطلب، الطاولة، المشروب..."
+            placeholder="بحث برقم الطلب، الطاولة، المشروب، الملاحظات..."
             className="w-full bg-luxury-bg border border-gray-800 focus:border-gold-500 text-white text-xs rounded-xl py-2 pr-9 pl-3 focus:outline-none font-bold"
           />
         </div>
@@ -313,9 +398,13 @@ export default function BaristaView({ onShowSuccessAlert, onShowWarningAlert }: 
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filteredOrders.map(order => {
             const badge = getStatusBadge(order.status);
+            const hasOrderNotes = Boolean(order.notes && order.notes.trim());
+            const hasNotesHistory = Boolean(order.notes_history && order.notes_history.length > 0);
+            const isHistoryExpanded = Boolean(expandedHistoryMap[order.id]);
+
             return (
               <div
                 key={order.id}
@@ -327,11 +416,11 @@ export default function BaristaView({ onShowSuccessAlert, onShowWarningAlert }: 
                   <div className="flex justify-between items-start gap-2 pb-3 border-b border-gray-800/80 mb-3">
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="text-lg font-black text-white font-mono tracking-tight">
+                        <span className="text-xl font-black text-white font-mono tracking-tight">
                           #{order.order_number}
                         </span>
                         {order.table_number && (
-                          <span className="px-2 py-0.5 bg-gold-600/20 text-gold-400 border border-gold-500/40 rounded-lg text-xs font-black">
+                          <span className="px-2.5 py-0.5 bg-gold-600/20 text-gold-400 border border-gold-500/40 rounded-lg text-xs font-black">
                             {order.table_number.includes('طاولة') ? order.table_number : `طاولة ${order.table_number}`}
                           </span>
                         )}
@@ -350,60 +439,180 @@ export default function BaristaView({ onShowSuccessAlert, onShowWarningAlert }: 
                     </div>
 
                     {/* Status Badge */}
-                    <span className={`px-2.5 py-1 rounded-xl text-[10px] font-black border uppercase tracking-wider ${badge.badgeClass}`}>
+                    <span className={`px-2.5 py-1 rounded-xl text-[10px] font-black border uppercase tracking-wider shrink-0 ${badge.badgeClass}`}>
                       {badge.label}
                     </span>
                   </div>
 
-                  {/* Send Time & Notes if any */}
-                  <div className="flex justify-between items-center text-[10px] text-gray-400 font-bold mb-3 bg-black/40 px-3 py-1.5 rounded-xl border border-gray-900">
+                  {/* Send Time Bar */}
+                  <div className="flex justify-between items-center text-[11px] text-gray-400 font-bold mb-3 bg-black/50 px-3 py-1.5 rounded-xl border border-gray-900">
                     <span className="flex items-center gap-1 font-mono">
-                      <Clock className="w-3 h-3 text-gold-500" />
-                      إرسال: {order.sent_time}
+                      <Clock className="w-3.5 h-3.5 text-gold-500" />
+                      وقت الإرسال: {order.sent_time}
                     </span>
-                    {order.notes && (
-                      <span className="text-amber-400 font-bold truncate max-w-[150px]">
-                        📝 {order.notes}
+
+                    {/* Edit button (Cashier/Admin) or Read-only badge (Barista) */}
+                    {isEditable ? (
+                      <button
+                        onClick={() => handleOpenEditModal(order)}
+                        className="px-2.5 py-0.5 bg-gold-600/20 hover:bg-gold-600/40 text-gold-300 border border-gold-500/40 rounded-lg text-[10px] font-extrabold flex items-center gap-1 transition-all cursor-pointer"
+                        title="تعديل الملاحظات"
+                      >
+                        <Edit3 className="w-3 h-3 text-gold-400" />
+                        <span>تعديل الملاحظات</span>
+                      </button>
+                    ) : (
+                      <span className="text-[10px] text-gray-500 font-bold flex items-center gap-1">
+                        <Lock className="w-3 h-3" />
+                        <span>عرض فقط</span>
                       </span>
                     )}
                   </div>
 
-                  {/* Items List (Strictly NO Prices!) */}
+                  {/* ========================================================= */}
+                  {/* 1. ORDER NOTES (ملاحظات الطلب) - Yellow Warning Container */}
+                  {/* ========================================================= */}
+                  {hasOrderNotes && (
+                    <div className="bg-amber-500/15 border-2 border-amber-500/80 rounded-2xl p-3.5 my-3 shadow-[0_0_20px_rgba(245,158,11,0.2)] relative overflow-hidden animate-pulse-slow">
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xl leading-none animate-bounce">⚠️</span>
+                          <h4 className="text-sm font-black text-amber-300 tracking-wide uppercase flex items-center gap-1.5">
+                            <span>ملاحظات الطلب</span>
+                            <span className="text-[9px] bg-amber-500/30 text-amber-200 px-1.5 py-0.5 rounded border border-amber-400/40 font-black">
+                              هام جداً
+                            </span>
+                          </h4>
+                        </div>
+                        {isEditable && (
+                          <button
+                            onClick={() => handleOpenEditModal(order)}
+                            className="px-2 py-0.5 bg-amber-500/30 hover:bg-amber-500/50 text-amber-200 border border-amber-400/50 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                            <span>تعديل</span>
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="bg-black/75 border border-amber-500/40 rounded-xl p-3 text-amber-200 font-black text-sm leading-relaxed">
+                        <ul className="space-y-1">
+                          {order.notes!.split(/\n|,|،/).filter(Boolean).map((n, i) => (
+                            <li key={i} className="text-amber-200 font-black text-sm flex items-start gap-2">
+                              <span className="text-amber-400 shrink-0 font-black text-base leading-none">•</span>
+                              <span className="leading-snug">{n.trim()}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Option for Cashier/Admin to add notes if no order notes exist */}
+                  {!hasOrderNotes && isEditable && (
+                    <div className="mb-3">
+                      <button
+                        onClick={() => handleOpenEditModal(order)}
+                        className="w-full py-1.5 px-3 bg-black/40 hover:bg-amber-500/10 border border-dashed border-gray-800 hover:border-amber-500/50 text-gray-400 hover:text-amber-300 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <Plus className="w-3.5 h-3.5 text-amber-400" />
+                        <span>إضافة ملاحظات لهذا الطلب</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* ========================================================= */}
+                  {/* 2. PRODUCT ITEMS & INDIVIDUAL PRODUCT NOTES */}
+                  {/* ========================================================= */}
                   <div className="space-y-2 mb-4">
                     <span className="text-[10px] font-extrabold text-gold-500/80 block uppercase tracking-wider">
                       عناصر المشروبات والطلبات:
                     </span>
-                    <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
+                    <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
                       {order.items.map((item, idx) => {
                         const icon = item.category_icon || getItemCategoryIcon(item.category_name, item.product_name_ar);
+                        const hasItemNotes = Boolean(item.notes && item.notes.trim());
+
                         return (
                           <div
                             key={item.id || idx}
-                            className="bg-black/80 border border-gray-850 p-2.5 rounded-xl flex items-start justify-between gap-2 transition-all hover:border-gray-700"
+                            className="bg-black/80 border border-gray-850 p-3 rounded-2xl flex flex-col gap-1.5 transition-all hover:border-gray-700"
                           >
-                            <div className="flex items-start gap-2">
-                              <span className="text-base shrink-0 leading-none pt-0.5">{icon}</span>
-                              <div>
-                                <strong className="text-xs font-bold text-white block leading-tight">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-lg shrink-0 leading-none">{icon}</span>
+                                <strong className="text-xs sm:text-sm font-black text-white leading-tight">
                                   {item.product_name_ar}
                                 </strong>
-                                {item.notes && (
-                                  <span className="text-[10px] text-amber-300 font-semibold block mt-0.5">
-                                    ملاحظات: {item.notes}
-                                  </span>
-                                )}
                               </div>
+
+                              {/* Quantity pill */}
+                              <span className="px-2.5 py-1 bg-gold-600/20 text-gold-400 border border-gold-500/30 rounded-lg text-xs font-black font-mono shrink-0">
+                                x{item.quantity}
+                              </span>
                             </div>
 
-                            {/* Quantity pill */}
-                            <span className="px-2 py-0.5 bg-gold-600/20 text-gold-400 border border-gold-500/30 rounded-lg text-xs font-black font-mono shrink-0">
-                              x{item.quantity}
-                            </span>
+                            {/* Product-Specific Notes */}
+                            {hasItemNotes && (
+                              <div className="mr-6 pr-2.5 border-r-2 border-amber-500/80 bg-amber-500/10 p-2 rounded-xl border border-amber-500/20">
+                                <ul className="space-y-0.5">
+                                  {item.notes!.split(/\n|,|،/).filter(Boolean).map((pNote, pIdx) => (
+                                    <li key={pIdx} className="text-xs font-extrabold text-amber-300 flex items-center gap-1.5">
+                                      <span className="text-amber-400 font-black leading-none">•</span>
+                                      <span>{pNote.trim()}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
                     </div>
                   </div>
+
+                  {/* ========================================================= */}
+                  {/* 3. NOTES HISTORY TIMELINE */}
+                  {/* ========================================================= */}
+                  {hasNotesHistory && (
+                    <div className="mb-3 bg-black/60 border border-gray-850 rounded-2xl p-3 space-y-2">
+                      <button
+                        onClick={() =>
+                          setExpandedHistoryMap(prev => ({
+                            ...prev,
+                            [order.id]: !prev[order.id]
+                          }))
+                        }
+                        className="w-full flex items-center justify-between text-[11px] font-black text-gray-300 hover:text-white transition-colors cursor-pointer"
+                      >
+                        <span className="flex items-center gap-1.5 text-gold-400">
+                          <History className="w-3.5 h-3.5 text-gold-500" />
+                          <span>سجل تحديث الملاحظات (Timeline)</span>
+                        </span>
+                        <span className="text-[10px] bg-gray-800 text-gold-400 px-2 py-0.5 rounded-full font-mono font-bold">
+                          {order.notes_history!.length} {isHistoryExpanded ? 'إخفاء ▲' : 'عرض ▼'}
+                        </span>
+                      </button>
+
+                      {isHistoryExpanded && (
+                        <div className="space-y-2 pt-2 border-t border-gray-850 max-h-40 overflow-y-auto pr-1">
+                          {order.notes_history!.map((hist, hIdx) => (
+                            <div
+                              key={hist.id || hIdx}
+                              className="text-xs border-r-2 border-amber-500/70 pr-2.5 py-1 bg-gray-900/50 rounded-l-xl"
+                            >
+                              <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono mb-0.5">
+                                <span className="text-gold-400 font-black">{hist.timestamp}</span>
+                                <span className="text-gray-300 font-bold">{hist.author_name}</span>
+                              </div>
+                              <p className="text-amber-200 font-extrabold text-xs">{hist.note}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                 </div>
 
                 {/* Bottom Action Buttons */}
@@ -454,6 +663,124 @@ export default function BaristaView({ onShowSuccessAlert, onShowWarningAlert }: 
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* EDIT ORDER NOTES MODAL (Cashier & Admin Only) */}
+      {/* ========================================================= */}
+      {editingOrder && isEditable && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fade-in" dir="rtl">
+          <div className="bg-luxury-card border-2 border-gold-500/40 rounded-3xl p-6 w-full max-w-lg shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+            
+            {/* Modal Header */}
+            <div className="flex justify-between items-center border-b border-gray-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center font-black">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white">
+                    تعديل ملاحظات الطلب #{editingOrder.order_number}
+                  </h3>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    سيتم تحديث شاشة البارستا فورياً مع توثيق التعديل في السجل
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setEditingOrder(null)}
+                className="p-2 text-gray-400 hover:text-white bg-black/40 hover:bg-gray-800 rounded-xl transition-all cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* General Order Notes */}
+            <div className="space-y-2">
+              <label className="text-xs font-black text-amber-300 flex items-center gap-1.5">
+                <span>⚠️ ملاحظات الطلب العامة (الإنذار الأبرز):</span>
+              </label>
+
+              <textarea
+                value={editGeneralNotes}
+                onChange={(e) => setEditGeneralNotes(e.target.value)}
+                placeholder="اكتب ملاحظات الطلب مثل: بدون سكر، كوب سفري، بعد الأكل..."
+                rows={3}
+                className="w-full bg-black/80 border border-amber-500/40 focus:border-amber-400 text-amber-200 text-sm font-extrabold rounded-2xl p-3 focus:outline-none"
+              />
+
+              {/* Quick Presets Buttons */}
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold text-gray-400 block">اختصارات سريعة للملاحظات:</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {notePresets.map((preset, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => handleAddPreset(preset)}
+                      className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                    >
+                      + {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Individual Product Notes */}
+            <div className="space-y-3 pt-3 border-t border-gray-800">
+              <h4 className="text-xs font-black text-gold-400 uppercase tracking-wider">
+                ملاحظات كل منتج على حدة:
+              </h4>
+
+              <div className="space-y-2.5">
+                {editingOrder.items.map((item) => (
+                  <div key={item.id} className="bg-black/60 border border-gray-800 p-3 rounded-2xl space-y-1.5">
+                    <div className="flex justify-between items-center text-xs font-bold text-white">
+                      <span>{item.product_name_ar}</span>
+                      <span className="text-gold-400 font-mono">x{item.quantity}</span>
+                    </div>
+
+                    <input
+                      type="text"
+                      value={editItemNotesMap[item.id] || ''}
+                      onChange={(e) =>
+                        setEditItemNotesMap({
+                          ...editItemNotesMap,
+                          [item.id]: e.target.value
+                        })
+                      }
+                      placeholder="مثال: بدون نعناع، لبن خالي الدسم..."
+                      className="w-full bg-luxury-bg border border-gray-800 focus:border-gold-500 text-amber-200 text-xs font-bold rounded-xl py-1.5 px-3 focus:outline-none"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center gap-3 pt-3 border-t border-gray-800">
+              <button
+                type="button"
+                onClick={handleSaveNotes}
+                className="flex-1 py-3 bg-gradient-to-r from-amber-600 via-gold-600 to-amber-500 hover:from-amber-500 hover:to-gold-400 text-black font-black text-xs sm:text-sm rounded-2xl shadow-xl transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                <Save className="w-4 h-4" />
+                <span>حفظ وتحديث الملاحظات فورياً</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setEditingOrder(null)}
+                className="px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold text-xs sm:text-sm rounded-2xl transition-all cursor-pointer"
+              >
+                إلغاء
+              </button>
+            </div>
+
+          </div>
         </div>
       )}
 

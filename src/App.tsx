@@ -223,8 +223,32 @@ function AppContent() {
       }
     };
 
+    const handleOpenInvoiceCreated = (e: any) => {
+      const msg = e.detail?.message || 'تم تحويل الطلب إلى الفواتير المفتوحة 📋';
+      showSuccessAlert(msg);
+    };
+
+    const handleInvoicePaidNotif = (e: any) => {
+      const msg = e.detail?.message || 'تم سداد وإغلاق الفاتورة بنجاح 💰';
+      showSuccessAlert(msg);
+    };
+
+    const handleInvoiceCreditNotif = (e: any) => {
+      const msg = e.detail?.message || 'تم تحويل الفاتورة لحساب العميل الآجل 📜';
+      showSuccessAlert(msg);
+    };
+
     window.addEventListener('barista_order_ready', handleOrderReady as EventListener);
-    return () => window.removeEventListener('barista_order_ready', handleOrderReady as EventListener);
+    window.addEventListener('open_invoice_created', handleOpenInvoiceCreated as EventListener);
+    window.addEventListener('invoice_paid_notification', handleInvoicePaidNotif as EventListener);
+    window.addEventListener('invoice_credit_notification', handleInvoiceCreditNotif as EventListener);
+
+    return () => {
+      window.removeEventListener('barista_order_ready', handleOrderReady as EventListener);
+      window.removeEventListener('open_invoice_created', handleOpenInvoiceCreated as EventListener);
+      window.removeEventListener('invoice_paid_notification', handleInvoicePaidNotif as EventListener);
+      window.removeEventListener('invoice_credit_notification', handleInvoiceCreditNotif as EventListener);
+    };
   }, [currentUser]);
 
   // Listener for postponed update modal when invoice/cart is cleared

@@ -54,10 +54,11 @@ import {
   BaristaOrder,
   BaristaOrderItem,
   BaristaOrderStatus,
+  OrderNoteHistoryItem,
   OperationalStatus
 } from './types';
 import { sanitizePaymentMethod } from './utils/paymentUtils';
-import { playBaristaNewOrderSound, playOrderReadySound } from './lib/audioService';
+import { playBaristaNewOrderSound, playOrderReadySound, playBaristaNoteUpdatedSound } from './lib/audioService';
 
 import { safeStorage } from './lib/safeStorage';
 export { safeStorage };
@@ -258,11 +259,15 @@ const defaultSettings: AppSettings = {
   ],
   vodafone_cash_number: '01094793701',
   instapay_number: '01094793701',
+  instapay_id: 'cafeeldeeb@instapay',
+  digital_payment_account_owner: 'Cafe Eldeeb',
+  vodafone_cash_qr: '',
+  instapay_qr: '',
   employee_consumption_policy: 'DEDUCT',
   custom_expense_categories: [],
   auto_update_checks_enabled: true,
   last_update_check_date: new Date().toISOString(),
-  last_installed_version: '4.3.0',
+  last_installed_version: '4.4.2',
   force_update_enabled: false,
 };
 
@@ -2223,6 +2228,38 @@ export const dbService = {
       } catch (e) {
         console.error('Error auto-logging visit in closeOpenInvoice:', e);
       }
+    }
+
+    // Record timeline & audit events for payment/credit closure
+    const isCredit = paymentType === 'CREDIT' || sanitizedMethod === 'CREDIT';
+    const closeStatus = isCredit ? 'CREDIT' : 'PAID';
+    
+    if (!updatedInvoice.timeline) updatedInvoice.timeline = [];
+    updatedInvoice.timeline.push({
+      status: closeStatus,
+      timestamp: dateStr,
+      operator: cashierName,
+      notes: isCredit
+        ? `تم إغلاق الفاتورة وتحويل الحساب إلى العميل الآجل`
+        : `تم سداد الفاتورة بالكامل وإغلاقها بأسلوب (${sanitizedMethod || 'نقدي'})`
+    });
+
+    dbService.logAuditAction(
+      isCredit ? 'INVOICE_CREDIT_CONVERTED' : 'INVOICE_PAID',
+      `تم إغلاق الفاتورة رقم #${updatedInvoice.invoice_number} ${isCredit ? 'وتحويلها لحساب عميل آجل' : 'وسداد قيمتها بنجاح'} (${total} ج.م)`,
+      cashierName
+    );
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(isCredit ? 'invoice_credit_notification' : 'invoice_paid_notification', {
+        detail: {
+          invoice: updatedInvoice,
+          message: `تم إغلاق الفاتورة رقم #${updatedInvoice.invoice_number} ${isCredit ? 'وتحويلها لحساب آجل 📜' : 'وسداد قيمتها بنجاح 💰'}`
+        }
+      }));
+      window.dispatchEvent(new CustomEvent('open_invoices_updated'));
+      window.dispatchEvent(new CustomEvent('barista_orders_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
     }
 
     return { invoice: updatedInvoice, items: newItems };
@@ -4381,7 +4418,36 @@ export const dbService = {
 
   // --- Batch Inventory System Module ---
   getInventoryBatches: (): InventoryBatch[] => {
-    return getLocal<InventoryBatch[]>(KEYS.INVENTORY_BATCHES, []);
+    const list = getLocal<InventoryBatch[]>(KEYS.INVENTORY_BATCHES, []);
+    let modified = false;
+    const sanitized = list.map(b => {
+      let bMod = false;
+      let consumed = b.consumed_quantity;
+      if (consumed === undefined || consumed === null || isNaN(consumed)) {
+        consumed = 0;
+        bMod = true;
+      }
+      let orig = b.original_quantity || b.yield_capacity || 0;
+      let remaining = b.remaining_quantity;
+      if (remaining === undefined || remaining === null || isNaN(remaining)) {
+        remaining = Math.max(0, orig - consumed);
+        bMod = true;
+      }
+      if (bMod) {
+        modified = true;
+        return {
+          ...b,
+          consumed_quantity: consumed,
+          remaining_quantity: remaining,
+          remaining_cups: b.yield_capacity ? remaining : b.remaining_cups
+        };
+      }
+      return b;
+    });
+    if (modified) {
+      setLocal(KEYS.INVENTORY_BATCHES, sanitized);
+    }
+    return sanitized;
   },
 
   getBatchConsumptions: (): any[] => {
@@ -4393,12 +4459,14 @@ export const dbService = {
     const idx = list.findIndex(b => b.id === batch.id);
 
     const isRaw = batch.item_type === 'raw_material' || !!batch.yield_capacity;
-    const yieldCap = isRaw ? (batch.yield_capacity || batch.original_quantity || 50) : batch.original_quantity;
-    const remaining = Math.max(0, yieldCap - batch.consumed_quantity);
+    const yieldCap = isRaw ? (batch.yield_capacity || batch.original_quantity || 50) : (batch.original_quantity || 1);
+    const consumed = batch.consumed_quantity !== undefined && batch.consumed_quantity !== null && !isNaN(batch.consumed_quantity) ? batch.consumed_quantity : 0;
+    const remaining = Math.max(0, yieldCap - consumed);
 
     const isSugar = isSugarMaterial(batch.item_name);
     const updated: InventoryBatch = {
       ...batch,
+      consumed_quantity: consumed,
       original_quantity: yieldCap,
       yield_capacity: isRaw ? yieldCap : batch.yield_capacity,
       yield_unit: isRaw ? (batch.yield_unit || 'كوب') : batch.yield_unit,
@@ -4685,6 +4753,17 @@ export const dbService = {
     const products = dbService.getProducts();
     const rawMaterials = dbService.getRawMaterials();
 
+    const normalizeName = (s: string) => {
+      if (!s) return '';
+      return s
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .replace(/[أإآ]/g, 'ا')
+        .replace(/ة/g, 'ه')
+        .replace(/ى/g, 'ي');
+    };
+
     // Group the required items
     const requiredQuantities: { [itemId: string]: { name: string; quantity: number; isRawMaterial: boolean } } = {};
 
@@ -4718,12 +4797,13 @@ export const dbService = {
       const req = requiredQuantities[itemId];
       const targetItem = products.find(p => p.id === itemId) || rawMaterials.find(r => r.id === itemId);
       const targetName = targetItem ? ((targetItem as any).name_ar || (targetItem as any).name || '') : '';
+      const normTargetName = normalizeName(targetName);
 
       if (req.isRawMaterial) {
         // For raw material ingredients: presence of active open batch (status !== COMPLETED) means material is available
         const activeRmBatches = batches.filter(b => {
           const matchId = b.item_id === itemId;
-          const matchName = targetName && b.item_name.trim().toLowerCase() === targetName.trim().toLowerCase();
+          const matchName = normTargetName && normalizeName(b.item_name) === normTargetName;
           return (matchId || matchName) && b.status !== 'COMPLETED';
         });
 
@@ -4735,12 +4815,40 @@ export const dbService = {
         }
       } else {
         // For ready-made products (cans, bottled water), check exact unit count in remaining_quantity
-        const itemBatches = batches.filter(b => {
+        let itemBatches = batches.filter(b => {
           const matchId = b.item_id === itemId;
-          const matchName = targetName && b.item_name.trim().toLowerCase() === targetName.trim().toLowerCase();
-          return (matchId || matchName) && b.remaining_quantity > 0;
+          const matchName = normTargetName && normalizeName(b.item_name) === normTargetName;
+          return (matchId || matchName) && (b.remaining_quantity || 0) > 0;
         });
-        const totalAvailable = itemBatches.reduce((sum, b) => sum + b.remaining_quantity, 0);
+
+        let totalAvailable = itemBatches.reduce((sum, b) => sum + (b.remaining_quantity || 0), 0);
+
+        // Fallback / Auto-sync: If totalAvailable is less than requested, but targetItem exists with current_stock > 0
+        if (totalAvailable < req.quantity && targetItem && (targetItem as Product).current_stock > 0) {
+          const prodObj = targetItem as Product;
+          if (prodObj.current_stock >= req.quantity) {
+            // Auto-provision an active batch for this product so FIFO tracking works
+            const newBatch: InventoryBatch = {
+              id: `batch_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+              batch_serial: `دفعة ${prodObj.name_ar} رقم 1`,
+              item_type: 'ready_product',
+              item_id: prodObj.id,
+              item_name: prodObj.name_ar,
+              raw_material_qty: prodObj.current_stock,
+              original_quantity: prodObj.current_stock,
+              consumed_quantity: 0,
+              remaining_quantity: prodObj.current_stock,
+              unit: prodObj.unit || 'قطعة',
+              purchase_price: (prodObj.cost_price || 0) * prodObj.current_stock,
+              supplier: 'مورد عام',
+              purchase_date: new Date().toISOString().split('T')[0],
+              status: 'ACTIVE',
+              created_at: new Date().toISOString()
+            };
+            dbService.saveInventoryBatch(newBatch);
+            totalAvailable = prodObj.current_stock;
+          }
+        }
 
         if (totalAvailable < req.quantity) {
           return {
@@ -4889,12 +4997,24 @@ export const dbService = {
       return;
     }
     
+    const normalizeName = (s: string) => {
+      if (!s) return '';
+      return s
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .replace(/[أإآ]/g, 'ا')
+        .replace(/ة/g, 'ه')
+        .replace(/ى/g, 'ي');
+    };
+    const normTargetName = normalizeName(targetName);
+
     // Sort active batches chronologically by purchase_date then by created_at
-    const sortedBatches = batches
+    let sortedBatches = batches
       .filter(b => {
         const matchId = b.item_id === itemId;
-        const matchName = targetName && b.item_name.trim().toLowerCase() === targetName.trim().toLowerCase();
-        return (matchId || matchName) && b.remaining_quantity > 0;
+        const matchName = normTargetName && normalizeName(b.item_name) === normTargetName;
+        return (matchId || matchName) && (b.remaining_quantity || 0) > 0;
       })
       .sort((a, b) => {
         const dateA = new Date(a.purchase_date).getTime();
@@ -4902,6 +5022,31 @@ export const dbService = {
         if (dateA !== dateB) return dateA - dateB;
         return a.created_at.localeCompare(b.created_at);
       });
+
+    // Fallback: If no batch found in INVENTORY_BATCHES but targetItem has current_stock > 0
+    if (sortedBatches.length === 0 && targetItem && (targetItem as Product).current_stock > 0) {
+      const prodObj = targetItem as Product;
+      const newBatch: InventoryBatch = {
+        id: `batch_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        batch_serial: `دفعة ${prodObj.name_ar} رقم 1`,
+        item_type: 'ready_product',
+        item_id: prodObj.id,
+        item_name: prodObj.name_ar,
+        raw_material_qty: prodObj.current_stock,
+        original_quantity: prodObj.current_stock,
+        consumed_quantity: 0,
+        remaining_quantity: prodObj.current_stock,
+        unit: prodObj.unit || 'قطعة',
+        purchase_price: (prodObj.cost_price || 0) * prodObj.current_stock,
+        supplier: 'مورد عام',
+        purchase_date: new Date().toISOString().split('T')[0],
+        status: 'ACTIVE',
+        created_at: new Date().toISOString()
+      };
+      dbService.saveInventoryBatch(newBatch);
+      batches.push(newBatch);
+      sortedBatches = [newBatch];
+    }
 
     // Helper to get raw material conversion ratio
     const getRawMaterialRatio = (unit: string): number => {
@@ -5329,12 +5474,22 @@ export const dbService = {
     cashier_name?: string;
     items: BaristaOrderItem[];
     notes?: string;
+    notes_history?: OrderNoteHistoryItem[];
     status?: BaristaOrderStatus;
     sent_time?: string;
   }): BaristaOrder => {
     const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
     const now = new Date();
     const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+
+    const initialNotes = (orderData.notes || '').trim();
+    const initialHistory: OrderNoteHistoryItem[] = orderData.notes_history || (initialNotes ? [{
+      id: `nh_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      timestamp: timeStr,
+      date: now.toLocaleDateString('ar-EG'),
+      author_name: orderData.cashier_name || 'الكاشير',
+      note: initialNotes
+    }] : []);
 
     const newOrder: BaristaOrder = {
       id: `bar_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -5348,7 +5503,8 @@ export const dbService = {
       created_at: now.toISOString(),
       updated_at: now.toISOString(),
       sent_time: orderData.sent_time || timeStr,
-      notes: orderData.notes || ''
+      notes: initialNotes,
+      notes_history: initialHistory
     };
 
     // If active order already exists for same order_number or invoice_id, update items and timestamp
@@ -5358,10 +5514,36 @@ export const dbService = {
     );
 
     if (existingIdx >= 0) {
+      const prevOrder = orders[existingIdx];
+      let updatedHistory = prevOrder.notes_history || [];
+      if (prevOrder.notes && updatedHistory.length === 0) {
+        updatedHistory = [{
+          id: `nh_init_${prevOrder.id}`,
+          timestamp: prevOrder.sent_time || timeStr,
+          author_name: prevOrder.cashier_name || 'الكاشير',
+          note: prevOrder.notes
+        }];
+      }
+
+      if (initialNotes && initialNotes !== prevOrder.notes) {
+        updatedHistory = [
+          ...updatedHistory,
+          {
+            id: `nh_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            timestamp: timeStr,
+            date: now.toLocaleDateString('ar-EG'),
+            author_name: orderData.cashier_name || 'الكاشير',
+            note: initialNotes
+          }
+        ];
+      }
+
       orders[existingIdx] = {
-        ...orders[existingIdx],
+        ...prevOrder,
         ...newOrder,
-        id: orders[existingIdx].id,
+        id: prevOrder.id,
+        notes: initialNotes || prevOrder.notes || '',
+        notes_history: updatedHistory,
         updated_at: now.toISOString()
       };
     } else {
@@ -5381,20 +5563,71 @@ export const dbService = {
     return newOrder;
   },
 
-  updateBaristaOrderStatus: (orderId: string, status: BaristaOrderStatus): BaristaOrder | null => {
+  updateBaristaOrderNotes: (
+    orderId: string,
+    newNotes: string,
+    authorName: string,
+    itemNotesMap?: { [itemIdOrProdId: string]: string }
+  ): BaristaOrder | null => {
     const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
-    const index = orders.findIndex(o => o.id === orderId || o.invoice_id === orderId || o.order_number === orderId);
-    if (index === -1) return null;
+    const idx = orders.findIndex(o =>
+      o.id === orderId ||
+      o.invoice_id === orderId ||
+      o.order_number === orderId ||
+      `INV-${o.order_number}` === orderId
+    );
+    if (idx === -1) return null;
+
+    const existing = orders[idx];
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+    const trimmedNotes = (newNotes || '').trim();
+
+    const newHistoryItem: OrderNoteHistoryItem = {
+      id: `nh_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      timestamp: timeStr,
+      date: now.toLocaleDateString('ar-EG'),
+      author_name: authorName || 'الكاشير',
+      note: trimmedNotes || 'تم مسح الملاحظات'
+    };
+
+    let existingHistory = existing.notes_history || [];
+    if (existingHistory.length === 0 && existing.notes && existing.notes.trim()) {
+      existingHistory = [{
+        id: `nh_init_${existing.id}`,
+        timestamp: existing.sent_time || timeStr,
+        author_name: existing.cashier_name || 'الكاشير',
+        note: existing.notes
+      }];
+    }
+
+    const updatedHistory = [...existingHistory, newHistoryItem];
+
+    // Update item-level notes if provided
+    let updatedItems = existing.items;
+    if (itemNotesMap) {
+      updatedItems = existing.items.map(it => {
+        if (itemNotesMap[it.id] !== undefined) {
+          return { ...it, notes: itemNotesMap[it.id] };
+        } else if (itemNotesMap[it.product_id] !== undefined) {
+          return { ...it, notes: itemNotesMap[it.product_id] };
+        }
+        return it;
+      });
+    }
 
     const updatedOrder: BaristaOrder = {
-      ...orders[index],
-      status,
-      updated_at: new Date().toISOString()
+      ...existing,
+      notes: trimmedNotes,
+      notes_history: updatedHistory,
+      items: updatedItems,
+      updated_at: now.toISOString()
     };
-    orders[index] = updatedOrder;
+
+    orders[idx] = updatedOrder;
     setLocal(KEYS.BARISTA_ORDERS, orders);
 
-    // Sync operational_status on corresponding invoice without changing invoice_status
+    // Sync matching invoice notes in local storage
     const invoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
     const invIdx = invoices.findIndex(i =>
       (updatedOrder.invoice_id && i.id === updatedOrder.invoice_id) ||
@@ -5404,9 +5637,166 @@ export const dbService = {
       updatedOrder.order_number.endsWith(i.invoice_number)
     );
     if (invIdx > -1) {
-      invoices[invIdx].operational_status = status;
-      invoices[invIdx].updated_at = new Date().toISOString();
+      invoices[invIdx].notes = trimmedNotes;
+      invoices[invIdx].updated_at = now.toISOString();
       setLocal(KEYS.INVOICES, invoices);
+    }
+
+    // Play notification sound
+    playBaristaNoteUpdatedSound();
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('barista_orders_updated'));
+      window.dispatchEvent(new CustomEvent('barista_notes_updated', {
+        detail: {
+          order: updatedOrder,
+          order_number: updatedOrder.order_number,
+          newNote: trimmedNotes,
+          authorName
+        }
+      }));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
+    return updatedOrder;
+  },
+
+  updateBaristaOrderStatus: (orderId: string, status: BaristaOrderStatus): BaristaOrder | null => {
+    const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
+    const index = orders.findIndex(o => o.id === orderId || o.invoice_id === orderId || o.order_number === orderId);
+    if (index === -1) return null;
+
+    const nowIso = new Date().toISOString();
+    const updatedOrder: BaristaOrder = {
+      ...orders[index],
+      status,
+      updated_at: nowIso
+    };
+    orders[index] = updatedOrder;
+    setLocal(KEYS.BARISTA_ORDERS, orders);
+
+    // Sync operational_status on corresponding invoice
+    const invoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
+    let invIdx = invoices.findIndex(i =>
+      (updatedOrder.invoice_id && i.id === updatedOrder.invoice_id) ||
+      i.id === updatedOrder.id ||
+      i.invoice_number === updatedOrder.order_number ||
+      i.invoice_number === `INV-${updatedOrder.order_number}` ||
+      updatedOrder.order_number.endsWith(i.invoice_number)
+    );
+
+    if (invIdx > -1) {
+      invoices[invIdx].operational_status = status;
+      invoices[invIdx].updated_at = nowIso;
+
+      if (!invoices[invIdx].timeline) invoices[invIdx].timeline = [];
+
+      if (status === 'PREPARING') {
+        invoices[invIdx].timeline!.push({
+          status: 'PREPARING',
+          timestamp: nowIso,
+          operator: 'البارستا',
+          notes: 'بدء تحضير مشروبات الفاتورة في البارستا'
+        });
+      } else if (status === 'READY') {
+        invoices[invIdx].timeline!.push({
+          status: 'PREPARED',
+          timestamp: nowIso,
+          operator: 'البارستا',
+          notes: 'تم تجهيز الطلب بالكامل في البارستا'
+        });
+      } else if (status === 'DELIVERED') {
+        invoices[invIdx].delivery_time = nowIso;
+        if (invoices[invIdx].invoice_status !== 'CLOSED') {
+          invoices[invIdx].invoice_status = 'OPEN';
+        }
+        if (!invoices[invIdx].payment_status) {
+          invoices[invIdx].payment_status = 'UNPAID';
+        }
+
+        invoices[invIdx].timeline!.push({
+          status: 'DELIVERED_TO_CUSTOMER',
+          timestamp: nowIso,
+          operator: 'البارستا',
+          notes: 'تم التسليم للعميل بنجاح'
+        });
+
+        invoices[invIdx].timeline!.push({
+          status: 'OPEN_INVOICE',
+          timestamp: nowIso,
+          operator: 'الأنظمة',
+          notes: 'نقل الفاتورة إلى قائمة الفواتير المفتوحة'
+        });
+      }
+      setLocal(KEYS.INVOICES, invoices);
+    } else if (status === 'DELIVERED') {
+      // If invoice didn't exist yet, auto-create Open Invoice for this delivered order
+      const newInvId = `inv_bar_${updatedOrder.id}`;
+      const invNum = updatedOrder.order_number.startsWith('INV')
+        ? updatedOrder.order_number
+        : `INV-${updatedOrder.order_number}`;
+
+      const allProdsList = dbService.getProducts();
+      const totalVal = updatedOrder.items.reduce((acc, item) => {
+        const prodMatch = allProdsList.find(p => p.id === item.product_id);
+        const uPrice = item.unit_price ?? prodMatch?.selling_price ?? 0;
+        const tPrice = item.total_price ?? (uPrice * item.quantity);
+        return acc + tPrice;
+      }, 0);
+
+      const newInvoice: Invoice = {
+        id: newInvId,
+        invoice_number: invNum,
+        customer_id: null,
+        payment_type: 'CASH',
+        subtotal: totalVal,
+        discount: 0,
+        tax: 0,
+        total: totalVal,
+        paid_amount: 0,
+        remaining_amount: totalVal,
+        invoice_status: 'OPEN',
+        payment_status: 'UNPAID',
+        operational_status: 'DELIVERED',
+        cashier_name: updatedOrder.cashier_name || 'البارستا',
+        invoice_date: nowIso.split('T')[0],
+        notes: updatedOrder.notes || '',
+        table_number: updatedOrder.table_number || '',
+        delivery_time: nowIso,
+        created_at: updatedOrder.created_at || nowIso,
+        updated_at: nowIso,
+        timeline: [
+          { status: 'CREATED', timestamp: updatedOrder.created_at || nowIso, operator: updatedOrder.cashier_name || 'الأنظمة', notes: 'إنشاء طلب جديد' },
+          { status: 'DELIVERED_TO_CUSTOMER', timestamp: nowIso, operator: 'البارستا', notes: 'تم تسليم الطلب للعميل' },
+          { status: 'OPEN_INVOICE', timestamp: nowIso, operator: 'الأنظمة', notes: 'تحويل تلقائي إلى الفواتير المفتوحة' }
+        ]
+      };
+
+      invoices.unshift(newInvoice);
+      setLocal(KEYS.INVOICES, invoices);
+
+      // Save corresponding items
+      const existingItems = getLocal<InvoiceItem[]>(KEYS.INVOICE_ITEMS, []);
+      const newItemsList: InvoiceItem[] = updatedOrder.items.map(it => {
+        const prodMatch = allProdsList.find(p => p.id === it.product_id);
+        const uPrice = it.unit_price ?? prodMatch?.selling_price ?? 0;
+        const cPrice = it.cost_price ?? prodMatch?.cost_price ?? 0;
+        const tPrice = it.total_price ?? (uPrice * it.quantity);
+        return {
+          id: `item_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          invoice_id: newInvId,
+          product_id: it.product_id,
+          product_name_ar: it.product_name_ar,
+          quantity: it.quantity,
+          unit_price: uPrice,
+          cost_price: cPrice,
+          total_price: tPrice,
+          notes: it.notes || '',
+          created_at: nowIso,
+          updated_at: nowIso
+        };
+      });
+      setLocal(KEYS.INVOICE_ITEMS, [...existingItems, ...newItemsList]);
     }
 
     if (status === 'READY') {
@@ -5416,8 +5806,25 @@ export const dbService = {
       }
     }
 
+    if (status === 'DELIVERED') {
+      dbService.logAuditAction(
+        'OPEN_INVOICE_CREATED',
+        `الطلب رقم #${updatedOrder.order_number} تم تسليمه للعميل بنجاح وتحويله إلى الفواتير المفتوحة`,
+        updatedOrder.cashier_name || 'البارستا'
+      );
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('open_invoice_created', {
+          detail: {
+            order: updatedOrder,
+            message: `الطلب رقم #${updatedOrder.order_number} تم تسليمه للعميل وتحويله إلى الفواتير المفتوحة 📋`
+          }
+        }));
+      }
+    }
+
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('barista_orders_updated'));
+      window.dispatchEvent(new CustomEvent('open_invoices_updated'));
       window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
     }
 
@@ -5464,5 +5871,20 @@ export const dbService = {
       window.dispatchEvent(new CustomEvent('barista_orders_updated'));
     }
     return true;
+  },
+
+  getCurrentUser: (): AuthUser | null => {
+    try {
+      const raw = localStorage.getItem('cafe_eldeeb_logged_user');
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return null;
+  },
+
+  saveInvoices: (invoices: Invoice[]): void => {
+    setLocal(KEYS.INVOICES, invoices);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
   }
 };

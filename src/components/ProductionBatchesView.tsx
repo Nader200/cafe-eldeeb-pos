@@ -424,6 +424,30 @@ export default function ProductionBatchesView({
     };
 
     dbService.saveProduct(prodData);
+
+    if (stock > 0 && !editingProduct) {
+      const nextNum = dbService.getNextBatchNumber(name);
+      const batchSerial = `دفعة ${name} رقم ${nextNum}`;
+      const newBatch: InventoryBatch = {
+        id: `batch_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        batch_serial: batchSerial,
+        item_type: 'ready_product',
+        item_id: prodData.id,
+        item_name: name,
+        raw_material_qty: stock,
+        original_quantity: stock,
+        consumed_quantity: 0,
+        remaining_quantity: stock,
+        unit: 'قطعة',
+        purchase_price: costPrice * stock,
+        supplier: 'مورد عام',
+        purchase_date: new Date().toISOString().split('T')[0],
+        status: 'ACTIVE',
+        created_at: new Date().toISOString()
+      };
+      dbService.saveInventoryBatch(newBatch);
+    }
+
     onShowSuccessAlert(`تم حفظ المنتج الجاهز "${name}" بنجاح! 🥤`);
     setShowAddProductModal(false);
     resetProductForm();

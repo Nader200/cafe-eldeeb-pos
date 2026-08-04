@@ -224,6 +224,33 @@ export default function RawMaterialsView({
         const found = products.find(p => p.id === selectedItemId || (p.name_ar || '').trim().toLowerCase() === nameToSave.toLowerCase());
         if (found) {
           finalItemId = found.id;
+          dbService.saveProduct({
+            ...found,
+            current_stock: (found.current_stock || 0) + qtyNum,
+            cost_price: priceNum && qtyNum > 0 ? (priceNum / qtyNum) : found.cost_price
+          });
+        } else {
+          const newProd: Product = {
+            id: `prod_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+            category_id: dbService.getCategories()[0]?.id || 'cat_1',
+            name_ar: nameToSave,
+            name_en: nameToSave,
+            barcode: '',
+            image: '🥤',
+            selling_price: priceNum && qtyNum > 0 ? Math.round((priceNum / qtyNum) * 1.5) : 10,
+            cost_price: priceNum && qtyNum > 0 ? (priceNum / qtyNum) : 0,
+            current_stock: qtyNum,
+            minimum_stock: 5,
+            unit: unit || 'قطعة',
+            is_favorite: false,
+            is_available: true,
+            notes: 'منتج جاهز مضاف عبر الدفعات',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            is_raw_material: false
+          };
+          dbService.saveProduct(newProd);
+          finalItemId = newProd.id;
         }
       }
 

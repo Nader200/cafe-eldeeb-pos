@@ -236,6 +236,10 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
   // Configurable Vodafone Cash & InstaPay
   const [vodafoneCashNumber, setVodafoneCashNumber] = useState<string>('');
   const [instapayNumber, setInstapayNumber] = useState<string>('');
+  const [instapayId, setInstapayId] = useState<string>('');
+  const [digitalPaymentAccountOwner, setDigitalPaymentAccountOwner] = useState<string>('');
+  const [vodafoneCashQr, setVodafoneCashQr] = useState<string>('');
+  const [instapayQr, setInstapayQr] = useState<string>('');
 
   // Employee Consumption Policy state
   const [employeeConsumptionPolicy, setEmployeeConsumptionPolicy] = useState<'FREE' | 'DEDUCT'>('DEDUCT');
@@ -316,10 +320,14 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
     setClientPlatformOverride(s.client_platform || detectClientPlatform());
     setUpdateLogs(dbService.getUpdateLogs());
 
-    // Initialize payment numbers
+    // Initialize payment numbers & digital payment settings
     setPaymentNumbers(s.payment_numbers || []);
     setVodafoneCashNumber(s.vodafone_cash_number || '');
     setInstapayNumber(s.instapay_number || '');
+    setInstapayId(s.instapay_id || 'cafeeldeeb@instapay');
+    setDigitalPaymentAccountOwner(s.digital_payment_account_owner || 'Cafe Eldeeb');
+    setVodafoneCashQr(s.vodafone_cash_qr || '');
+    setInstapayQr(s.instapay_qr || '');
 
     // Initialize employee policy & themes
     setEmployeeConsumptionPolicy(s.employee_consumption_policy || 'DEDUCT');
@@ -386,6 +394,10 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
       ...config,
       vodafone_cash_number: vodafoneCashNumber,
       instapay_number: instapayNumber,
+      instapay_id: instapayId,
+      digital_payment_account_owner: digitalPaymentAccountOwner,
+      vodafone_cash_qr: vodafoneCashQr,
+      instapay_qr: instapayQr,
       updated_at: new Date().toISOString()
     };
 
@@ -764,7 +776,7 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
         </div>
 
         <span className="text-[10px] bg-gold-600/10 text-gold-500 border border-gold-600/20 px-3.5 py-1.5 rounded-full font-bold">
-          النسخة الخاصة • Private Edition v4.2
+          النسخة الخاصة • Private Edition v{CURRENT_APP_VERSION}
         </span>
       </div>
 
@@ -1671,6 +1683,19 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
           </div>
 
           <form onSubmit={handleSavePaymentNumbers} className="space-y-6">
+            {/* Account Owner Input */}
+            <div className="bg-luxury-bg border border-gray-900 rounded-2xl p-5 space-y-2">
+              <label className="text-xs text-gold-400 font-extrabold block">👤 اسم صاحب الحساب / المستفيد (يظهر للعميل أثناء الدفع):</label>
+              <input
+                type="text"
+                required
+                placeholder="مثال: Cafe Eldeeb"
+                value={digitalPaymentAccountOwner}
+                onChange={(e) => setDigitalPaymentAccountOwner(e.target.value)}
+                className="w-full bg-luxury-card border border-gray-800 text-white text-sm font-bold rounded-xl py-2.5 px-4 focus:outline-none focus:border-gold-500"
+              />
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               
               {/* Vodafone Cash Configuration Card */}
@@ -1700,9 +1725,49 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
                     }}
                     className="w-full bg-luxury-card border border-gray-800 text-gold-500 text-sm font-black rounded-xl py-3 px-4 text-center font-mono focus:outline-none focus:border-red-600 tracking-wider"
                   />
-                  <p className="text-[10px] text-gray-500 leading-relaxed font-medium">
-                    سيقوم النظام بقراءة هذا الرقم وإظهاره للعميل تلقائياً في نافذة السداد التفصيلي وإيصال الاستلام عند الدفع بمحفظة فودافون كاش.
-                  </p>
+                </div>
+
+                <div className="space-y-2 pt-2 border-t border-gray-900/60">
+                  <label className="text-xs text-gray-400 font-bold block">رابط أو صورة QR Code (اختياري):</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="رابط الصورة أو بيانات QR Code..."
+                      value={vodafoneCashQr}
+                      onChange={(e) => setVodafoneCashQr(e.target.value)}
+                      className="flex-1 bg-luxury-card border border-gray-800 text-gray-300 text-xs rounded-xl py-2 px-3 focus:outline-none focus:border-red-600 font-mono"
+                    />
+                    <label className="px-3 py-2 bg-red-600/20 hover:bg-red-600/40 border border-red-500/40 text-red-300 text-xs font-bold rounded-xl cursor-pointer shrink-0 flex items-center gap-1">
+                      <span>📁 رفع صورة</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              if (reader.result) setVodafoneCashQr(reader.result as string);
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                    </label>
+                  </div>
+                  {vodafoneCashQr && (
+                    <div className="flex items-center gap-2 pt-1">
+                      <img src={vodafoneCashQr} alt="Vodafone Cash QR" className="w-12 h-12 rounded-lg object-cover border border-gray-700" />
+                      <button
+                        type="button"
+                        onClick={() => setVodafoneCashQr('')}
+                        className="text-[10px] text-red-400 hover:underline"
+                      >
+                        حذف الصورة
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1721,21 +1786,61 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-xs text-gray-400 font-bold block">رقم الهاتف المرتبط بـ InstaPay *</label>
+                  <label className="text-xs text-gray-400 font-bold block">عنوان InstaPay ID أو رقم الهاتف *</label>
                   <input
                     type="text"
                     required
-                    placeholder="مثال: 01012345678"
-                    value={instapayNumber}
+                    placeholder="مثال: cafeeldeeb@instapay أو 01012345678"
+                    value={instapayId}
                     onChange={(e) => {
-                      const val = e.target.value.replace(/[^0-9]/g, '');
-                      setInstapayNumber(val);
+                      setInstapayId(e.target.value);
+                      if (/^[0-9]+$/.test(e.target.value)) setInstapayNumber(e.target.value);
                     }}
                     className="w-full bg-luxury-card border border-gray-800 text-gold-500 text-sm font-black rounded-xl py-3 px-4 text-center font-mono focus:outline-none focus:border-emerald-600 tracking-wider"
                   />
-                  <p className="text-[10px] text-gray-500 leading-relaxed font-medium">
-                    يجب إدخال رقم الهاتف المسجل في البنك والمرتبط بحساب إنستا باي لاستقبل التحويلات البنكية الفورية.
-                  </p>
+                </div>
+
+                <div className="space-y-2 pt-2 border-t border-gray-900/60">
+                  <label className="text-xs text-gray-400 font-bold block">رابط أو صورة QR Code (اختياري):</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="رابط الصورة أو بيانات QR Code..."
+                      value={instapayQr}
+                      onChange={(e) => setInstapayQr(e.target.value)}
+                      className="flex-1 bg-luxury-card border border-gray-800 text-gray-300 text-xs rounded-xl py-2 px-3 focus:outline-none focus:border-emerald-600 font-mono"
+                    />
+                    <label className="px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/40 border border-emerald-500/40 text-emerald-300 text-xs font-bold rounded-xl cursor-pointer shrink-0 flex items-center gap-1">
+                      <span>📁 رفع صورة</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              if (reader.result) setInstapayQr(reader.result as string);
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                    </label>
+                  </div>
+                  {instapayQr && (
+                    <div className="flex items-center gap-2 pt-1">
+                      <img src={instapayQr} alt="InstaPay QR" className="w-12 h-12 rounded-lg object-cover border border-gray-700" />
+                      <button
+                        type="button"
+                        onClick={() => setInstapayQr('')}
+                        className="text-[10px] text-red-400 hover:underline"
+                      >
+                        حذف الصورة
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 

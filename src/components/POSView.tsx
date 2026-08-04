@@ -522,34 +522,78 @@ export default function POSView({
 
     const customerObj = customers.find(c => c.id === selectedCustomer);
     const customerNameStr = customerObj ? customerObj.full_name : 'عميل مباشر';
-
-    const orderNumberStr = String(dbService.getInvoices(true).length + 1001);
-
-    const baristaItems: BaristaOrderItem[] = cart.map((item, idx) => ({
-      id: `bitm_${Date.now()}_${idx}`,
-      product_id: item.product.id,
-      product_name_ar: item.product.name_ar,
-      product_name_en: item.product.name_en,
-      category_id: item.product.category_id,
-      category_name: categories.find(c => c.id === item.product.category_id)?.name_ar || '',
-      quantity: item.quantity,
-      notes: item.notes || '',
-      category_icon: getItemCategoryIcon(categories.find(c => c.id === item.product.category_id)?.name_ar, item.product.name_ar)
-    }));
-
     const cashierName = currentUser?.name || 'الكاشير';
 
-    dbService.addBaristaOrder({
-      order_number: orderNumberStr,
-      table_number: tableNumberStr,
-      customer_name: customerNameStr,
-      cashier_name: cashierName,
-      items: baristaItems,
-      notes: invoiceNotes,
-      status: 'NEW'
-    });
+    try {
+      // 1. Save or ensure Open Invoice in DB
+      const savedOpenRes = dbService.saveOpenInvoice(
+        activeInvoiceId,
+        cart,
+        paymentType,
+        selectedCustomer === 'c_general' ? null : selectedCustomer,
+        discount,
+        taxPercentage,
+        0,
+        cashierName,
+        invoiceNotes,
+        tableNumberStr,
+        paymentMethod,
+        referenceNumber,
+        paymentNotes,
+        'OPEN',
+        senderPhone,
+        receiptImageUrl
+      );
 
-    onShowSuccessAlert(`تم إرسال الطلب رقم #${orderNumberStr} لشاشة البارستا بنجاح ☕!`);
+      // 2. Prepare Barista Order Items with full metadata
+      const baristaItems: BaristaOrderItem[] = cart.map((item, idx) => ({
+        id: `bitm_${Date.now()}_${idx}`,
+        product_id: item.product.id,
+        product_name_ar: item.product.name_ar,
+        product_name_en: item.product.name_en,
+        category_id: item.product.category_id,
+        category_name: categories.find(c => c.id === item.product.category_id)?.name_ar || '',
+        quantity: item.quantity,
+        notes: (item.notes || item.kitchen_notes || '').trim(),
+        category_icon: getItemCategoryIcon(categories.find(c => c.id === item.product.category_id)?.name_ar, item.product.name_ar),
+        unit_price: item.custom_price !== undefined ? item.custom_price : item.product.selling_price,
+        cost_price: item.product.cost_price,
+        total_price: (item.custom_price !== undefined ? item.custom_price : item.product.selling_price) * item.quantity
+      }));
+
+      // 3. Dispatch to Barista Kitchen Screen
+      dbService.addBaristaOrder({
+        order_number: savedOpenRes.invoice.invoice_number,
+        invoice_id: savedOpenRes.invoice.id,
+        table_number: tableNumberStr,
+        customer_name: customerNameStr,
+        cashier_name: cashierName,
+        items: baristaItems,
+        notes: invoiceNotes,
+        status: 'NEW'
+      });
+
+      onShowSuccessAlert(`تم إرسال الطلب رقم #${savedOpenRes.invoice.invoice_number} للبارستا وتوثيقه كفاتورة مفتوحة ☕!`);
+
+      // 4. Reset cart state for cashier
+      setCart([]);
+      setDiscount(0);
+      setTaxPercentage(settings.default_tax_percentage !== undefined ? settings.default_tax_percentage : 0);
+      setInvoiceNotes('');
+      setTableNumber('');
+      setSelectedCustomer('c_general');
+      setPaymentMethod('CASH');
+      setReferenceNumber('');
+      setSenderPhone('');
+      setReceiptImageUrl('');
+      setPaymentNotes('');
+      setActiveInvoiceId(undefined);
+      if (clearReopenedInvoiceId) {
+        clearReopenedInvoiceId();
+      }
+    } catch (err: any) {
+      onShowWarningAlert(err.message || 'حدث خطأ أثناء إرسال الطلب للبارستا');
+    }
   };
 
   const activeDrawer = useMemo(() => dbService.getActiveDrawer(), []);
@@ -1537,6 +1581,50 @@ export default function POSView({
                 );
               })
             )}
+          </div>
+
+          {/* Kitchen / Barista Notes Input on Main Order Screen */}
+          <div className="bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-xl space-y-1.5 shrink-0 my-1">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] font-black text-amber-300 flex items-center gap-1">
+                <span>🍳 ملاحظات للمطبخ / البارستا:</span>
+              </label>
+              {invoiceNotes && (
+                <button
+                  type="button"
+                  onClick={() => setInvoiceNotes('')}
+                  className="text-[9px] text-amber-400 hover:text-amber-200 cursor-pointer font-bold"
+                >
+                  مسح
+                </button>
+              )}
+            </div>
+            <input
+              type="text"
+              placeholder="مثال: مع كأس ثلج، بدون سكر، كوب سفري..."
+              value={invoiceNotes}
+              onChange={(e) => setInvoiceNotes(e.target.value)}
+              className="w-full bg-black/80 border border-amber-500/40 text-amber-200 text-xs font-bold rounded-lg py-1.5 px-2.5 focus:outline-none focus:border-amber-400"
+            />
+            {/* Quick preset chips */}
+            <div className="flex flex-wrap gap-1">
+              {['مع كأس ثلج', 'بدون سكر', 'سكر زيادة', 'كوب سفري', 'بعد الأكل'].map((chip, cIdx) => (
+                <button
+                  key={cIdx}
+                  type="button"
+                  onClick={() => {
+                    if (!invoiceNotes.trim()) {
+                      setInvoiceNotes(chip);
+                    } else if (!invoiceNotes.includes(chip)) {
+                      setInvoiceNotes(`${invoiceNotes.trim()} - ${chip}`);
+                    }
+                  }}
+                  className="px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/40 border border-amber-500/30 text-amber-300 text-[9px] font-bold rounded-md transition-all cursor-pointer"
+                >
+                  + {chip}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* 3. Compact Totals Section with Advanced Panel Toggle */}

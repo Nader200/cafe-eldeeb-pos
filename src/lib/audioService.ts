@@ -65,3 +65,32 @@ export const playOrderReadySound = () => {
     console.warn('Audio notification failed:', e);
   }
 };
+
+// Play notification sound when order notes are updated by Cashier/Admin
+export const playBaristaNoteUpdatedSound = () => {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+
+    // Warning / Attention double-tone chime: A5 (880Hz) -> D6 (1174.66Hz)
+    const tones = [880, 1174.66];
+    tones.forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const startTime = now + idx * 0.12;
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, startTime);
+      gain.gain.setValueAtTime(0.4, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(startTime);
+      osc.stop(startTime + 0.35);
+    });
+  } catch (e) {
+    console.warn('Audio notification failed:', e);
+  }
+};
+

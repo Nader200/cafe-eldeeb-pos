@@ -156,6 +156,8 @@ export interface Invoice {
   payment_time?: string;
   created_at: string;
   updated_at: string;
+  delivery_time?: string;
+  admin_name?: string;
   timeline?: InvoiceTimelineEvent[];
 }
 
@@ -170,6 +172,7 @@ export interface InvoiceItem {
   product_name_ar: string; // Denormalized for printing/display speed
   created_at: string;
   updated_at: string;
+  notes?: string;
   original_price?: number;
   is_price_edited?: boolean;
   price_edit_reason?: string;
@@ -297,6 +300,10 @@ export interface AppSettings {
   payment_numbers?: PaymentNumber[];
   vodafone_cash_number?: string;
   instapay_number?: string;
+  instapay_id?: string;
+  digital_payment_account_owner?: string;
+  vodafone_cash_qr?: string;
+  instapay_qr?: string;
   // --- Employee Settings ---
   employee_consumption_policy?: 'FREE' | 'DEDUCT';
   seasonal_theme?: 'LUXURY_COFFEE' | 'RAMADAN' | 'EID' | 'EID_AL_FITR' | 'EID_AL_ADHA' | 'WINTER' | 'SUMMER' | 'VALENTINE' | 'NEW_YEAR' | 'NONE';
@@ -630,6 +637,15 @@ export type UserRole = 'Admin' | 'Cashier' | 'Barista';
 
 export type BaristaOrderStatus = 'NEW' | 'PREPARING' | 'READY' | 'DELIVERED';
 
+export interface OrderNoteHistoryItem {
+  id: string;
+  timestamp: string;
+  date?: string;
+  author_name: string;
+  author_role?: string;
+  note: string;
+}
+
 export interface BaristaOrderItem {
   id: string;
   product_id: string;
@@ -640,6 +656,9 @@ export interface BaristaOrderItem {
   quantity: number;
   notes?: string;
   category_icon?: string;
+  unit_price?: number;
+  cost_price?: number;
+  total_price?: number;
 }
 
 export interface BaristaOrder {
@@ -655,6 +674,7 @@ export interface BaristaOrder {
   updated_at: string;
   sent_time: string;
   notes?: string;
+  notes_history?: OrderNoteHistoryItem[];
 }
 
 export interface AuthUser {

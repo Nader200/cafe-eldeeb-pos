@@ -29,7 +29,14 @@ import {
   ChevronLeft,
   Settings,
   X,
-  Gamepad2
+  Gamepad2,
+  Plus,
+  CreditCard,
+  UserCheck,
+  History,
+  Copy,
+  Camera,
+  Upload
 } from 'lucide-react';
 import { dbService, safeStorage } from '../dbService';
 const localStorage = safeStorage;
@@ -127,6 +134,68 @@ export default function OpenInvoicesView({
   const [moveItemQty, setMoveItemQty] = useState<number>(1);
   const [targetInvoiceId, setTargetInvoiceId] = useState<string>('');
 
+  // Quick Pay Modal State
+  const [showPayModal, setShowPayModal] = useState<boolean>(false);
+  const [payInvoice, setPayInvoice] = useState<Invoice | null>(null);
+  const [payMethod, setPayMethod] = useState<string>('CASH');
+  const [payCashReceived, setPayCashReceived] = useState<number>(0);
+  const [payNotes, setPayNotes] = useState<string>('');
+  const [paySenderPhone, setPaySenderPhone] = useState<string>('');
+  const [payRefNo, setPayRefNo] = useState<string>('');
+  const [payReceiptImage, setPayReceiptImage] = useState<string>('');
+
+  // Credit Conversion Modal State
+  const [showCreditModal, setShowCreditModal] = useState<boolean>(false);
+  const [creditInvoice, setCreditInvoice] = useState<Invoice | null>(null);
+  const [creditCustomerId, setCreditCustomerId] = useState<string>('');
+  const [creditNotes, setCreditNotes] = useState<string>('');
+
+  // Timeline Modal State
+  const [showTimelineModal, setShowTimelineModal] = useState<boolean>(false);
+  const [timelineInvoice, setTimelineInvoice] = useState<Invoice | null>(null);
+
+  // Note Edit Modal State
+  const [editingNotesInvoice, setEditingNotesInvoice] = useState<Invoice | null>(null);
+  const [newInvoiceNotesInput, setNewInvoiceNotesInput] = useState<string>('');
+
+  const handleOpenNotesModal = (inv: Invoice) => {
+    setEditingNotesInvoice(inv);
+    setNewInvoiceNotesInput(inv.notes || '');
+  };
+
+  const handleSaveInvoiceNotes = () => {
+    if (!editingNotesInvoice) return;
+    const trimmed = newInvoiceNotesInput.trim();
+
+    // Update invoice notes in local database
+    const invoices = dbService.getInvoices();
+    const idx = invoices.findIndex(i => i.id === editingNotesInvoice.id);
+    if (idx > -1) {
+      invoices[idx].notes = trimmed;
+      invoices[idx].updated_at = new Date().toISOString();
+      dbService.saveInvoices(invoices);
+    }
+
+    // Also update matching Barista Order notes
+    const currentUser = dbService.getCurrentUser();
+    dbService.updateBaristaOrderNotes(
+      editingNotesInvoice.id,
+      trimmed,
+      currentUser?.name || 'الكاشير'
+    );
+
+    if (selectedInvoice && selectedInvoice.id === editingNotesInvoice.id) {
+      setSelectedInvoice({ ...selectedInvoice, notes: trimmed });
+    }
+
+    if (onShowSuccessAlert) {
+      onShowSuccessAlert(`تم تحديث ملاحظات الفاتورة #${editingNotesInvoice.invoice_number} وتزامنها مع البارستا! 🔔`);
+    }
+
+    setEditingNotesInvoice(null);
+    loadData();
+  };
+
   const settings = useMemo(() => dbService.getSettings(), []);
 
   // Sync data on load and dynamic updates
@@ -140,15 +209,184 @@ export default function OpenInvoicesView({
   useEffect(() => {
     loadData();
     window.addEventListener('cafe_db_synced_remote', loadData);
+    window.addEventListener('open_invoices_updated', loadData);
+    window.addEventListener('open_invoice_created', loadData);
     // Refresh live timers every 10 seconds
     const interval = setInterval(() => {
       setTicks(prev => prev + 1);
     }, 10000);
     return () => {
       window.removeEventListener('cafe_db_synced_remote', loadData);
+      window.removeEventListener('open_invoices_updated', loadData);
+      window.removeEventListener('open_invoice_created', loadData);
       clearInterval(interval);
     };
   }, []);
+
+  const handleConfirmPayInvoice = () => {
+    if (!payInvoice) return;
+    try {
+      if (payMethod === 'VODAFONE_CASH' || payMethod === 'INSTAPAY') {
+        if (!paySenderPhone.trim()) {
+          if (onShowWarningAlert) onShowWarningAlert('برجاء إدخال رقم هاتف العميل المرسل.');
+          return;
+        }
+        if (!payRefNo.trim()) {
+          if (onShowWarningAlert) onShowWarningAlert('برجاء إدخال رقم العملية (الرقم المرجعي).');
+          return;
+        }
+        if (!payReceiptImage) {
+          if (onShowWarningAlert) onShowWarningAlert('برجاء إرفاق صورة إيصال التحويل لإتمام العملية.');
+          return;
+        }
+      }
+
+      const details = dbService.getInvoiceById(payInvoice.id);
+      if (!details) throw new Error('تعذر العثور على بيانات الفاتورة!');
+
+      const allProducts = dbService.getProducts();
+      const cartItems = details.items.map(item => {
+        const prod = allProducts.find(p => p.id === item.product_id) || {
+          id: item.product_id,
+          category_id: 'cat_all',
+          name_ar: item.product_name_ar,
+          name_en: item.product_name_ar,
+          barcode: '',
+          selling_price: item.unit_price,
+          cost_price: item.cost_price,
+          current_stock: 999,
+          minimum_stock: 0,
+          unit: 'عدد',
+          is_favorite: false,
+          is_available: true,
+          notes: '',
+          image: '☕',
+          created_at: '',
+          updated_at: ''
+        };
+        return {
+          product: prod,
+          quantity: item.quantity,
+          notes: item.notes || '',
+          kitchen_notes: '',
+          custom_price: item.is_price_edited ? item.unit_price : undefined
+        };
+      });
+
+      const isCreditType = payMethod === 'CREDIT';
+      const targetPaymentNumber = payMethod === 'VODAFONE_CASH'
+        ? (settings.vodafone_cash_number || '01094793701')
+        : payMethod === 'INSTAPAY'
+        ? (settings.instapay_id || settings.instapay_number || 'cafeeldeeb@instapay')
+        : '';
+
+      dbService.closeOpenInvoice(
+        payInvoice.id,
+        cartItems,
+        isCreditType ? 'CREDIT' : 'CASH',
+        payInvoice.customer_id,
+        payInvoice.discount || 0,
+        0,
+        isCreditType ? 0 : payInvoice.total,
+        currentUser?.name || 'الكاشير',
+        payNotes || payInvoice.notes || '',
+        payInvoice.table_number || '',
+        payMethod,
+        payRefNo,
+        payNotes,
+        0,
+        targetPaymentNumber,
+        paySenderPhone,
+        payReceiptImage
+      );
+
+      setShowPayModal(false);
+      setPayInvoice(null);
+      setSelectedInvoice(null);
+      setPaySenderPhone('');
+      setPayRefNo('');
+      setPayReceiptImage('');
+      loadData();
+      if (onShowSuccessAlert) {
+        onShowSuccessAlert(`تم سداد وإغلاق الفاتورة رقم #${payInvoice.invoice_number} بنجاح!`);
+      }
+    } catch (err: any) {
+      if (onShowWarningAlert) {
+        onShowWarningAlert(err.message || 'حدث خطأ أثناء سداد الفاتورة');
+      }
+    }
+  };
+
+  const handleConfirmCreditInvoice = () => {
+    if (!creditInvoice) return;
+    if (!creditCustomerId || creditCustomerId === 'c_general') {
+      if (onShowWarningAlert) onShowWarningAlert('يرجى اختيار عميل آجل مسجل بسجلات الكافيه أولاً!');
+      return;
+    }
+    try {
+      const details = dbService.getInvoiceById(creditInvoice.id);
+      if (!details) throw new Error('تعذر العثور على بيانات الفاتورة!');
+
+      const allProducts = dbService.getProducts();
+      const cartItems = details.items.map(item => {
+        const prod = allProducts.find(p => p.id === item.product_id) || {
+          id: item.product_id,
+          category_id: 'cat_all',
+          name_ar: item.product_name_ar,
+          name_en: item.product_name_ar,
+          barcode: '',
+          selling_price: item.unit_price,
+          cost_price: item.cost_price,
+          current_stock: 999,
+          minimum_stock: 0,
+          unit: 'عدد',
+          is_favorite: false,
+          is_available: true,
+          notes: '',
+          image: '☕',
+          created_at: '',
+          updated_at: ''
+        };
+        return {
+          product: prod,
+          quantity: item.quantity,
+          notes: item.notes || '',
+          kitchen_notes: '',
+          custom_price: item.is_price_edited ? item.unit_price : undefined
+        };
+      });
+
+      dbService.closeOpenInvoice(
+        creditInvoice.id,
+        cartItems,
+        'CREDIT',
+        creditCustomerId,
+        creditInvoice.discount || 0,
+        0,
+        0,
+        currentUser?.name || 'الكاشير',
+        creditNotes || creditInvoice.notes || '',
+        creditInvoice.table_number || '',
+        'CREDIT',
+        '',
+        creditNotes,
+        0,
+        ''
+      );
+
+      setShowCreditModal(false);
+      setCreditInvoice(null);
+      setSelectedInvoice(null);
+      loadData();
+      if (onShowSuccessAlert) {
+        onShowSuccessAlert(`تم تحويل الفاتورة رقم #${creditInvoice.invoice_number} لحساب العميل الآجل بنجاح!`);
+      }
+    } catch (err: any) {
+      if (onShowWarningAlert) {
+        onShowWarningAlert(err.message || 'حدث خطأ أثناء تحويل الفاتورة لحساب آجل');
+      }
+    }
+  };
 
   // Update tables occupied status dynamically based on open invoices
   const tablesWithLiveStatus = useMemo(() => {
@@ -215,6 +453,8 @@ export default function OpenInvoicesView({
         'أدمن النظام / نادر الديب'
       );
       
+      window.dispatchEvent(new CustomEvent('open_invoices_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
       onShowSuccessAlert('تم حذف وإلغاء الفاتورة المفتوحة بنجاح وصفرت تعليقاتها.');
       
       setShowDeletePinModal(false);
@@ -835,25 +1075,117 @@ export default function OpenInvoicesView({
                                 <Clock className="w-3 h-3 text-gold-500" />
                                 <span>مفتوح منذ: {formatDateTime(inv.created_at)}</span>
                               </p>
+                              {inv.delivery_time && (
+                                <p className="flex items-center gap-1 justify-end text-purple-400 font-bold">
+                                  <span>تاريخ التسليم: {formatDateTime(inv.delivery_time)}</span>
+                                </p>
+                              )}
                             </div>
                           </div>
                         </div>
 
-                        <div className="flex justify-between items-center pt-2.5 border-t border-gray-900/40">
-                          <span className="text-[10px] text-gray-500 font-bold truncate max-w-[200px]">
-                            {inv.notes ? `📝 ${inv.notes}` : 'بلا ملاحظات'}
-                          </span>
-                          <div className="flex gap-1.5">
+                        {/* Card Action Buttons Bar */}
+                        <div className="pt-2.5 border-t border-gray-900/40 flex flex-col gap-2">
+                          <div className="flex justify-between items-center text-[10px] text-gray-500 font-bold">
+                            <span className="truncate max-w-[180px]">
+                              {inv.notes ? `📝 ${inv.notes}` : 'بلا ملاحظات'}
+                            </span>
+                            <span className="text-gold-500 text-[9px]">
+                              {inv.cashier_name ? `بواسطة: ${inv.cashier_name}` : ''}
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            {/* 1. فتح الفاتورة */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedInvoice(inv);
+                              }}
+                              className="px-2.5 py-1 bg-luxury-bg border border-gray-800 hover:border-gold-500 text-gold-400 text-[9px] font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                              title="فتح معاينة تفاصيل الفاتورة"
+                            >
+                              <Eye className="w-3 h-3 text-gold-500" />
+                              فتح الفاتورة
+                            </button>
+
+                            {/* 2. تعديل */}
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleEditOpenInvoice(inv.id);
                               }}
-                              className="px-3 py-1 bg-gradient-to-r from-yellow-600 to-amber-500 text-black text-[9px] font-extrabold rounded-md hover:opacity-90 flex items-center gap-1 cursor-pointer shadow"
+                              className="px-2.5 py-1 bg-amber-600/20 border border-amber-600/40 hover:bg-amber-600/30 text-amber-300 text-[9px] font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                              title="متابعة وتعديل الفاتورة في كاشير POS"
                             >
-                              <ShoppingCart className="w-3 h-3" />
-                              تعديل وإغلاق (Resume)
+                              <ShoppingCart className="w-3 h-3 text-amber-400" />
+                              تعديل
                             </button>
+
+                            {/* 3. إضافة أصناف */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditOpenInvoice(inv.id);
+                              }}
+                              className="px-2.5 py-1 bg-blue-600/20 border border-blue-600/40 hover:bg-blue-600/30 text-blue-300 text-[9px] font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                              title="إضافة أصناف جديدة للفاتورة المفتوحة"
+                            >
+                              <Plus className="w-3 h-3 text-blue-400" />
+                              إضافة أصناف
+                            </button>
+
+                            {/* 4. إغلاق بالحساب */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPayInvoice(inv);
+                                setPayMethod('CASH');
+                                setPayCashReceived(inv.total);
+                                setPayNotes('');
+                                setPaySenderPhone('');
+                                setPayRefNo('');
+                                setPayReceiptImage('');
+                                setShowPayModal(true);
+                              }}
+                              className="px-2.5 py-1 bg-emerald-600/20 border border-emerald-600/40 hover:bg-emerald-600/30 text-emerald-300 text-[9px] font-extrabold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                              title="سداد الحساب بالكامل وإغلاق الفاتورة"
+                            >
+                              <CreditCard className="w-3 h-3 text-emerald-400" />
+                              إغلاق بالحساب
+                            </button>
+
+                            {/* 5. تحويل إلى عميل آجل */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setCreditInvoice(inv);
+                                setCreditCustomerId(inv.customer_id || '');
+                                setCreditNotes('');
+                                setShowCreditModal(true);
+                              }}
+                              className="px-2.5 py-1 bg-purple-600/20 border border-purple-600/40 hover:bg-purple-600/30 text-purple-300 text-[9px] font-extrabold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                              title="تحويل الفاتورة على حساب عميل آجل"
+                            >
+                              <UserCheck className="w-3 h-3 text-purple-400" />
+                              تحويل لعميل آجل
+                            </button>
+
+                            {/* 6. سجل التتبع Timeline */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setTimelineInvoice(inv);
+                                setShowTimelineModal(true);
+                              }}
+                              className="px-2.5 py-1 bg-gray-800/80 border border-gray-700 hover:border-gold-500/50 text-gray-300 text-[9px] font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                              title="عرض السجل الزمني وتفاصيل تتبع الفاتورة"
+                            >
+                              <History className="w-3 h-3 text-gold-400" />
+                              سجل التتبع
+                            </button>
+
+                            {/* 6. إلغاء الفاتورة (Admin only) */}
                             {currentUser?.role === 'Admin' && (
                               <button
                                 onClick={(e) => {
@@ -863,10 +1195,11 @@ export default function OpenInvoicesView({
                                   setDeleteError('');
                                   setShowDeletePinModal(true);
                                 }}
-                                className="p-1 text-gray-500 hover:text-red-500 rounded transition-all cursor-pointer"
-                                title="حذف الفاتورة بالكامل"
+                                className="px-2 py-1 bg-red-950/30 border border-red-900/40 hover:bg-red-900/40 text-red-400 text-[9px] font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer ml-auto"
+                                title="إلغاء الفاتورة المفتوحة بالكامل"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                <Trash2 className="w-3 h-3 text-red-500" />
+                                إلغاء
                               </button>
                             )}
                           </div>
@@ -1112,11 +1445,18 @@ export default function OpenInvoicesView({
                       <span className="text-gray-500">مفتوحة بواسطة:</span>
                       <span className="text-gray-400">{selectedInvoice.cashier_name}</span>
                     </div>
-                    {selectedInvoice.notes && (
-                      <div className="pt-2 border-t border-gray-900/50 text-gray-400 text-[10px] leading-relaxed">
-                        📝 <strong>ملاحظات:</strong> {selectedInvoice.notes}
+                    <div className="pt-2 border-t border-gray-900/50 flex items-center justify-between gap-2">
+                      <div className="text-amber-300 text-[11px] font-extrabold leading-relaxed flex-1">
+                        📝 <strong>ملاحظات الطلب:</strong> {selectedInvoice.notes || 'لا توجد ملاحظات حالياً'}
                       </div>
-                    )}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenNotesModal(selectedInvoice)}
+                        className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/40 text-amber-300 border border-amber-500/40 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shrink-0"
+                      >
+                        ✏️ تعديل الملاحظات
+                      </button>
+                    </div>
                   </div>
 
                   {/* Items List */}
@@ -2167,6 +2507,746 @@ export default function OpenInvoicesView({
               </div>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* --- QUICK PAY MODAL --- */}
+      {showPayModal && payInvoice && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-3 sm:p-6 animate-scale-in" dir="rtl">
+          <div className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-[#0a0a0a] border border-emerald-500/30 rounded-3xl p-5 sm:p-6 shadow-2xl relative text-right space-y-4">
+            <button
+              onClick={() => { setShowPayModal(false); setPayInvoice(null); }}
+              className="absolute top-4 left-4 text-gray-500 hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="border-b border-gray-900 pb-3">
+              <h3 className="text-sm font-extrabold text-emerald-400 flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-emerald-400" />
+                إغلاق وسداد الفاتورة رقم #{payInvoice.invoice_number}
+              </h3>
+              <p className="text-[10px] text-gray-500 mt-1">حدد طريقة السداد لإكمال العملية ونقل الفاتورة تلقائياً إلى سجل الفواتير المغلقة.</p>
+            </div>
+
+            {/* Invoice Summary Box */}
+            <div className="bg-luxury-bg p-3 rounded-2xl border border-gray-900 space-y-1.5 text-xs">
+              <div className="flex justify-between text-gray-400">
+                <span>العميل:</span>
+                <span className="text-white font-bold">{getCustomerName(payInvoice.customer_id)}</span>
+              </div>
+              <div className="flex justify-between text-gray-400">
+                <span>رقم الطاولة:</span>
+                <span className="text-gold-500 font-bold">{payInvoice.table_number || 'طلب خارجي كاونتر'}</span>
+              </div>
+              <div className="flex justify-between text-xs font-black text-emerald-400 pt-2 border-t border-gray-900">
+                <span>المبلغ الكلي المطلوب:</span>
+                <span className="text-sm font-mono">{payInvoice.total} {settings.currency}</span>
+              </div>
+            </div>
+
+            {/* Payment Method Selector */}
+            <div className="space-y-2">
+              <label className="text-[10px] font-extrabold text-gold-500 tracking-wider">اختر طريقة الدفع</label>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'CASH', name: '💵 نقدي (Cash)', icon: '💵' },
+                  { id: 'VODAFONE_CASH', name: '📱 فودافون كاش', icon: '📱' },
+                  { id: 'INSTAPAY', name: '⚡ انستا باي', icon: '⚡' },
+                ].map(method => (
+                  <button
+                    key={method.id}
+                    type="button"
+                    onClick={() => setPayMethod(method.id)}
+                    className={`p-2.5 rounded-xl border text-xs font-bold text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
+                      payMethod === method.id
+                        ? 'bg-emerald-500/15 border-emerald-500 text-emerald-300 shadow-md'
+                        : 'bg-luxury-bg border-gray-900 hover:border-gray-800 text-gray-400'
+                    }`}
+                  >
+                    <span className="text-base">{method.icon}</span>
+                    <span className="text-[11px] font-extrabold">{method.name.split(' ')[1] || method.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Cash Input if CASH */}
+            {payMethod === 'CASH' && (
+              <div className="space-y-1 bg-luxury-bg p-3 rounded-2xl border border-gray-900">
+                <label className="text-[10px] font-bold text-gray-400">المبلغ المستلم نقداً من العميل:</label>
+                <input
+                  type="number"
+                  value={payCashReceived}
+                  onChange={(e) => setPayCashReceived(Number(e.target.value) || 0)}
+                  className="w-full bg-black border border-gray-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-white font-mono text-sm font-bold text-left"
+                />
+                {payCashReceived > payInvoice.total && (
+                  <p className="text-[10px] text-emerald-400 font-bold text-left mt-1">
+                    المتبقي (الباقي للعميل): {payCashReceived - payInvoice.total} {settings.currency}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Vodafone Cash Details */}
+            {payMethod === 'VODAFONE_CASH' && (
+              <div className="bg-red-950/20 border border-red-500/40 p-4 rounded-3xl space-y-4 animate-fade-in shadow-xl">
+                {/* Header Title */}
+                <div className="text-center border-b border-red-900/40 pb-2">
+                  <h4 className="text-sm font-black text-red-400 flex items-center justify-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>
+                    الدفع عبر Vodafone Cash
+                  </h4>
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    صاحب الحساب: <span className="text-white font-bold">{settings.digital_payment_account_owner || 'Cafe Eldeeb'}</span>
+                  </p>
+                </div>
+
+                {/* Top Number & Copy Button */}
+                <div className="flex items-center justify-between bg-black/80 p-3 rounded-2xl border border-red-500/30 shadow-md">
+                  <div className="text-right">
+                    <span className="text-[10px] text-gray-400 font-bold block">رقم Vodafone Cash</span>
+                    <span className="text-base font-mono font-black text-red-300 tracking-wider dir-ltr inline-block">
+                      {settings.vodafone_cash_number || '01094793701'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const num = settings.vodafone_cash_number || '01094793701';
+                      try {
+                        if (navigator.clipboard && window.isSecureContext) {
+                          navigator.clipboard.writeText(num);
+                        } else {
+                          const textArea = document.createElement("textarea");
+                          textArea.value = num;
+                          document.body.appendChild(textArea);
+                          textArea.select();
+                          document.execCommand('copy');
+                          document.body.removeChild(textArea);
+                        }
+                      } catch (e) {}
+                      if (onShowSuccessAlert) {
+                        onShowSuccessAlert('تم نسخ الرقم بنجاح.');
+                      }
+                    }}
+                    className="px-3.5 py-2 bg-red-600/30 hover:bg-red-600/50 text-red-200 border border-red-500/50 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-md active:scale-95"
+                  >
+                    <Copy className="w-3.5 h-3.5 text-red-300" />
+                    <span>نسخ الرقم</span>
+                  </button>
+                </div>
+
+                {/* Center Large QR Box */}
+                <div className="flex flex-col items-center justify-center space-y-2">
+                  <div className="w-48 h-48 bg-black/90 p-3 rounded-2xl border-2 border-red-500/40 shadow-2xl flex items-center justify-center relative shadow-red-950/40">
+                    {settings.vodafone_cash_qr ? (
+                      <img
+                        src={settings.vodafone_cash_qr}
+                        alt="Vodafone Cash QR"
+                        className="w-full h-full object-contain rounded-xl"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-white p-2.5 rounded-xl flex flex-col items-center justify-center relative shadow-inner">
+                        <svg className="w-full h-full text-black" viewBox="0 0 100 100" fill="currentColor">
+                          <rect x="5" y="5" width="25" height="25" fill="#e60000" rx="3" />
+                          <rect x="9" y="9" width="17" height="17" fill="#ffffff" rx="1.5" />
+                          <rect x="13" y="13" width="9" height="9" fill="#e60000" rx="1" />
+
+                          <rect x="70" y="5" width="25" height="25" fill="#e60000" rx="3" />
+                          <rect x="74" y="9" width="17" height="17" fill="#ffffff" rx="1.5" />
+                          <rect x="78" y="13" width="9" height="9" fill="#e60000" rx="1" />
+
+                          <rect x="5" y="70" width="25" height="25" fill="#e60000" rx="3" />
+                          <rect x="9" y="74" width="17" height="17" fill="#ffffff" rx="1.5" />
+                          <rect x="13" y="78" width="9" height="9" fill="#e60000" rx="1" />
+
+                          <rect x="35" y="8" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="44" y="8" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="54" y="8" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="35" y="17" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="49" y="17" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="59" y="17" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="35" y="26" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="44" y="26" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="54" y="26" width="5" height="5" fill="#111" rx="1" />
+                          
+                          <rect x="8" y="35" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="17" y="35" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="26" y="35" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="8" y="44" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="17" y="44" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="8" y="54" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="23" y="54" width="5" height="5" fill="#111" rx="1" />
+
+                          <rect x="71" y="35" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="82" y="35" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="76" y="44" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="86" y="44" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="71" y="54" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="82" y="54" width="5" height="5" fill="#111" rx="1" />
+
+                          <rect x="35" y="71" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="45" y="71" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="57" y="71" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="40" y="80" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="51" y="80" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="61" y="80" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="35" y="89" width="5" height="5" fill="#111" rx="1" />
+                          <rect x="48" y="89" width="5" height="5" fill="#111" rx="1" />
+
+                          <rect x="34" y="34" width="32" height="32" fill="#ffffff" rx="6" />
+                          <rect x="36" y="36" width="28" height="28" fill="#e60000" rx="5" />
+                          <text x="50" y="55" fontSize="13" fontWeight="bold" fill="#ffffff" textAnchor="middle">VF</text>
+                        </svg>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Vodafone Cash number again under QR */}
+                  <div className="text-center bg-black/60 px-4 py-1.5 rounded-xl border border-red-500/20">
+                    <span className="text-xs font-mono font-black text-red-300 tracking-wider">
+                      {settings.vodafone_cash_number || '01094793701'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Explanatory message */}
+                <p className="text-[10px] text-gray-300 font-bold text-center leading-relaxed bg-black/40 p-2.5 rounded-xl border border-red-500/10">
+                  امسح رمز QR أو حوّل قيمة الفاتورة إلى الرقم أعلاه، ثم بعد إتمام التحويل أدخل البيانات التالية واضغط (تم استلام التحويل).
+                </p>
+
+                {/* Required Fields Block */}
+                <div className="space-y-3 pt-2 border-t border-red-900/40">
+                  {/* Sender Phone */}
+                  <div>
+                    <label className="text-[10px] font-extrabold text-gray-300 block mb-1">
+                      📱 رقم هاتف العميل المرسل <span className="text-red-400">*</span>
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      placeholder="أدخل رقم الهاتف المحول منه (مثال: 01012345678)"
+                      value={paySenderPhone}
+                      onChange={(e) => setPaySenderPhone(e.target.value)}
+                      className="w-full bg-black/80 border border-gray-800 focus:border-red-500 rounded-xl px-3 py-2 text-white font-mono text-xs text-right"
+                    />
+                  </div>
+
+                  {/* Ref No */}
+                  <div>
+                    <label className="text-[10px] font-extrabold text-gray-300 block mb-1">
+                      🔢 رقم العملية (الرقم المرجعي للتحويل) <span className="text-red-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="أدخل الرقم المرجعي أو رقم العملية المسجل بالإشعار..."
+                      value={payRefNo}
+                      onChange={(e) => setPayRefNo(e.target.value)}
+                      className="w-full bg-black/80 border border-gray-800 focus:border-red-500 rounded-xl px-3 py-2 text-white font-mono text-xs text-right"
+                    />
+                  </div>
+
+                  {/* Attachment */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-extrabold text-gray-300 block">
+                      📄 إرفاق إيصال التحويل (صورة أو كاميرا) <span className="text-red-400">*</span>
+                    </label>
+                    <div className="flex gap-2">
+                      <label className="flex-1 py-2 px-3 bg-red-600/20 hover:bg-red-600/40 border border-red-500/40 text-red-200 text-xs font-bold rounded-xl cursor-pointer flex items-center justify-center gap-1.5 transition-all">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>اختيار صورة</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onloadend = () => {
+                                if (reader.result) setPayReceiptImage(reader.result as string);
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                      </label>
+
+                      <label className="flex-1 py-2 px-3 bg-red-950/40 hover:bg-red-900/50 border border-red-500/40 text-red-200 text-xs font-bold rounded-xl cursor-pointer flex items-center justify-center gap-1.5 transition-all">
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>التقاط بالكاميرا</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onloadend = () => {
+                                if (reader.result) setPayReceiptImage(reader.result as string);
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                      </label>
+                    </div>
+
+                    {payReceiptImage && (
+                      <div className="flex items-center justify-between p-2 bg-black/80 rounded-xl border border-red-500/40 mt-2">
+                        <div className="flex items-center gap-2">
+                          <img src={payReceiptImage} alt="Receipt" className="w-12 h-12 rounded-lg object-cover border border-red-500/50" />
+                          <div>
+                            <p className="text-[10px] text-emerald-400 font-bold">✓ تم إرفاق صورة الإيصال</p>
+                            <p className="text-[8px] text-gray-400">جاهز للتأكيد</p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setPayReceiptImage('')}
+                          className="px-2.5 py-1 bg-red-600/30 hover:bg-red-600/50 text-red-300 text-[10px] font-bold rounded-lg border border-red-500/30 flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>حذف</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* InstaPay Details */}
+            {payMethod === 'INSTAPAY' && (
+              <div className="bg-emerald-950/20 border border-emerald-500/30 p-4 rounded-3xl space-y-4 animate-fade-in shadow-xl">
+                <div className="text-center border-b border-emerald-900/40 pb-2">
+                  <h4 className="text-sm font-black text-emerald-400 flex items-center justify-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    الدفع عبر InstaPay
+                  </h4>
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    صاحب الحساب: <span className="text-white font-bold">{settings.digital_payment_account_owner || 'Cafe Eldeeb'}</span>
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between bg-black/80 p-3 rounded-2xl border border-emerald-500/30 shadow-md">
+                  <div>
+                    <p className="text-[9px] text-gray-400 font-bold">عنوان InstaPay / IPA:</p>
+                    <p className="text-xs font-mono font-black text-emerald-300 tracking-wider">
+                      {settings.instapay_id || settings.instapay_number || 'cafeeldeeb@instapay'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const id = settings.instapay_id || settings.instapay_number || 'cafeeldeeb@instapay';
+                      try {
+                        if (navigator.clipboard && window.isSecureContext) {
+                          navigator.clipboard.writeText(id);
+                        } else {
+                          const textArea = document.createElement("textarea");
+                          textArea.value = id;
+                          document.body.appendChild(textArea);
+                          textArea.select();
+                          document.execCommand('copy');
+                          document.body.removeChild(textArea);
+                        }
+                      } catch (e) {}
+                      if (onShowSuccessAlert) onShowSuccessAlert('تم نسخ عنوان انستا باي بنجاح.');
+                    }}
+                    className="px-3.5 py-2 bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-200 border border-emerald-500/40 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow"
+                  >
+                    <Copy className="w-3.5 h-3.5 text-emerald-300" />
+                    <span>نسخ</span>
+                  </button>
+                </div>
+
+                {/* QR Code Section */}
+                <div className="flex flex-col items-center justify-center p-2 bg-black/40 rounded-2xl border border-emerald-500/20 gap-2">
+                  {settings.instapay_qr ? (
+                    <img src={settings.instapay_qr} alt="InstaPay QR" className="w-36 h-36 object-contain rounded-xl border border-emerald-500/40 shadow-lg" />
+                  ) : (
+                    <div className="w-36 h-36 border border-dashed border-emerald-500/40 rounded-xl flex flex-col items-center justify-center text-center p-2 bg-emerald-950/20">
+                      <span className="text-3xl">⚡</span>
+                      <span className="text-[10px] text-emerald-300 font-bold mt-1">رمز QR انستا باي</span>
+                      <span className="text-[9px] text-gray-400 font-mono mt-0.5">{settings.instapay_id || 'cafeeldeeb@instapay'}</span>
+                    </div>
+                  )}
+                  <p className="text-[10px] text-gray-300 font-bold text-center">تحقق من وصول المبلغ ثم أدخل بيانات العملية واضغط (تم استلام التحويل).</p>
+                </div>
+
+                {/* Required Fields Block */}
+                <div className="space-y-3 pt-2 border-t border-emerald-900/40">
+                  {/* Sender Phone */}
+                  <div>
+                    <label className="text-[10px] font-extrabold text-gray-300 block mb-1">
+                      📱 رقم هاتف العميل المرسل <span className="text-emerald-400">*</span>
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      placeholder="أدخل رقم الهاتف المحول منه (مثال: 01012345678)"
+                      value={paySenderPhone}
+                      onChange={(e) => setPaySenderPhone(e.target.value)}
+                      className="w-full bg-black/80 border border-gray-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-white font-mono text-xs text-right"
+                    />
+                  </div>
+
+                  {/* Ref No */}
+                  <div>
+                    <label className="text-[10px] font-extrabold text-gray-300 block mb-1">
+                      🔢 رقم العملية (الرقم المرجعي للتحويل) <span className="text-emerald-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="أدخل الرقم المرجعي أو رقم الإشعار..."
+                      value={payRefNo}
+                      onChange={(e) => setPayRefNo(e.target.value)}
+                      className="w-full bg-black/80 border border-gray-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-white font-mono text-xs text-right"
+                    />
+                  </div>
+
+                  {/* Attachment */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-extrabold text-gray-300 block">
+                      📄 إرفاق إيصال التحويل (صورة أو كاميرا) <span className="text-emerald-400">*</span>
+                    </label>
+                    <div className="flex gap-2">
+                      <label className="flex-1 py-2 px-3 bg-emerald-600/20 hover:bg-emerald-600/40 border border-emerald-500/40 text-emerald-200 text-xs font-bold rounded-xl cursor-pointer flex items-center justify-center gap-1.5 transition-all">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>اختيار صورة</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onloadend = () => {
+                                if (reader.result) setPayReceiptImage(reader.result as string);
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                      </label>
+
+                      <label className="flex-1 py-2 px-3 bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-500/40 text-emerald-200 text-xs font-bold rounded-xl cursor-pointer flex items-center justify-center gap-1.5 transition-all">
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>التقاط بالكاميرا</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onloadend = () => {
+                                if (reader.result) setPayReceiptImage(reader.result as string);
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                      </label>
+                    </div>
+
+                    {payReceiptImage && (
+                      <div className="flex items-center justify-between p-2 bg-black/80 rounded-xl border border-emerald-500/40 mt-2">
+                        <div className="flex items-center gap-2">
+                          <img src={payReceiptImage} alt="Receipt" className="w-12 h-12 rounded-lg object-cover border border-emerald-500/50" />
+                          <div>
+                            <p className="text-[10px] text-emerald-400 font-bold">✓ تم إرفاق صورة الإيصال</p>
+                            <p className="text-[8px] text-gray-400">جاهز للتأكيد</p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setPayReceiptImage('')}
+                          className="px-2.5 py-1 bg-red-600/30 hover:bg-red-600/50 text-red-300 text-[10px] font-bold rounded-lg border border-red-500/30 flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>حذف</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Notes */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400">ملاحظات التحصيل (اختياري):</label>
+              <input
+                type="text"
+                value={payNotes}
+                onChange={(e) => setPayNotes(e.target.value)}
+                placeholder="أدخل أي ملاحظات مالية..."
+                className="w-full bg-luxury-bg border border-gray-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-white text-xs"
+              />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-2 pt-3 border-t border-gray-900">
+              <button
+                type="button"
+                onClick={() => { setShowPayModal(false); setPayInvoice(null); }}
+                className="flex-1 py-2.5 bg-luxury-bg border border-gray-800 text-gray-400 rounded-xl text-xs font-bold hover:text-white cursor-pointer"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmPayInvoice}
+                className="flex-1 py-2.5 bg-gradient-to-r from-emerald-600 to-emerald-500 text-black font-extrabold rounded-xl text-xs hover:opacity-90 shadow-lg cursor-pointer flex items-center justify-center gap-1"
+              >
+                {payMethod === 'CASH' ? 'تأكيد الدفع وإغلاق الفاتورة 💰' : 'تم استلام التحويل 💰'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- CREDIT CONVERSION MODAL --- */}
+      {showCreditModal && creditInvoice && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-scale-in" dir="rtl">
+          <div className="w-full max-w-md bg-[#0a0a0a] border border-purple-500/30 rounded-3xl p-6 shadow-2xl relative text-right space-y-4">
+            <button
+              onClick={() => { setShowCreditModal(false); setCreditInvoice(null); }}
+              className="absolute top-4 left-4 text-gray-500 hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="border-b border-gray-900 pb-3">
+              <h3 className="text-sm font-extrabold text-purple-400 flex items-center gap-2">
+                <UserCheck className="w-5 h-5 text-purple-400" />
+                تحويل الفاتورة رقم #{creditInvoice.invoice_number} لحساب عميل آجل
+              </h3>
+              <p className="text-[10px] text-gray-500 mt-1">سيتم ترحيل مبلغ الفاتورة كدين على العميل ونقل الفاتورة تلقائياً لسجل الفواتير.</p>
+            </div>
+
+            {/* Select Customer */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-extrabold text-gold-500">اختر العميل الآجل المسجل:</label>
+              <select
+                value={creditCustomerId}
+                onChange={(e) => setCreditCustomerId(e.target.value)}
+                className="w-full bg-luxury-bg border border-gray-800 focus:border-purple-500 text-white rounded-xl px-3 py-2.5 text-xs font-bold"
+              >
+                <option value="">-- اختر عميل من القائمة --</option>
+                {customers.filter(c => c.id !== 'c_general').map(cust => (
+                  <option key={cust.id} value={cust.id}>
+                    {cust.full_name} ({cust.phone}) - الدين الحالي: {cust.total_debt || 0} {settings.currency}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Debt Calculations Box */}
+            {creditCustomerId && (
+              <div className="bg-purple-950/20 border border-purple-900/40 p-3 rounded-2xl space-y-1.5 text-xs">
+                <div className="flex justify-between text-purple-300">
+                  <span>قيمة الفاتورة الحالية:</span>
+                  <span className="font-mono font-bold">{creditInvoice.total} {settings.currency}</span>
+                </div>
+                <div className="flex justify-between text-gray-400">
+                  <span>الديون السابقة على العميل:</span>
+                  <span className="font-mono">
+                    {(customers.find(c => c.id === creditCustomerId)?.total_debt || 0)} {settings.currency}
+                  </span>
+                </div>
+                <div className="flex justify-between text-xs font-black text-purple-400 pt-2 border-t border-purple-900/40">
+                  <span>إجمالي الدين المتوقع بعد التحويل:</span>
+                  <span className="font-mono">
+                    {(customers.find(c => c.id === creditCustomerId)?.total_debt || 0) + creditInvoice.total} {settings.currency}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Notes */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400">ملاحظات عملية الأجل:</label>
+              <input
+                type="text"
+                value={creditNotes}
+                onChange={(e) => setCreditNotes(e.target.value)}
+                placeholder="مثلاً: تحويل بالآجل حسب الاتفاق..."
+                className="w-full bg-luxury-bg border border-gray-800 focus:border-purple-500 rounded-xl px-3 py-2 text-white text-xs"
+              />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-2 pt-3 border-t border-gray-900">
+              <button
+                type="button"
+                onClick={() => { setShowCreditModal(false); setCreditInvoice(null); }}
+                className="flex-1 py-2.5 bg-luxury-bg border border-gray-800 text-gray-400 rounded-xl text-xs font-bold hover:text-white"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCreditInvoice}
+                disabled={!creditCustomerId}
+                className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-500 disabled:opacity-40 text-white font-extrabold rounded-xl text-xs hover:opacity-90 shadow-lg cursor-pointer"
+              >
+                تأكيد التحويل لعميل آجل 📜
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- TIMELINE MODAL --- */}
+      {showTimelineModal && timelineInvoice && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-scale-in" dir="rtl">
+          <div className="w-full max-w-lg bg-[#0a0a0a] border border-gold-600/30 rounded-3xl p-6 shadow-2xl relative text-right space-y-4 max-h-[85vh] overflow-y-auto">
+            <button
+              onClick={() => { setShowTimelineModal(false); setTimelineInvoice(null); }}
+              className="absolute top-4 left-4 text-gray-500 hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="border-b border-gray-900 pb-3">
+              <h3 className="text-sm font-extrabold text-gold-500 flex items-center gap-2">
+                <History className="w-5 h-5 text-gold-500" />
+                سجل التتبع والـ Timeline للفاتورة رقم #{timelineInvoice.invoice_number}
+              </h3>
+              <p className="text-[10px] text-gray-500 mt-1">التسلسل الزمني الكامل للإنشاء والتحضير والتسليم والسداد.</p>
+            </div>
+
+            {/* Timeline Events List */}
+            <div className="space-y-3 relative border-r-2 border-gold-600/30 pr-4 my-2">
+              {(timelineInvoice.timeline && timelineInvoice.timeline.length > 0) ? (
+                timelineInvoice.timeline.map((evt, idx) => (
+                  <div key={idx} className="relative group">
+                    <div className="absolute -right-[23px] top-1 w-3 h-3 rounded-full bg-gold-500 border-2 border-black" />
+                    <div className="bg-luxury-bg/60 p-3 rounded-2xl border border-gray-900 space-y-1 text-xs">
+                      <div className="flex justify-between items-center">
+                        <span className="font-extrabold text-gold-400">
+                          {evt.status === 'CREATED' && '🆕 تم إنشاء الفاتورة والطلب'}
+                          {evt.status === 'SENT_TO_BARISTA' && '☕ تم إرسال الطلب للبارستا'}
+                          {evt.status === 'PREPARING' && '🍳 جاري تحضير الطلب بالبارستا'}
+                          {evt.status === 'PREPARED' && '🔔 تم تجهيز الطلب بالكامل'}
+                          {evt.status === 'DELIVERED_TO_CASHIER' && '📥 تم التسليم للكاشير'}
+                          {evt.status === 'DELIVERED_TO_CUSTOMER' && '🚶 تم التسليم للعميل'}
+                          {evt.status === 'OPEN_INVOICE' && '📋 نقل إلى الفواتير المفتوحة'}
+                          {evt.status === 'PAID' && '💰 تم السداد بالكامل وإغلاق الفاتورة'}
+                          {evt.status === 'CREDIT' && '📜 تم التحويل لعميل آجل'}
+                          {evt.status === 'CANCELLED' && '❌ تم إلغاء الفاتورة'}
+                          {!['CREATED','SENT_TO_BARISTA','PREPARING','PREPARED','DELIVERED_TO_CASHIER','DELIVERED_TO_CUSTOMER','OPEN_INVOICE','PAID','CREDIT','CANCELLED'].includes(evt.status) && evt.status}
+                        </span>
+                        <span className="text-[9px] text-gray-500 font-mono">
+                          {new Date(evt.timestamp).toLocaleString('ar-EG')}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-[10px] text-gray-400 pt-1 border-t border-gray-900/40">
+                        <span>المنفذ: <strong className="text-white">{evt.operator}</strong></span>
+                        {evt.notes && <span className="text-gray-500">{evt.notes}</span>}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-6 text-gray-500 text-xs">
+                  لا توجد سجلات تتبع إضافية مسجلة لهذه الفاتورة.
+                </div>
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-gray-900 text-left">
+              <button
+                type="button"
+                onClick={() => { setShowTimelineModal(false); setTimelineInvoice(null); }}
+                className="px-5 py-2.5 bg-luxury-bg border border-gray-800 text-white rounded-xl text-xs font-bold hover:bg-gray-800 cursor-pointer"
+              >
+                إغلاق
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* EDIT INVOICE & BARISTA ORDER NOTES MODAL */}
+      {/* ========================================================= */}
+      {editingNotesInvoice && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fade-in" dir="rtl">
+          <div className="bg-luxury-card border-2 border-gold-500/40 rounded-3xl p-6 w-full max-w-md shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b border-gray-800 pb-3">
+              <h3 className="text-sm font-black text-white flex items-center gap-2">
+                <span>⚠️ تعديل ملاحظات الفاتورة #{editingNotesInvoice.invoice_number}</span>
+              </h3>
+              <button
+                onClick={() => setEditingNotesInvoice(null)}
+                className="text-gray-400 hover:text-white text-xs p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-amber-300 block">
+                ملاحظات الطلب (تظهر بصوت وتنبيه بارز على شاشة البارستا):
+              </label>
+              <textarea
+                value={newInvoiceNotesInput}
+                onChange={(e) => setNewInvoiceNotesInput(e.target.value)}
+                placeholder="مثال: بدون سكر، ثلج خفيف، كوب سفري، بعد الأكل..."
+                rows={4}
+                className="w-full bg-black/80 border border-amber-500/40 text-amber-200 text-xs font-bold rounded-2xl p-3 focus:outline-none focus:border-amber-400"
+              />
+
+              <div className="flex flex-wrap gap-1 pt-1">
+                {['بدون سكر', 'سكر زيادة', 'ثلج خفيف', 'كوب سفري', 'بعد الأكل', 'بدون نعناع'].map((preset, pIdx) => (
+                  <button
+                    key={pIdx}
+                    type="button"
+                    onClick={() => {
+                      if (!newInvoiceNotesInput.trim()) {
+                        setNewInvoiceNotesInput(preset);
+                      } else if (!newInvoiceNotesInput.includes(preset)) {
+                        setNewInvoiceNotesInput(`${newInvoiceNotesInput.trim()} - ${preset}`);
+                      }
+                    }}
+                    className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 text-[10px] font-bold rounded-lg cursor-pointer"
+                  >
+                    + {preset}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-gray-800">
+              <button
+                type="button"
+                onClick={handleSaveInvoiceNotes}
+                className="px-4 py-2 bg-gradient-to-r from-amber-600 to-gold-500 hover:from-amber-500 hover:to-gold-400 text-black font-black text-xs rounded-xl shadow-lg cursor-pointer"
+              >
+                حفظ وإرسال للبارستا 💾
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingNotesInvoice(null)}
+                className="px-4 py-2 bg-gray-800 text-gray-300 font-bold text-xs rounded-xl cursor-pointer"
+              >
+                إلغاء
+              </button>
+            </div>
           </div>
         </div>
       )}
