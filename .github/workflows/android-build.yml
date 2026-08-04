@@ -39,7 +39,7 @@ jobs:
         run: |
           cd android
           if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
-            gradle wrapper --gradle-version 8.2.1 || true
+            gradle wrapper --gradle-version 8.7 || true
           fi
 
       - name: Build Android Debug APK
