@@ -19,7 +19,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
 
       - name: Set up Java JDK
         uses: actions/setup-java@v4
@@ -28,7 +27,7 @@ jobs:
           java-version: '17'
 
       - name: Install dependencies
-        run: npm ci || npm install
+        run: npm install
 
       - name: Build Web Application
         run: npm run build
@@ -36,7 +35,7 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
-      - name: Generate Gradle Wrapper if needed
+      - name: Generate Gradle Wrapper JAR if needed
         run: |
           cd android
           if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
@@ -54,3 +53,4 @@ jobs:
         with:
           name: app-debug.apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
