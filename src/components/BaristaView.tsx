@@ -64,7 +64,7 @@ export default function BaristaView({ onShowSuccessAlert, onShowWarningAlert }: 
   const loadOrders = (triggerSoundIfNew = false) => {
     const list = dbService.getBaristaOrders();
     setOrders(prev => {
-      if (triggerSoundIfNew && soundEnabled && prev.length > 0) {
+      if (triggerSoundIfNew && soundEnabled) {
         const prevIds = new Set(prev.map(o => o.id));
         const hasNewOrder = list.some(o => !prevIds.has(o.id) && o.status === 'NEW');
         if (hasNewOrder) {

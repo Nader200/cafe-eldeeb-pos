@@ -73,8 +73,11 @@ class FirebaseSyncService {
       }
     });
 
-    // Start real-time Firestore listener
+    // Start real-time Firestore listener and push initial local state if online
     this.startListening();
+    if (typeof navigator !== 'undefined' && navigator.onLine) {
+      setTimeout(() => this.syncAllLocalToCloud(), 1000);
+    }
   }
 
   private handleForeground() {
@@ -85,20 +88,8 @@ class FirebaseSyncService {
   }
 
   public updateCafeIdFromSettings() {
-    try {
-      const raw = safeStorage.getItem('cafe_settings');
-      if (raw) {
-        const settings = JSON.parse(raw);
-        if (settings.id && settings.id !== 'settings_1') {
-          this.cafeId = `cafe_${settings.id}`;
-        } else if (settings.phone) {
-          const cleanPhone = settings.phone.replace(/[^0-9]/g, '');
-          if (cleanPhone) this.cafeId = `cafe_${cleanPhone}`;
-        }
-      }
-    } catch (e) {
-      console.warn('Could not parse cafe settings for sync ID:', e);
-    }
+    // Keep cafeId fixed to DEFAULT_CAFE_ID to ensure all clients and devices share the exact same Firestore collection path
+    this.cafeId = DEFAULT_CAFE_ID;
   }
 
   private handleOnline() {
