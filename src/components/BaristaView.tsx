@@ -61,17 +61,26 @@ export default function BaristaView({ onShowSuccessAlert, onShowWarningAlert }: 
   ];
 
   // Load Barista Orders
-  const loadOrders = () => {
+  const loadOrders = (triggerSoundIfNew = false) => {
     const list = dbService.getBaristaOrders();
-    setOrders(list);
+    setOrders(prev => {
+      if (triggerSoundIfNew && soundEnabled && prev.length > 0) {
+        const prevIds = new Set(prev.map(o => o.id));
+        const hasNewOrder = list.some(o => !prevIds.has(o.id) && o.status === 'NEW');
+        if (hasNewOrder) {
+          playBaristaNewOrderSound();
+        }
+      }
+      return list;
+    });
   };
 
   useEffect(() => {
     loadOrders();
 
-    const handleUpdate = () => loadOrders();
+    const handleUpdate = () => loadOrders(true);
     const handleNewOrder = (e: any) => {
-      loadOrders();
+      loadOrders(false);
       if (soundEnabled) {
         playBaristaNewOrderSound();
       }

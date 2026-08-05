@@ -2,8 +2,8 @@
  * Cafe Eldeeb POS Enterprise - Version & Update Configuration
  */
 
-export const CURRENT_APP_VERSION = "4.4.3";
-export const CURRENT_APP_BUILD = 443;
+export const CURRENT_APP_VERSION = "4.4.4";
+export const CURRENT_APP_BUILD = 444;
 export const CURRENT_RELEASE_DATE = "2026-08-05";
 
 export type ClientPlatform = 'web' | 'android';

@@ -22,6 +22,18 @@ const DEVICE_ID_KEY = 'cafe_device_id';
 const DEFAULT_CAFE_ID = 'main_cafe_eldeeb';
 
 function getDeviceId(): string {
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    try {
+      let tabDevId = window.sessionStorage.getItem('cafe_tab_device_id');
+      if (!tabDevId) {
+        tabDevId = 'dev_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36);
+        window.sessionStorage.setItem('cafe_tab_device_id', tabDevId);
+      }
+      return tabDevId;
+    } catch (e) {
+      // Fallback if sessionStorage is disabled
+    }
+  }
   let devId = safeStorage.getItem(DEVICE_ID_KEY);
   if (!devId) {
     devId = 'dev_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36);
