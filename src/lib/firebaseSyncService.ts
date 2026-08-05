@@ -162,8 +162,7 @@ class FirebaseSyncService {
 
         snapshot.docChanges().forEach((change) => {
           const docData = change.doc.data();
-          if (!docData || !docData.key || docData.deviceId === this.deviceId) {
-            // Ignore changes originated from this exact device to avoid echo loops
+          if (!docData || !docData.key) {
             return;
           }
 
@@ -174,8 +173,8 @@ class FirebaseSyncService {
           const localMetaKey = `__meta_updated_${key}`;
           const localUpdatedAt = parseInt(safeStorage.getItem(localMetaKey) || '0', 10);
 
-          // Conflict Resolution: Last Write Wins
-          if (remoteUpdatedAt >= localUpdatedAt) {
+          // Conflict Resolution: Remote Firestore update takes priority or Last Write Wins
+          if (remoteUpdatedAt >= localUpdatedAt || change.type === 'added' || change.type === 'modified') {
             this.isProcessingRemoteChange = true;
             try {
               if (remoteData === null || remoteData === undefined) {
@@ -202,7 +201,7 @@ class FirebaseSyncService {
         this.notifyState();
 
         if (updatedAny && typeof window !== 'undefined') {
-          // Notify React components to re-render fresh data
+          // Notify React components across all views to re-render fresh data
           window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
           window.dispatchEvent(new CustomEvent('barista_orders_updated'));
           window.dispatchEvent(new CustomEvent('open_invoices_updated'));

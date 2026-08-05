@@ -275,11 +275,18 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
   // Live timer tick
   useEffect(() => {
     loadData();
+    const handleSync = () => loadData();
+    window.addEventListener('cafe_db_synced_remote', handleSync);
+    window.addEventListener('storage', handleSync);
     const interval = setInterval(() => {
       setCurrentTime(new Date());
       setDevices(dbService.getPSDevices());
     }, 1000);
-    return () => clearInterval(interval);
+    return () => {
+      window.removeEventListener('cafe_db_synced_remote', handleSync);
+      window.removeEventListener('storage', handleSync);
+      clearInterval(interval);
+    };
   }, []);
 
   // --- DEVICE MANAGEMENT ---

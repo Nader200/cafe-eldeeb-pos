@@ -496,6 +496,7 @@ export default function POSView({
 
     refreshData();
     window.addEventListener('cafe_db_synced_remote', refreshData);
+    window.addEventListener('storage', refreshData);
 
     // Check for auto-table redirect from Tables Map
     const tableNo = localStorage.getItem('temp_pos_table_number');
@@ -509,6 +510,7 @@ export default function POSView({
 
     return () => {
       window.removeEventListener('cafe_db_synced_remote', refreshData);
+      window.removeEventListener('storage', refreshData);
     };
   }, []);
 

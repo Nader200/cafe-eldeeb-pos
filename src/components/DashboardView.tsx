@@ -85,14 +85,26 @@ export default function DashboardView({
   onApproveRawMaterials
 }: DashboardViewProps) {
   // 1. Reactive Datasets
-  const invoices = useMemo(() => dbService.getInvoices(), []);
-  const expenses = useMemo(() => dbService.getExpenses(), []);
-  const customers = useMemo(() => dbService.getCustomers(), []);
-  const cashDrawer = useMemo(() => dbService.getActiveDrawer(), []);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const handleSync = () => setTick(t => t + 1);
+    window.addEventListener('cafe_db_synced_remote', handleSync);
+    window.addEventListener('storage', handleSync);
+    return () => {
+      window.removeEventListener('cafe_db_synced_remote', handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
+  }, []);
+
+  const invoices = useMemo(() => dbService.getInvoices(), [tick]);
+  const expenses = useMemo(() => dbService.getExpenses(), [tick]);
+  const customers = useMemo(() => dbService.getCustomers(), [tick]);
+  const cashDrawer = useMemo(() => dbService.getActiveDrawer(), [tick]);
   const auditLogs = useMemo(() => {
     const logs = dbService.getAuditLogs ? dbService.getAuditLogs() : [];
     return [...logs].reverse().slice(0, 5);
-  }, []);
+  }, [tick]);
 
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
 

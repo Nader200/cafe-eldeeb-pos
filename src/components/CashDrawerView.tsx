@@ -76,6 +76,13 @@ export default function CashDrawerView({
 
   useEffect(() => {
     refreshData();
+    const handleSync = () => refreshData();
+    window.addEventListener('cafe_db_synced_remote', handleSync);
+    window.addEventListener('storage', handleSync);
+    return () => {
+      window.removeEventListener('cafe_db_synced_remote', handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
   }, [activeSubTab]);
 
   // Current calculations

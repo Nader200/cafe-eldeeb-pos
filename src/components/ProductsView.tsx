@@ -75,6 +75,13 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
 
   useEffect(() => {
     loadCatalogData();
+    const handleSync = () => loadCatalogData();
+    window.addEventListener('cafe_db_synced_remote', handleSync);
+    window.addEventListener('storage', handleSync);
+    return () => {
+      window.removeEventListener('cafe_db_synced_remote', handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
   }, []);
 
   const settings = useMemo(() => dbService.getSettings(), []);

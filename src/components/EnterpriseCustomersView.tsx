@@ -122,6 +122,13 @@ export default function EnterpriseCustomersView({
       console.error(e);
     }
     loadData();
+    const handleSync = () => loadData();
+    window.addEventListener('cafe_db_synced_remote', handleSync);
+    window.addEventListener('storage', handleSync);
+    return () => {
+      window.removeEventListener('cafe_db_synced_remote', handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
   }, []);
 
   const loadData = () => {

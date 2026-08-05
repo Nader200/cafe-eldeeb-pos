@@ -112,6 +112,13 @@ export default function RawMaterialsView({
 
   useEffect(() => {
     loadAllData();
+    const handleSync = () => loadAllData();
+    window.addEventListener('cafe_db_synced_remote', handleSync);
+    window.addEventListener('storage', handleSync);
+    return () => {
+      window.removeEventListener('cafe_db_synced_remote', handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
   }, []);
 
   // Expiry check helper (Expired if expiry_date is defined and is in the past)

@@ -123,6 +123,13 @@ export default function ProductionBatchesView({
 
   useEffect(() => {
     loadAllData();
+    const handleSync = () => loadAllData();
+    window.addEventListener('cafe_db_synced_remote', handleSync);
+    window.addEventListener('storage', handleSync);
+    return () => {
+      window.removeEventListener('cafe_db_synced_remote', handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
   }, []);
 
   // Update batch form defaults when selecting raw material

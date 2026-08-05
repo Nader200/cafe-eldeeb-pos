@@ -54,6 +54,13 @@ export default function InvoicesView({ onShowSuccessAlert, onShowWarningAlert }:
 
   useEffect(() => {
     loadInvoicesData();
+    const handleSync = () => loadInvoicesData();
+    window.addEventListener('cafe_db_synced_remote', handleSync);
+    window.addEventListener('storage', handleSync);
+    return () => {
+      window.removeEventListener('cafe_db_synced_remote', handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
   }, []);
 
   const settings = useMemo(() => dbService.getSettings(), []);

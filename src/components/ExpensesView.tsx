@@ -72,6 +72,13 @@ export default function ExpensesView({ onShowSuccessAlert, onShowWarningAlert }:
 
   useEffect(() => {
     loadExpenses();
+    const handleSync = () => loadExpenses();
+    window.addEventListener('cafe_db_synced_remote', handleSync);
+    window.addEventListener('storage', handleSync);
+    return () => {
+      window.removeEventListener('cafe_db_synced_remote', handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
   }, []);
 
   // Combined user-defined categories list only
