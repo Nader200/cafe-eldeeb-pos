@@ -50,13 +50,26 @@ class FirebaseSyncService {
     // Determine Cafe ID from settings or fallback
     this.updateCafeIdFromSettings();
 
-    // Online/Offline detection
+    // Online/Offline & Focus/Visibility detection for Android & Web
     this.status = navigator.onLine ? 'connected' : 'offline';
     window.addEventListener('online', () => this.handleOnline());
     window.addEventListener('offline', () => this.handleOffline());
+    window.addEventListener('focus', () => this.handleForeground());
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        this.handleForeground();
+      }
+    });
 
     // Start real-time Firestore listener
     this.startListening();
+  }
+
+  private handleForeground() {
+    if (navigator.onLine) {
+      this.status = 'connected';
+      this.startListening();
+    }
   }
 
   public updateCafeIdFromSettings() {
@@ -179,6 +192,9 @@ class FirebaseSyncService {
         if (updatedAny && typeof window !== 'undefined') {
           // Notify React components to re-render fresh data
           window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+          window.dispatchEvent(new CustomEvent('barista_orders_updated'));
+          window.dispatchEvent(new CustomEvent('open_invoices_updated'));
+          window.dispatchEvent(new CustomEvent('storage'));
         }
       },
       (error) => {
@@ -256,8 +272,10 @@ class FirebaseSyncService {
       'cafe_returns_list', 'cafe_credit_adjustments', 'cafe_cash_history', 'cafe_wallet_transactions',
       'cafe_customer_notes', 'cafe_customer_visits', 'cafe_credit_transactions_system',
       'cafe_tables_system', 'cafe_employees', 'cafe_employee_transactions', 'cafe_ps_devices',
-      'cafe_ps_sessions', 'cafe_daily_raw_materials', 'cafe_raw_materials', 'cafe_inventory_batches',
-      'cafe_inventory_batch_logs', 'cafe_auth_users', 'cafe_partners', 'cafe_partner_drawings'
+      'cafe_ps_sessions', 'cafe_daily_raw_materials', 'cafe_raw_materials', 'cafe_raw_materials_seeded',
+      'cafe_raw_materials_deleted', 'cafe_inventory_batches', 'cafe_inventory_batch_logs',
+      'cafe_batch_consumptions', 'cafe_auth_users', 'cafe_auth_audit_logs', 'cafe_partners',
+      'cafe_partner_drawings', 'cafe_update_logs', 'cafe_barista_orders'
     ];
 
     try {

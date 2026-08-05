@@ -7,6 +7,7 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import {
   initializeFirestore,
+  getFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
   doc,
@@ -23,16 +24,27 @@ export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
 const databaseId = (firebaseConfig as any).firestoreDatabaseId;
 
-// Initialize Firestore with modern persistent local cache (replaces deprecated enableIndexedDbPersistence)
-export const db = initializeFirestore(
-  app,
-  {
-    localCache: persistentLocalCache({
-      tabManager: persistentMultipleTabManager()
-    })
-  },
-  databaseId
-);
+// Initialize Firestore with fallback for Android WebViews & browser environments
+export const db = (() => {
+  try {
+    return initializeFirestore(
+      app,
+      {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager()
+        })
+      },
+      databaseId
+    );
+  } catch (e) {
+    console.warn('Firestore persistent cache initialization fallback:', e);
+    try {
+      return initializeFirestore(app, {}, databaseId);
+    } catch (e2) {
+      return getFirestore(app, databaseId);
+    }
+  }
+})();
 
 export const auth = getAuth(app);
 

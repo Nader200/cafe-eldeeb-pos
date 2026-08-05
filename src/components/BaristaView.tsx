@@ -91,12 +91,14 @@ export default function BaristaView({ onShowSuccessAlert, onShowWarningAlert }: 
     window.addEventListener('barista_orders_updated', handleUpdate);
     window.addEventListener('barista_new_order', handleNewOrder as EventListener);
     window.addEventListener('barista_notes_updated', handleNotesUpdated as EventListener);
+    window.addEventListener('cafe_db_synced_remote', handleUpdate);
     window.addEventListener('storage', handleUpdate);
 
     return () => {
       window.removeEventListener('barista_orders_updated', handleUpdate);
       window.removeEventListener('barista_new_order', handleNewOrder as EventListener);
       window.removeEventListener('barista_notes_updated', handleNotesUpdated as EventListener);
+      window.removeEventListener('cafe_db_synced_remote', handleUpdate);
       window.removeEventListener('storage', handleUpdate);
     };
   }, [soundEnabled, onShowSuccessAlert]);
