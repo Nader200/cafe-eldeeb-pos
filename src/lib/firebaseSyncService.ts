@@ -50,7 +50,7 @@ class FirebaseSyncService {
   private listeners: ((state: SyncState) => void)[] = [];
   private unsubscribeSnapshot: Unsubscribe | null = null;
   private isProcessingRemoteChange: boolean = false;
-  private syncTimeout: any = null;
+  private cloudTimestamps: Map<string, number> = new Map();
 
   constructor() {
     this.init();
@@ -73,11 +73,8 @@ class FirebaseSyncService {
       }
     });
 
-    // Start real-time Firestore listener and push initial local state if online
+    // Start real-time Firestore listener
     this.startListening();
-    if (typeof navigator !== 'undefined' && navigator.onLine) {
-      setTimeout(() => this.syncAllLocalToCloud(), 1000);
-    }
   }
 
   private handleForeground() {
@@ -96,7 +93,6 @@ class FirebaseSyncService {
     this.status = 'connected';
     this.notifyState();
     this.startListening();
-    this.syncAllLocalToCloud();
   }
 
   private handleOffline() {
@@ -152,6 +148,8 @@ class FirebaseSyncService {
         let updatedAny = false;
 
         snapshot.docChanges().forEach((change) => {
+          if (change.type === 'removed') return;
+
           const docData = change.doc.data();
           if (!docData || !docData.key) {
             return;
@@ -161,11 +159,14 @@ class FirebaseSyncService {
           const remoteData = docData.data;
           const remoteUpdatedAt = docData.updatedAt || 0;
 
+          this.cloudTimestamps.set(key, remoteUpdatedAt);
+
           const localMetaKey = `__meta_updated_${key}`;
           const localUpdatedAt = parseInt(safeStorage.getItem(localMetaKey) || '0', 10);
+          const localVal = safeStorage.getItem(key);
 
-          // Conflict Resolution: Remote Firestore update takes priority or Last Write Wins
-          if (remoteUpdatedAt >= localUpdatedAt || change.type === 'added' || change.type === 'modified') {
+          // If remote update is newer or local is uninitialized, accept remote data
+          if (remoteUpdatedAt >= localUpdatedAt || localUpdatedAt === 0 || !localVal) {
             this.isProcessingRemoteChange = true;
             try {
               if (remoteData === null || remoteData === undefined) {
@@ -180,6 +181,12 @@ class FirebaseSyncService {
             } finally {
               this.isProcessingRemoteChange = false;
             }
+          } else if (localUpdatedAt > remoteUpdatedAt && localVal) {
+            // Local device has newer edits created offline; sync local edit back to cloud
+            try {
+              const parsed = JSON.parse(localVal);
+              this.pushKeyToCloud(key, parsed);
+            } catch (e) {}
           }
         });
 
@@ -219,6 +226,7 @@ class FirebaseSyncService {
 
     const now = Date.now();
     safeStorage.setItem(`__meta_updated_${key}`, String(now));
+    this.cloudTimestamps.set(key, now);
 
     if (!navigator.onLine) {
       this.status = 'offline';
@@ -257,7 +265,7 @@ class FirebaseSyncService {
   }
 
   /**
-   * Full push of all local keys to cloud database
+   * Push local keys that are strictly newer than cloud data
    */
   public async syncAllLocalToCloud(): Promise<void> {
     if (!navigator.onLine) return;
@@ -283,7 +291,10 @@ class FirebaseSyncService {
     try {
       for (const key of keysToSync) {
         const val = safeStorage.getItem(key);
-        if (val !== null) {
+        const localUpdatedAt = parseInt(safeStorage.getItem(`__meta_updated_${key}`) || '0', 10);
+        const remoteUpdatedAt = this.cloudTimestamps.get(key) || 0;
+
+        if (val !== null && localUpdatedAt > remoteUpdatedAt) {
           try {
             const parsed = JSON.parse(val);
             await this.pushKeyToCloud(key, parsed);
@@ -297,7 +308,7 @@ class FirebaseSyncService {
       });
       this.status = 'connected';
     } catch (e) {
-      console.error('Error syncing all local keys to cloud:', e);
+      console.error('Error syncing local keys to cloud:', e);
       this.status = 'error';
     } finally {
       this.notifyState();
