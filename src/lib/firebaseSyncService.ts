@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { doc, setDoc, onSnapshot, collection, Unsubscribe } from 'firebase/firestore';
+import { doc, setDoc, getDoc, onSnapshot, collection, Unsubscribe } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from './firebaseClient';
 import { safeStorage } from './safeStorage';
 import { syncDiagnosticLogger } from './syncDiagnosticLogger';
@@ -278,6 +278,7 @@ class FirebaseSyncService {
       const docRef = doc(db, 'cafes', this.cafeId, 'sync_store', key);
       const sanitizedData = data !== undefined ? JSON.parse(JSON.stringify(data)) : null;
 
+      console.log("[SYNC] BEFORE setDoc");
       const start = Date.now();
       await setDoc(docRef, {
         key,
@@ -287,7 +288,31 @@ class FirebaseSyncService {
         cafeId: this.cafeId
       });
 
-      console.log("[SYNC] AFTER setDoc", Date.now() - start, "ms");
+      const duration = Date.now() - start;
+      console.log("[SYNC] AFTER setDoc");
+      console.log(`زمن التنفيذ بالمللي ثانية: ${duration} ms`);
+
+      try {
+        const snap = await getDoc(docRef);
+        const exists = snap.exists();
+        const snapData = snap.data();
+        let itemsCount = 0;
+        if (snapData && snapData.data) {
+          if (Array.isArray(snapData.data)) {
+            itemsCount = snapData.data.length;
+          } else if (typeof snapData.data === 'object' && snapData.data !== null) {
+            itemsCount = Object.keys(snapData.data).length;
+          } else {
+            itemsCount = 1;
+          }
+        }
+        console.log("===== FIRESTORE TEST VERIFICATION =====");
+        console.log("هل المستند موجود؟", exists);
+        console.log("عدد العناصر الموجودة بداخله:", itemsCount);
+        console.log("مسار المستند الكامل:", docRef.path);
+      } catch (getErr: any) {
+        console.error("Failed to read document after setDoc:", getErr);
+      }
 
       console.log("===== PUSH SUCCESS =====");
       console.log("Document:", key);
@@ -302,7 +327,9 @@ class FirebaseSyncService {
       this.status = 'connected';
     } catch (error: any) {
       console.error("===== PUSH FAILED =====");
-      console.error(error);
+      console.error("code:", error?.code);
+      console.error("message:", error?.message);
+      console.error("stack:", error?.stack);
       console.error(`Failed to push key ${key} to cloud:`, error);
 
       const errStr = error?.message || String(error);

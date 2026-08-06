@@ -4,7 +4,7 @@
  */
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged } from 'firebase/auth';
 import {
   initializeFirestore,
   getFirestore,
@@ -16,15 +16,23 @@ import {
   collection,
   getDocs
 } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
+// Firebase Web App configuration for project cafe-eldeeb-pos
+export const firebaseConfig = {
+  projectId: "cafe-eldeeb-pos",
+  appId: "1:864337937711:web:6ac0c52e98515f602a4dda",
+  apiKey: "AIzaSyA-rOKaAUEmfuNsObbduYLQcDLY2s8WAes",
+  authDomain: "cafe-eldeeb-pos.firebaseapp.com",
+  storageBucket: "cafe-eldeeb-pos.firebasestorage.app",
+  messagingSenderId: "864337937711",
+  measurementId: "G-6JK5ZJFMH0"
+};
 
-// Initialize Firebase App
+// Initialize Firebase App exclusively with cafe-eldeeb-pos project
 export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-console.log("===== FIREBASE RUNTIME =====");
-console.log("projectId =", (firebaseConfig as any).projectId);
-console.log("appId =", (firebaseConfig as any).appId);
-console.log("authDomain =", (firebaseConfig as any).authDomain);
+console.log("===== FIREBASE PROJECT CONFIG =====");
+console.log("Project ID المستخدم:", firebaseConfig.projectId);
+console.log("Firebase App Name:", app.name);
 
 const databaseId = (firebaseConfig as any).firestoreDatabaseId;
 
@@ -46,11 +54,11 @@ if (typeof window !== 'undefined' && window.localStorage) {
   }
 }
 
-// Initialize Firestore with memoryLocalCache and forced long polling to avoid WebSocket hangs in iframe sandboxes
+// Initialize Firestore with memoryLocalCache and auto-detect long polling for optimal connection in sandboxed environments
 export const db = (() => {
   try {
     const settings = {
-      experimentalForceLongPolling: true,
+      experimentalAutoDetectLongPolling: true,
       localCache: memoryLocalCache()
     };
     return databaseId && databaseId !== '(default)'
@@ -62,7 +70,40 @@ export const db = (() => {
   }
 })();
 
+console.log("Firestore App:", db.app.name);
+
 export const auth = getAuth(app);
+
+// Auto-login check for Firebase Authentication
+if (typeof window !== 'undefined') {
+  let attemptedLogin = false;
+  onAuthStateChanged(auth, async (user) => {
+    if (user) {
+      console.log("===== FIREBASE AUTH STATUS =====");
+      console.log("Status: Logged in successfully");
+      console.log("UID:", user.uid);
+      console.log("Email:", user.email);
+    } else if (!attemptedLogin) {
+      attemptedLogin = true;
+      const targetEmail = "nader.eldeeb.2015@gmail.com";
+      const experimentPassword = "password123";
+
+      try {
+        const credential = await signInWithEmailAndPassword(auth, targetEmail, experimentPassword);
+        console.log("===== FIREBASE AUTH STATUS =====");
+        console.log("Status: Logged in successfully");
+        console.log("UID:", credential.user.uid);
+        console.log("Email:", credential.user.email);
+      } catch (err: any) {
+        if (err?.code === 'auth/operation-not-allowed') {
+          console.log("[Firebase Auth Note] Email/Password provider is not enabled in Firebase Console for project cafe-eldeeb-pos.");
+        } else {
+          console.warn("[Firebase Auth Note] Auth sign-in attempt:", err?.code || err?.message);
+        }
+      }
+    }
+  });
+}
 
 export enum OperationType {
   CREATE = 'create',

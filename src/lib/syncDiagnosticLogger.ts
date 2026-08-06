@@ -36,18 +36,28 @@ export interface SnapshotInfo {
 
 type DiagnosticsListener = () => void;
 
+let pushSequence = 0;
+
 class SyncDiagnosticLogger {
+  public readonly instanceId: string = Math.random().toString(36).substring(2, 9);
+  private activePushSeqMap: Map<string, number> = new Map();
   private events: LogEvent[] = [];
   private lastPush: PushInfo | null = null;
+  private lastSuccessfulPush: PushInfo | null = null;
   private lastSnapshot: SnapshotInfo | null = null;
   private docsReceivedCount: number = 0;
   private listeners: DiagnosticsListener[] = [];
 
   constructor() {
+    console.log(`[SyncDiagnosticLogger CREATED] instanceId: ${this.instanceId}`);
     try {
       const savedPush = safeStorage.getItem('cafe_last_push_info');
       if (savedPush) {
         this.lastPush = JSON.parse(savedPush);
+      }
+      const savedSuccessPush = safeStorage.getItem('cafe_last_successful_push_info');
+      if (savedSuccessPush) {
+        this.lastSuccessfulPush = JSON.parse(savedSuccessPush);
       }
     } catch (e) {
       // Ignore parse error
@@ -97,6 +107,11 @@ class SyncDiagnosticLogger {
   }
 
   public recordPushStart(key: string, path: string) {
+    const id = ++pushSequence;
+    this.activePushSeqMap.set(key, id);
+    console.log(`[PUSH ${id}] START`, key);
+    console.trace(`[LOGGER instance:${this.instanceId}] [recordPushStart STACK] Push #${id} | key: ${key}`);
+    console.log(`[LOGGER instance:${this.instanceId}] recordPushStart BEFORE this.lastPush:`, this.lastPush);
     const timeStr = new Date().toLocaleTimeString('ar-EG', {
       hour: '2-digit',
       minute: '2-digit',
@@ -111,9 +126,14 @@ class SyncDiagnosticLogger {
       status: 'PENDING'
     };
 
+    console.log(`[LOGGER instance:${this.instanceId}] recordPushStart AFTER this.lastPush:`, this.lastPush);
+    console.log(`[LOGGER instance:${this.instanceId}] [LAST PUSH STATE]:`, this.lastPush);
+
     try {
       safeStorage.setItem('cafe_last_push_info', JSON.stringify(this.lastPush));
     } catch (e) {}
+
+    console.log(`[LOGGER instance:${this.instanceId}] saved to localStorage:`, localStorage.getItem("cafe_last_push_info"));
 
     this.addEvent({
       time: timeStr,
@@ -126,6 +146,9 @@ class SyncDiagnosticLogger {
   }
 
   public recordPushSuccess(key: string, path: string, data: any) {
+    const id = this.activePushSeqMap.get(key) || pushSequence;
+    console.log(`[PUSH ${id}] SUCCESS`, key);
+    console.log(`[LOGGER instance:${this.instanceId}] recordPushSuccess BEFORE this.lastPush:`, this.lastPush);
     const timeStr = new Date().toLocaleTimeString('ar-EG', {
       hour: '2-digit',
       minute: '2-digit',
@@ -147,9 +170,23 @@ class SyncDiagnosticLogger {
       status: 'SUCCESS'
     };
 
+    this.lastSuccessfulPush = {
+      time: timeStr,
+      key,
+      path,
+      sizeBytes,
+      status: 'SUCCESS'
+    };
+
+    console.log(`[LOGGER instance:${this.instanceId}] recordPushSuccess AFTER this.lastPush:`, this.lastPush);
+    console.log(`[LOGGER instance:${this.instanceId}] [LAST PUSH STATE]:`, this.lastPush);
+
     try {
       safeStorage.setItem('cafe_last_push_info', JSON.stringify(this.lastPush));
+      safeStorage.setItem('cafe_last_successful_push_info', JSON.stringify(this.lastSuccessfulPush));
     } catch (e) {}
+
+    console.log(`[LOGGER instance:${this.instanceId}] saved to localStorage:`, localStorage.getItem("cafe_last_push_info"));
 
     this.addEvent({
       time: timeStr,
@@ -162,6 +199,9 @@ class SyncDiagnosticLogger {
   }
 
   public recordPushFailure(key: string, path: string, errorMsg: string) {
+    const id = this.activePushSeqMap.get(key) || pushSequence;
+    console.log(`[PUSH ${id}] FAILURE`, key);
+    console.log(`[LOGGER instance:${this.instanceId}] recordPushFailure BEFORE this.lastPush:`, this.lastPush);
     const timeStr = new Date().toLocaleTimeString('ar-EG', {
       hour: '2-digit',
       minute: '2-digit',
@@ -177,9 +217,14 @@ class SyncDiagnosticLogger {
       error: errorMsg
     };
 
+    console.log(`[LOGGER instance:${this.instanceId}] recordPushFailure AFTER this.lastPush:`, this.lastPush);
+    console.log(`[LOGGER instance:${this.instanceId}] [LAST PUSH STATE]:`, this.lastPush);
+
     try {
       safeStorage.setItem('cafe_last_push_info', JSON.stringify(this.lastPush));
     } catch (e) {}
+
+    console.log(`[LOGGER instance:${this.instanceId}] saved to localStorage:`, localStorage.getItem("cafe_last_push_info"));
 
     this.addEvent({
       time: timeStr,
@@ -248,7 +293,12 @@ class SyncDiagnosticLogger {
   }
 
   public getLastPush(): PushInfo | null {
+    console.log(`[LOGGER instance:${this.instanceId}] getLastPush() CALLED ->`, this.lastPush);
     return this.lastPush;
+  }
+
+  public getLastSuccessfulPush(): PushInfo | null {
+    return this.lastSuccessfulPush;
   }
 
   public getLastSnapshot(): SnapshotInfo | null {

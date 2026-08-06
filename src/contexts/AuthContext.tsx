@@ -83,7 +83,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         'invoice-history',
         'invoices',
         'playstation',
-        'barista',
         'user_manual'
       ];
       return allowedCashierTabs.includes(tab);

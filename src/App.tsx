@@ -957,7 +957,7 @@ function AppContent() {
             />
           )}
 
-          {activeTab === 'pos' && (
+          {activeTab === 'pos' && hasPermission('pos') && (
             <POSView
               onNavigate={(tab) => {
                 setActiveTab(tab as TabType);
@@ -975,7 +975,7 @@ function AppContent() {
             />
           )}
 
-          {activeTab === 'open-invoices' && (
+          {activeTab === 'open-invoices' && hasPermission('open-invoices') && (
             <OpenInvoicesView
               onNavigate={(tab) => setActiveTab(tab as TabType)}
               onSelectInvoiceForEdit={(id) => setReopenedInvoiceId(id)}
@@ -984,14 +984,14 @@ function AppContent() {
             />
           )}
 
-          {activeTab === 'invoices' && (
+          {activeTab === 'invoices' && hasPermission('invoices') && (
             <InvoicesView
               onShowSuccessAlert={showSuccessAlert}
               onShowWarningAlert={showWarningAlert}
             />
           )}
 
-          {activeTab === 'invoice-history' && (
+          {activeTab === 'invoice-history' && hasPermission('invoice-history') && (
             <InvoiceHistoryView
               onShowSuccessAlert={showSuccessAlert}
               onShowWarningAlert={showWarningAlert}
@@ -1000,49 +1000,49 @@ function AppContent() {
             />
           )}
 
-          {activeTab === 'products' && (
+          {activeTab === 'products' && hasPermission('products') && (
             <ProductsView
               onShowSuccessAlert={showSuccessAlert}
               onShowWarningAlert={showWarningAlert}
             />
           )}
 
-          {activeTab === 'customers' && (
+          {activeTab === 'customers' && hasPermission('customers') && (
             <EnterpriseCustomersView
               onShowSuccessAlert={showSuccessAlert}
               onShowWarningAlert={showWarningAlert}
             />
           )}
 
-          {activeTab === 'suppliers' && (
+          {activeTab === 'suppliers' && hasPermission('suppliers') && (
             <SuppliersView
               onShowSuccessAlert={showSuccessAlert}
               onShowWarningAlert={showWarningAlert}
             />
           )}
 
-          {activeTab === 'expenses' && (
+          {activeTab === 'expenses' && hasPermission('expenses') && (
             <ExpensesView
               onShowSuccessAlert={showSuccessAlert}
               onShowWarningAlert={showWarningAlert}
             />
           )}
 
-          {activeTab === 'partner_drawings' && (
+          {activeTab === 'partner_drawings' && hasPermission('partner_drawings') && (
             <PartnerDrawingsView
               onShowSuccessAlert={showSuccessAlert}
               onShowWarningAlert={showWarningAlert}
             />
           )}
 
-          {activeTab === 'barista' && (
+          {activeTab === 'barista' && hasPermission('barista') && (
             <BaristaView
               onShowSuccessAlert={showSuccessAlert}
               onShowWarningAlert={showWarningAlert}
             />
           )}
 
-          {activeTab === 'cash_drawer' && (
+          {activeTab === 'cash_drawer' && hasPermission('cash_drawer') && (
             <CashDrawerView
               settings={settings}
               onShowSuccessAlert={showSuccessAlert}
@@ -1050,34 +1050,34 @@ function AppContent() {
             />
           )}
 
-           {activeTab === 'reports' && (
+           {activeTab === 'reports' && hasPermission('reports') && (
              <ReportsView
                onShowSuccessAlert={showSuccessAlert}
              />
            )}
  
-           {activeTab === 'employees' && (
+           {activeTab === 'employees' && hasPermission('employees') && (
              <EmployeesView
                onShowSuccessAlert={showSuccessAlert}
                onShowWarningAlert={showWarningAlert}
              />
            )}
  
-           {activeTab === 'playstation' && (
+           {activeTab === 'playstation' && hasPermission('playstation') && (
              <PlayStationView
                onShowSuccessAlert={showSuccessAlert}
                onShowWarningAlert={showWarningAlert}
              />
            )}
  
-           {(activeTab === 'production_batches' || activeTab === 'raw_materials') && (
+           {(activeTab === 'production_batches' || activeTab === 'raw_materials') && hasPermission('production_batches') && (
               <ProductionBatchesView
                 onShowSuccessAlert={showSuccessAlert}
                 onShowWarningAlert={showWarningAlert}
               />
             )}
 
-            {activeTab === 'settings' && (
+            {activeTab === 'settings' && hasPermission('settings') && (
               <SettingsView
                 onShowSuccessAlert={showSuccessAlert}
                 onShowWarningAlert={showWarningAlert}
@@ -1085,7 +1085,7 @@ function AppContent() {
               />
             )}
 
-            {activeTab === 'user_manual' && (
+            {activeTab === 'user_manual' && hasPermission('user_manual') && (
               <UserManualView
                 currentUser={currentUser}
                 onNavigateTab={(tab) => handleNavigate(tab as TabType)}
@@ -1121,46 +1121,62 @@ function AppContent() {
           </button>
 
           {/* Button 3: الرئيسية / POS */}
-          <button
-            onClick={() => handleNavigate(hasPermission('dashboard') ? 'dashboard' : 'pos')}
-            className={`flex-1 h-full flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-all active:scale-95 ${
-              (activeTab === 'dashboard' || activeTab === 'pos') ? 'text-[#D4AF37]' : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            {hasPermission('dashboard') ? <Home className="w-5 h-5" /> : <ShoppingCart className="w-5 h-5" />}
-            <span className="text-[10px] font-black tracking-tighter">{hasPermission('dashboard') ? 'الرئيسية' : 'الكاشير'}</span>
-          </button>
+          {(hasPermission('dashboard') || hasPermission('pos')) && (
+            <button
+              onClick={() => handleNavigate(hasPermission('dashboard') ? 'dashboard' : 'pos')}
+              className={`flex-1 h-full flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-all active:scale-95 ${
+                (activeTab === 'dashboard' || activeTab === 'pos') ? 'text-[#D4AF37]' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              {hasPermission('dashboard') ? <Home className="w-5 h-5" /> : <ShoppingCart className="w-5 h-5" />}
+              <span className="text-[10px] font-black tracking-tighter">{hasPermission('dashboard') ? 'الرئيسية' : 'الكاشير'}</span>
+            </button>
+          )}
 
-          {/* Button 4: البحث */}
-          <button
-            onClick={() => {
-              handleNavigate('invoice-history');
-              showSuccessAlert('اكتب رقم الفاتورة أو اسم الزبون للبحث الفوري...');
-            }}
-            className={`flex-1 h-full flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-all active:scale-95 ${
-              activeTab === 'invoice-history' ? 'text-[#D4AF37]' : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            <Search className="w-5 h-5" />
-            <span className="text-[10px] font-black tracking-tighter">بحث</span>
-          </button>
+          {/* Button 4: البارستا / البحث */}
+          {hasPermission('barista') && !hasPermission('pos') ? (
+            <button
+              onClick={() => handleNavigate('barista')}
+              className={`flex-1 h-full flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-all active:scale-95 ${
+                activeTab === 'barista' ? 'text-[#D4AF37]' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              <Coffee className="w-5 h-5 text-amber-500" />
+              <span className="text-[10px] font-black tracking-tighter">البارستا</span>
+            </button>
+          ) : hasPermission('invoice-history') ? (
+            <button
+              onClick={() => {
+                handleNavigate('invoice-history');
+                showSuccessAlert('اكتب رقم الفاتورة أو اسم الزبون للبحث الفوري...');
+              }}
+              className={`flex-1 h-full flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-all active:scale-95 ${
+                activeTab === 'invoice-history' ? 'text-[#D4AF37]' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              <Search className="w-5 h-5" />
+              <span className="text-[10px] font-black tracking-tighter">بحث</span>
+            </button>
+          ) : null}
 
           {/* Button 5: الإعدادات / المنيو */}
-          <button
-            onClick={() => {
-              if (hasPermission('settings')) {
-                handleNavigate('settings');
-              } else {
-                handleNavigate('products');
-              }
-            }}
-            className={`flex-1 h-full flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-all active:scale-95 ${
-              (activeTab === 'settings' || activeTab === 'products') ? 'text-[#D4AF37]' : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            {hasPermission('settings') ? <User className="w-5 h-5" /> : <Coffee className="w-5 h-5" />}
-            <span className="text-[10px] font-black tracking-tighter">{hasPermission('settings') ? 'الإعدادات' : 'المنيو'}</span>
-          </button>
+          {(hasPermission('settings') || hasPermission('products')) && (
+            <button
+              onClick={() => {
+                if (hasPermission('settings')) {
+                  handleNavigate('settings');
+                } else if (hasPermission('products')) {
+                  handleNavigate('products');
+                }
+              }}
+              className={`flex-1 h-full flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-all active:scale-95 ${
+                (activeTab === 'settings' || activeTab === 'products') ? 'text-[#D4AF37]' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              {hasPermission('settings') ? <User className="w-5 h-5" /> : <Coffee className="w-5 h-5" />}
+              <span className="text-[10px] font-black tracking-tighter">{hasPermission('settings') ? 'الإعدادات' : 'المنيو'}</span>
+            </button>
+          )}
 
         </div>
 

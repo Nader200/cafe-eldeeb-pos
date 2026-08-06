@@ -28,6 +28,7 @@ import {
 import { firebaseSyncService, SyncState } from '../lib/firebaseSyncService';
 import { syncDiagnosticLogger, LogEvent, PushInfo, SnapshotInfo } from '../lib/syncDiagnosticLogger';
 import { db, auth } from '../lib/firebaseClient';
+import { doc, setDoc } from 'firebase/firestore';
 import { dbService } from '../dbService';
 import { safeStorage } from '../lib/safeStorage';
 
@@ -40,6 +41,7 @@ export default function DebugSyncCenterModal({ isOpen, onClose }: DebugSyncCente
   const [syncState, setSyncState] = useState<SyncState>(firebaseSyncService.getState());
   const [events, setEvents] = useState<LogEvent[]>(syncDiagnosticLogger.getEvents());
   const [lastPush, setLastPush] = useState<PushInfo | null>(syncDiagnosticLogger.getLastPush());
+  const [lastSuccessfulPush, setLastSuccessfulPush] = useState<PushInfo | null>(syncDiagnosticLogger.getLastSuccessfulPush());
   const [lastSnapshot, setLastSnapshot] = useState<SnapshotInfo | null>(syncDiagnosticLogger.getLastSnapshot());
   const [docsReceivedCount, setDocsReceivedCount] = useState<number>(syncDiagnosticLogger.getDocsReceivedCount());
 
@@ -87,6 +89,12 @@ export default function DebugSyncCenterModal({ isOpen, onClose }: DebugSyncCente
   useEffect(() => {
     if (!isOpen) return;
 
+    const currentP = syncDiagnosticLogger.getLastPush();
+    console.log(`[DebugSyncCenterModal OPEN] syncDiagnosticLogger (instanceId:${syncDiagnosticLogger.instanceId}).getLastPush() =`, currentP);
+    console.log("[DebugSyncCenterModal OPEN] UI state lastPush =", lastPush);
+    console.log("[DebugSyncCenterModal OPEN] Reference equality (getLastPush() === UI lastPush):", currentP === lastPush);
+    console.log("[DebugSyncCenterModal OPEN] localStorage cafe_last_push_info =", localStorage.getItem("cafe_last_push_info"));
+
     refreshLocalStorageCounts();
 
     const unsubSync = firebaseSyncService.subscribe((state) => {
@@ -96,7 +104,12 @@ export default function DebugSyncCenterModal({ isOpen, onClose }: DebugSyncCente
 
     const unsubDiag = syncDiagnosticLogger.subscribe(() => {
       setEvents(syncDiagnosticLogger.getEvents());
-      setLastPush(syncDiagnosticLogger.getLastPush());
+      const p = syncDiagnosticLogger.getLastPush();
+      const pSuccess = syncDiagnosticLogger.getLastSuccessfulPush();
+      console.log(`[DebugSyncCenterModal listener] syncDiagnosticLogger (instanceId:${syncDiagnosticLogger.instanceId}).getLastPush() =`, p);
+      console.log("[DebugSyncCenterModal listener] Reference equality (p === previous UI lastPush):", p === lastPush);
+      setLastPush(p);
+      setLastSuccessfulPush(pSuccess);
       setLastSnapshot(syncDiagnosticLogger.getLastSnapshot());
       setDocsReceivedCount(syncDiagnosticLogger.getDocsReceivedCount());
       refreshLocalStorageCounts();
@@ -166,6 +179,28 @@ export default function DebugSyncCenterModal({ isOpen, onClose }: DebugSyncCente
       syncDiagnosticLogger.clearLogs();
       setActionMessage('تم تفريغ سجل التشخيص المباشر!');
       setTimeout(() => setActionMessage(null), 3000);
+    }
+  };
+
+  const handleTestDirectConnection = async () => {
+    setIsProcessing(true);
+    setActionMessage('جاري تشغيل اختبار setDoc المباشر في test_connection...');
+    try {
+      console.log('BEFORE setDoc');
+      const testRef = doc(db, 'test_connection', 'test_doc_' + Date.now());
+      await setDoc(testRef, {
+        timestamp: new Date().toISOString(),
+        testMessage: 'Direct setDoc connection test',
+        cafeId: syncState.cafeId || 'test_cafe',
+      });
+      console.log('AFTER setDoc');
+      setActionMessage('تمت كتابة setDoc المباشرة بنجاح! (BEFORE setDoc / AFTER setDoc تمت بنجاح)');
+    } catch (e: any) {
+      console.error('Direct setDoc ERROR:', e);
+      setActionMessage(`فشل setDoc المباشر: ${e?.message || JSON.stringify(e)}`);
+    } finally {
+      setIsProcessing(false);
+      setTimeout(() => setActionMessage(null), 6000);
     }
   };
 
@@ -359,14 +394,51 @@ export default function DebugSyncCenterModal({ isOpen, onClose }: DebugSyncCente
             </div>
           </div>
 
-          {/* Section 2: LAST PUSH & LAST SNAPSHOT */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Section 2: LAST SUCCESSFUL PUSH, CURRENT PUSH, & LAST SNAPSHOT */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             
-            {/* LAST PUSH */}
+            {/* LAST SUCCESSFUL PUSH */}
             <div className="bg-[#1a202e] border border-gray-800 rounded-xl p-4 space-y-2.5">
               <div className="flex items-center gap-2 border-b border-gray-800 pb-2">
-                <Zap className="w-4 h-4 text-emerald-400" />
-                <h3 className="font-extrabold text-white text-sm">LAST PUSH</h3>
+                <Check className="w-4 h-4 text-emerald-400" />
+                <h3 className="font-extrabold text-white text-sm">LAST SUCCESSFUL PUSH</h3>
+              </div>
+
+              {lastSuccessfulPush ? (
+                <div className="space-y-2 font-mono text-[11px]">
+                  <div className="flex justify-between border-b border-gray-800/60 pb-1">
+                    <span className="text-gray-400">Time:</span>
+                    <span className="text-gold-300 font-bold">{lastSuccessfulPush.time}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-gray-800/60 pb-1">
+                    <span className="text-gray-400">Key:</span>
+                    <span className="text-emerald-400 font-bold">{lastSuccessfulPush.key}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-gray-800/60 pb-1">
+                    <span className="text-gray-400">Path:</span>
+                    <span className="text-gray-300 text-[10px] truncate max-w-[140px] dir-ltr">{lastSuccessfulPush.path}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-gray-800/60 pb-1">
+                    <span className="text-gray-400">Size:</span>
+                    <span className="text-gray-300">{(lastSuccessfulPush.sizeBytes / 1024).toFixed(2)} KB</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Status:</span>
+                    <span className="text-emerald-400 font-bold">
+                      SUCCESS ✓
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-gray-500 text-xs italic py-2">لم تكتمل أي عملية رفع بنجاح حتى الآن.</p>
+              )}
+            </div>
+
+            {/* CURRENT PUSH (LATEST) */}
+            <div className="bg-[#1a202e] border border-gray-800 rounded-xl p-4 space-y-2.5">
+              <div className="flex items-center gap-2 border-b border-gray-800 pb-2">
+                <Zap className="w-4 h-4 text-amber-400" />
+                <h3 className="font-extrabold text-white text-sm">CURRENT PUSH (STATUS)</h3>
               </div>
 
               {lastPush ? (
@@ -377,11 +449,11 @@ export default function DebugSyncCenterModal({ isOpen, onClose }: DebugSyncCente
                   </div>
                   <div className="flex justify-between border-b border-gray-800/60 pb-1">
                     <span className="text-gray-400">Key:</span>
-                    <span className="text-emerald-400 font-bold">{lastPush.key}</span>
+                    <span className="text-amber-300 font-bold">{lastPush.key}</span>
                   </div>
                   <div className="flex justify-between border-b border-gray-800/60 pb-1">
                     <span className="text-gray-400">Path:</span>
-                    <span className="text-gray-300 text-[10px] truncate max-w-[180px] dir-ltr">{lastPush.path}</span>
+                    <span className="text-gray-300 text-[10px] truncate max-w-[140px] dir-ltr">{lastPush.path}</span>
                   </div>
                   <div className="flex justify-between border-b border-gray-800/60 pb-1">
                     <span className="text-gray-400">Size:</span>
@@ -514,7 +586,17 @@ export default function DebugSyncCenterModal({ isOpen, onClose }: DebugSyncCente
               <h3 className="font-extrabold text-white text-sm">DIAGNOSTIC TOOLS (أدوات التحكم)</h3>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2">
+              <button
+                type="button"
+                disabled={isProcessing}
+                onClick={handleTestDirectConnection}
+                className="bg-amber-600/30 hover:bg-amber-600/50 text-amber-300 border border-amber-500/50 p-2.5 rounded-xl font-bold text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 col-span-2 sm:col-span-1"
+              >
+                <Database className="w-3.5 h-3.5 text-amber-400" />
+                <span>Direct setDoc Test</span>
+              </button>
+
               <button
                 type="button"
                 disabled={isProcessing}
