@@ -116,7 +116,7 @@ export default function DebugSyncCenterModal({ isOpen, onClose }: DebugSyncCente
   const appId = (db?.app?.options as any)?.appId || 'cafe-eldeeb-app';
   const currentUser = dbService.getCurrentUser();
   const userRole = currentUser?.role || 'Admin/Manager';
-  const userEmail = auth?.currentUser?.email || currentUser?.email || 'Nader.Eldeeb.2015@gmail.com';
+  const userEmail = auth?.currentUser?.email || (currentUser as any)?.email || (currentUser as any)?.username || 'Nader.Eldeeb.2015@gmail.com';
 
   // Handlers for tools
   const handleForcePushAll = async () => {

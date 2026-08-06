@@ -124,11 +124,47 @@ export function isServiceOrNonInventoryProduct(prod: any): boolean {
 }
 
 import { firebaseSyncService } from './lib/firebaseSyncService';
+import { syncDiagnosticLogger } from './lib/syncDiagnosticLogger';
 
 const setLocal = <T>(key: string, value: T): void => {
-  localStorage.setItem(key, JSON.stringify(value));
+  console.log('SETLOCAL CALLED:', key);
+  syncDiagnosticLogger.addEvent({
+    type: 'INFO',
+    title: 'SETLOCAL CALLED',
+    key,
+    details: `Key: ${key} | Data type/length: ${Array.isArray(value) ? value.length + ' items' : typeof value}`
+  });
+
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (err: any) {
+    console.error('localStorage.setItem failed:', err);
+    syncDiagnosticLogger.recordError('localStorage setItem Error', err?.message || String(err));
+  }
+
   syncToServer();
-  firebaseSyncService.pushKeyToCloud(key, value);
+
+  console.log('PUSHKEYTOCLOUD WILL BE CALLED:', key);
+  syncDiagnosticLogger.addEvent({
+    type: 'INFO',
+    title: 'PUSHKEYTOCLOUD WILL BE CALLED',
+    key,
+    details: `Invoking pushKeyToCloud for key: ${key}`
+  });
+
+  try {
+    firebaseSyncService.pushKeyToCloud(key, value);
+    console.log('PUSHKEYTOCLOUD FINISHED:', key);
+    syncDiagnosticLogger.addEvent({
+      type: 'INFO',
+      title: 'PUSHKEYTOCLOUD FINISHED',
+      key,
+      details: `pushKeyToCloud execution started for key: ${key}`
+    });
+  } catch (err: any) {
+    console.error('pushKeyToCloud Exception in setLocal:', err);
+    syncDiagnosticLogger.recordError(`pushKeyToCloud Exception (${key})`, err?.message || String(err));
+  }
 };
 
 // Database Keys
@@ -842,7 +878,20 @@ export const dbService = {
     return uniqueList.sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
   },
   saveCategory: (category: Category) => {
+    console.log('SAVE CATEGORY CALLED:', category);
+    syncDiagnosticLogger.addEvent({
+      type: 'INFO',
+      title: 'SAVE CATEGORY CALLED',
+      details: `Category Name: ${category.name_ar} | ID: ${category.id || 'new'}`
+    });
+
     if (getCurrentUserRole() === 'Cashier') {
+      console.warn('SAVE CATEGORY BLOCKED: Role Cashier');
+      syncDiagnosticLogger.addEvent({
+        type: 'ERROR',
+        title: 'SAVE CATEGORY BLOCKED',
+        details: 'Cashier role cannot save categories.'
+      });
       throw new Error('عذراً! هذه العملية تتطلب صلاحية مدير النظام (Admin). لا يمكن للكاشير إضافة أو تعديل التصنيفات.');
     }
     const list = dbService.getCategories();
@@ -910,7 +959,20 @@ export const dbService = {
     return uniqueList;
   },
   saveProduct: (product: Product) => {
+    console.log('SAVE PRODUCT CALLED:', product);
+    syncDiagnosticLogger.addEvent({
+      type: 'INFO',
+      title: 'SAVE PRODUCT CALLED',
+      details: `Product Name: ${product.name_ar || product.name_en || 'Unnamed'} | ID: ${product.id || 'new'}`
+    });
+
     if (getCurrentUserRole() === 'Cashier') {
+      console.warn('SAVE PRODUCT BLOCKED: Role Cashier');
+      syncDiagnosticLogger.addEvent({
+        type: 'ERROR',
+        title: 'SAVE PRODUCT BLOCKED',
+        details: 'User role is Cashier, admin required.'
+      });
       throw new Error('عذراً! هذه العملية تتطلب صلاحية مدير النظام (Admin). لا يمكن للكاشير إضافة أو تعديل المنتجات.');
     }
     const list = dbService.getProducts();
@@ -5478,6 +5540,13 @@ export const dbService = {
     status?: BaristaOrderStatus;
     sent_time?: string;
   }): BaristaOrder => {
+    console.log('ADD BARISTA ORDER CALLED:', orderData);
+    syncDiagnosticLogger.addEvent({
+      type: 'INFO',
+      title: 'ADD BARISTA ORDER CALLED',
+      details: `Order Number: ${orderData.order_number} | Items: ${orderData.items?.length || 0} | Customer: ${orderData.customer_name || 'Direct'}`
+    });
+
     const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
     const now = new Date();
     const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });

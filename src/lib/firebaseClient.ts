@@ -8,8 +8,7 @@ import { getAuth } from 'firebase/auth';
 import {
   initializeFirestore,
   getFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
+  memoryLocalCache,
   doc,
   getDocFromServer,
   onSnapshot,
@@ -29,25 +28,38 @@ console.log("authDomain =", (firebaseConfig as any).authDomain);
 
 const databaseId = (firebaseConfig as any).firestoreDatabaseId;
 
-// Initialize Firestore with fallback for Android WebViews & browser environments
+// Clean up old firestore_ keys from localStorage if present to prevent QuotaExceededError
+if (typeof window !== 'undefined' && window.localStorage) {
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (k && k.startsWith('firestore_')) {
+        keysToRemove.push(k);
+      }
+    }
+    keysToRemove.forEach(k => {
+      try { window.localStorage.removeItem(k); } catch (e) { /* ignore */ }
+    });
+  } catch (e) {
+    console.warn('Could not clean stale firestore_ localStorage keys:', e);
+  }
+}
+
+// Initialize Firestore with memoryLocalCache to avoid filling up browser localStorage
 export const db = (() => {
   try {
     return initializeFirestore(
       app,
       {
-        localCache: persistentLocalCache({
-          tabManager: persistentMultipleTabManager()
-        })
+        experimentalAutoDetectLongPolling: true,
+        localCache: memoryLocalCache()
       },
       databaseId
     );
-  } catch (e) {
-    console.warn('Firestore persistent cache initialization fallback:', e);
-    try {
-      return initializeFirestore(app, {}, databaseId);
-    } catch (e2) {
-      return getFirestore(app, databaseId);
-    }
+  } catch (e1) {
+    console.warn('Firestore initialization failed, trying default getFirestore:', e1);
+    return getFirestore(app, databaseId);
   }
 })();
 
@@ -96,8 +108,8 @@ export async function testFirestoreConnection(): Promise<boolean> {
     await getDocFromServer(doc(db, 'test', 'connection'));
     return true;
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('Firestore client is offline or initial connection check failed.');
+    if (error instanceof Error && (error.message.includes('the client is offline') || error.message.includes('unavailable') || (error as any).code === 'unavailable')) {
+      console.warn('Firestore client is offline or initial connection check failed (will retry automatically).');
     }
     return false;
   }
