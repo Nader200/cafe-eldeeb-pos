@@ -49,6 +49,7 @@ import { checkForUpdates, publishRemoteVersionConfig } from '../services/updateS
 import UpdateModal from './UpdateModal';
 import { useAuth } from '../contexts/AuthContext';
 import UserManualView from './UserManualView';
+import DebugSyncCenterModal from './DebugSyncCenterModal';
 
 interface SettingsViewProps {
   onShowSuccessAlert: (msg: string) => void;
@@ -58,6 +59,7 @@ interface SettingsViewProps {
 
 export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, onSettingsChanged }: SettingsViewProps) {
   const [config, setConfig] = useState<AppSettings | null>(null);
+  const [showDebugModal, setShowDebugModal] = useState<boolean>(false);
   
   // Local inputs
   const [cafeName, setCafeName] = useState<string>('');
@@ -775,9 +777,19 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
           </div>
         </div>
 
-        <span className="text-[10px] bg-gold-600/10 text-gold-500 border border-gold-600/20 px-3.5 py-1.5 rounded-full font-bold">
-          النسخة الخاصة • Private Edition v{CURRENT_APP_VERSION}
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowDebugModal(true)}
+            className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black text-xs px-4 py-2 rounded-xl shadow-lg border border-blue-400/30 flex items-center gap-2 transition-all cursor-pointer animate-pulse"
+          >
+            <CloudLightning className="w-4 h-4 text-gold-300" />
+            <span>🔧 Debug Sync Center</span>
+          </button>
+          <span className="text-[10px] bg-gold-600/10 text-gold-500 border border-gold-600/20 px-3.5 py-1.5 rounded-full font-bold hidden sm:inline-block">
+            النسخة الخاصة • Private Edition v{CURRENT_APP_VERSION}
+          </span>
+        </div>
       </div>
 
       {/* Settings Tab Navigation: Settings -> Accounting */}
@@ -2452,6 +2464,12 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
         updateInfo={updateCheckResult}
         onClose={() => setShowUpdateModal(false)}
         userRole={currentUser?.role || 'Admin'}
+      />
+
+      {/* Debug Sync Center Modal */}
+      <DebugSyncCenterModal
+        isOpen={showDebugModal}
+        onClose={() => setShowDebugModal(false)}
       />
 
     </div>

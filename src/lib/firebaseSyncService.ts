@@ -6,6 +6,7 @@
 import { doc, setDoc, onSnapshot, collection, Unsubscribe } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from './firebaseClient';
 import { safeStorage } from './safeStorage';
+import { syncDiagnosticLogger } from './syncDiagnosticLogger';
 
 export type SyncStatus = 'connected' | 'syncing' | 'offline' | 'error';
 
@@ -172,6 +173,15 @@ class FirebaseSyncService {
 
           const key = docData.key;
           console.log(`RECEIVED REMOTE UPDATE FOR: cafes/${this.cafeId}/sync_store/${key}`, { type: change.type, deviceId: docData.deviceId });
+          
+          syncDiagnosticLogger.recordSnapshot(
+            key,
+            `cafes/${this.cafeId}/sync_store`,
+            change.type,
+            docData.deviceId || 'unknown',
+            docData.data
+          );
+
           const remoteData = docData.data;
           const remoteUpdatedAt = docData.updatedAt || 0;
 
@@ -215,6 +225,7 @@ class FirebaseSyncService {
         this.notifyState();
 
         if (updatedAny && typeof window !== 'undefined') {
+          syncDiagnosticLogger.recordUIRefresh('POSView & BaristaView & InvoicesView');
           // Notify React components across all views to re-render fresh data
           window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
           window.dispatchEvent(new CustomEvent('barista_orders_updated'));
@@ -222,8 +233,9 @@ class FirebaseSyncService {
           window.dispatchEvent(new CustomEvent('storage'));
         }
       },
-      (error) => {
+      (error: any) => {
         console.error('Firestore sync error:', error);
+        syncDiagnosticLogger.recordError('Firestore Listener Error', error?.message || String(error));
         handleFirestoreError(error, OperationType.LIST, `cafes/${this.cafeId}/sync_store`);
         this.status = 'error';
         this.notifyState();
@@ -276,16 +288,22 @@ class FirebaseSyncService {
       console.log("===== PUSH SUCCESS =====");
       console.log("Document:", key);
 
+      syncDiagnosticLogger.recordPushSuccess(key, docPath, sanitizedData);
+
       this.lastSyncTime = new Date().toLocaleTimeString('ar-EG', {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit'
       });
       this.status = 'connected';
-    } catch (error) {
+    } catch (error: any) {
       console.error("===== PUSH FAILED =====");
       console.error(error);
       console.error(`Failed to push key ${key} to cloud:`, error);
+
+      const errStr = error?.message || String(error);
+      syncDiagnosticLogger.recordPushFailure(key, `cafes/${this.cafeId}/sync_store/${key}`, errStr);
+
       handleFirestoreError(error, OperationType.WRITE, `cafes/${this.cafeId}/sync_store/${key}`);
       this.status = 'error';
     } finally {
@@ -342,6 +360,70 @@ class FirebaseSyncService {
     } finally {
       this.notifyState();
     }
+  }
+
+  /**
+   * Force push all local keys regardless of timestamp comparison
+   */
+  public async forcePushAllKeys(): Promise<number> {
+    syncDiagnosticLogger.addEvent({
+      type: 'ACTION',
+      title: 'بدء رفع كلي لجميع المستندات المحلية (Force Push All)',
+      details: 'Pushing all local keys directly to Firestore...'
+    });
+
+    const keysToSync = [
+      'cafe_categories', 'cafe_products', 'cafe_customers', 'cafe_suppliers',
+      'cafe_invoices', 'cafe_invoice_items', 'cafe_expenses', 'cafe_inventory_transactions',
+      'cafe_credit_payments', 'cafe_cash_drawers', 'cafe_daily_closes', 'cafe_settings',
+      'cafe_backup_logs', 'cafe_communication_logs', 'cafe_audit_logs', 'cafe_item_modifications',
+      'cafe_returns_list', 'cafe_credit_adjustments', 'cafe_cash_history', 'cafe_wallet_transactions',
+      'cafe_customer_notes', 'cafe_customer_visits', 'cafe_credit_transactions_system',
+      'cafe_tables_system', 'cafe_employees', 'cafe_employee_transactions', 'cafe_ps_devices',
+      'cafe_ps_sessions', 'cafe_daily_raw_materials', 'cafe_raw_materials', 'cafe_raw_materials_seeded',
+      'cafe_raw_materials_deleted', 'cafe_inventory_batches', 'cafe_inventory_batch_logs',
+      'cafe_batch_consumptions', 'cafe_auth_users', 'cafe_auth_audit_logs', 'cafe_partners',
+      'cafe_partner_drawings', 'cafe_update_logs', 'cafe_barista_orders'
+    ];
+
+    let pushedCount = 0;
+    for (const key of keysToSync) {
+      const val = safeStorage.getItem(key);
+      if (val !== null) {
+        try {
+          const parsed = JSON.parse(val);
+          await this.pushKeyToCloud(key, parsed);
+          pushedCount++;
+        } catch (e) {
+          console.error(`Failed force push for key ${key}:`, e);
+        }
+      }
+    }
+
+    syncDiagnosticLogger.addEvent({
+      type: 'ACTION',
+      title: `اكتمل الرفع الكلي: تم رفع ${pushedCount} مستند`,
+      details: `Force Push finished with ${pushedCount} documents.`
+    });
+
+    return pushedCount;
+  }
+
+  /**
+   * Restart Firestore listener explicitly
+   */
+  public restartFirestoreListener(): void {
+    syncDiagnosticLogger.addEvent({
+      type: 'ACTION',
+      title: 'إعادة تشغيل مستمع Firestore (Restart Listener)',
+      details: 'Restarting Firestore snapshot listener...'
+    });
+
+    if (this.unsubscribeSnapshot) {
+      this.unsubscribeSnapshot();
+      this.unsubscribeSnapshot = null;
+    }
+    this.startListening();
   }
 }
 
