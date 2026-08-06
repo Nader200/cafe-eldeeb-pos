@@ -389,7 +389,11 @@ export default function DebugSyncCenterModal({ isOpen, onClose }: DebugSyncCente
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-400">Status:</span>
-                    <span className={lastPush.status === 'SUCCESS' ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
+                    <span className={
+                      lastPush.status === 'SUCCESS' ? 'text-emerald-400 font-bold' :
+                      lastPush.status === 'PENDING' ? 'text-amber-400 font-bold animate-pulse' :
+                      'text-red-400 font-bold'
+                    }>
                       {lastPush.status}
                     </span>
                   </div>

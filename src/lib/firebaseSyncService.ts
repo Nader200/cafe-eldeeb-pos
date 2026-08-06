@@ -249,11 +249,6 @@ class FirebaseSyncService {
   public async pushKeyToCloud(key: string, data: any): Promise<void> {
     const docPath = `cafes/${this.cafeId}/sync_store/${key}`;
 
-    if (this.isProcessingRemoteChange) {
-      // Do not re-push incoming remote changes back to cloud
-      return;
-    }
-
     const now = Date.now();
     safeStorage.setItem(`__meta_updated_${key}`, String(now));
     this.cloudTimestamps.set(key, now);
@@ -282,6 +277,8 @@ class FirebaseSyncService {
       console.log(`WRITING TO: ${docPath}`);
       const docRef = doc(db, 'cafes', this.cafeId, 'sync_store', key);
       const sanitizedData = data !== undefined ? JSON.parse(JSON.stringify(data)) : null;
+
+      const start = Date.now();
       await setDoc(docRef, {
         key,
         data: sanitizedData,
@@ -289,6 +286,8 @@ class FirebaseSyncService {
         deviceId: this.deviceId,
         cafeId: this.cafeId
       });
+
+      console.log("[SYNC] AFTER setDoc", Date.now() - start, "ms");
 
       console.log("===== PUSH SUCCESS =====");
       console.log("Document:", key);

@@ -21,7 +21,7 @@ export interface PushInfo {
   key: string;
   path: string;
   sizeBytes: number;
-  status: 'SUCCESS' | 'FAILED';
+  status: 'SUCCESS' | 'FAILED' | 'PENDING';
   error?: string;
 }
 
@@ -102,6 +102,18 @@ class SyncDiagnosticLogger {
       minute: '2-digit',
       second: '2-digit'
     });
+
+    this.lastPush = {
+      time: timeStr,
+      key,
+      path,
+      sizeBytes: 0,
+      status: 'PENDING'
+    };
+
+    try {
+      safeStorage.setItem('cafe_last_push_info', JSON.stringify(this.lastPush));
+    } catch (e) {}
 
     this.addEvent({
       time: timeStr,

@@ -46,20 +46,19 @@ if (typeof window !== 'undefined' && window.localStorage) {
   }
 }
 
-// Initialize Firestore with memoryLocalCache to avoid filling up browser localStorage
+// Initialize Firestore with memoryLocalCache and forced long polling to avoid WebSocket hangs in iframe sandboxes
 export const db = (() => {
   try {
-    return initializeFirestore(
-      app,
-      {
-        experimentalAutoDetectLongPolling: true,
-        localCache: memoryLocalCache()
-      },
-      databaseId
-    );
+    const settings = {
+      experimentalForceLongPolling: true,
+      localCache: memoryLocalCache()
+    };
+    return databaseId && databaseId !== '(default)'
+      ? initializeFirestore(app, settings, databaseId)
+      : initializeFirestore(app, settings);
   } catch (e1) {
     console.warn('Firestore initialization failed, trying default getFirestore:', e1);
-    return getFirestore(app, databaseId);
+    return databaseId && databaseId !== '(default)' ? getFirestore(app, databaseId) : getFirestore(app);
   }
 })();
 
