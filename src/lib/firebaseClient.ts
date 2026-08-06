@@ -22,6 +22,11 @@ import firebaseConfig from '../../firebase-applet-config.json';
 // Initialize Firebase App
 export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
+console.log("===== FIREBASE RUNTIME =====");
+console.log("projectId =", (firebaseConfig as any).projectId);
+console.log("appId =", (firebaseConfig as any).appId);
+console.log("authDomain =", (firebaseConfig as any).authDomain);
+
 const databaseId = (firebaseConfig as any).firestoreDatabaseId;
 
 // Initialize Firestore with fallback for Android WebViews & browser environments

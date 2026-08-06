@@ -62,6 +62,12 @@ class FirebaseSyncService {
     // Determine Cafe ID from settings or fallback
     this.updateCafeIdFromSettings();
 
+    console.log('[FIREBASE DIAGNOSTICS] Firebase projectId:', (db.app.options as any).projectId);
+    console.log('[FIREBASE DIAGNOSTICS] Firebase app name:', db.app.name);
+    console.log('[FIREBASE DIAGNOSTICS] DEFAULT_CAFE_ID:', DEFAULT_CAFE_ID);
+    console.log('[FIREBASE DIAGNOSTICS] Actual cafeId:', this.cafeId);
+    console.log(`[FIREBASE DIAGNOSTICS] Firestore Collection Path: cafes/${this.cafeId}/sync_store`);
+
     // Online/Offline & Focus/Visibility detection for Android & Web
     this.status = navigator.onLine ? 'connected' : 'offline';
     window.addEventListener('online', () => this.handleOnline());
@@ -137,6 +143,8 @@ class FirebaseSyncService {
     }
 
     this.updateCafeIdFromSettings();
+    const storePath = `cafes/${this.cafeId}/sync_store`;
+    console.log(`LISTENING TO: ${storePath}`);
     const storeRef = collection(db, 'cafes', this.cafeId, 'sync_store');
 
     this.unsubscribeSnapshot = onSnapshot(
@@ -150,12 +158,20 @@ class FirebaseSyncService {
         snapshot.docChanges().forEach((change) => {
           if (change.type === 'removed') return;
 
-          const docData = change.doc.data();
+          const doc = change.doc;
+          console.log("===== SNAPSHOT RECEIVED =====");
+          console.log("Document ID:", doc.id);
+          console.log("Changed key:", doc.id);
+          console.log("Data:", doc.data());
+          console.log("Time:", new Date().toISOString());
+
+          const docData = doc.data();
           if (!docData || !docData.key) {
             return;
           }
 
           const key = docData.key;
+          console.log(`RECEIVED REMOTE UPDATE FOR: cafes/${this.cafeId}/sync_store/${key}`, { type: change.type, deviceId: docData.deviceId });
           const remoteData = docData.data;
           const remoteUpdatedAt = docData.updatedAt || 0;
 
@@ -239,6 +255,14 @@ class FirebaseSyncService {
 
     try {
       this.updateCafeIdFromSettings();
+      console.log("===== PUSH START =====");
+      console.log("Cafe ID:", this.cafeId);
+      console.log("Key:", key);
+      console.log("Document Path:", `cafes/${this.cafeId}/sync_store/${key}`);
+      console.log("Payload:", data);
+
+      const docPath = `cafes/${this.cafeId}/sync_store/${key}`;
+      console.log(`WRITING TO: ${docPath}`);
       const docRef = doc(db, 'cafes', this.cafeId, 'sync_store', key);
       const sanitizedData = data !== undefined ? JSON.parse(JSON.stringify(data)) : null;
       await setDoc(docRef, {
@@ -249,6 +273,9 @@ class FirebaseSyncService {
         cafeId: this.cafeId
       });
 
+      console.log("===== PUSH SUCCESS =====");
+      console.log("Document:", key);
+
       this.lastSyncTime = new Date().toLocaleTimeString('ar-EG', {
         hour: '2-digit',
         minute: '2-digit',
@@ -256,6 +283,8 @@ class FirebaseSyncService {
       });
       this.status = 'connected';
     } catch (error) {
+      console.error("===== PUSH FAILED =====");
+      console.error(error);
       console.error(`Failed to push key ${key} to cloud:`, error);
       handleFirestoreError(error, OperationType.WRITE, `cafes/${this.cafeId}/sync_store/${key}`);
       this.status = 'error';
