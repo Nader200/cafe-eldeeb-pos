@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { safeStorage } from './safeStorage';
+
 export interface LogEvent {
   id: string;
   time: string;
@@ -42,6 +44,15 @@ class SyncDiagnosticLogger {
   private listeners: DiagnosticsListener[] = [];
 
   constructor() {
+    try {
+      const savedPush = safeStorage.getItem('cafe_last_push_info');
+      if (savedPush) {
+        this.lastPush = JSON.parse(savedPush);
+      }
+    } catch (e) {
+      // Ignore parse error
+    }
+
     this.addEvent({
       type: 'INFO',
       title: 'مركز التشخيص متصل ومستعد',
@@ -85,6 +96,23 @@ class SyncDiagnosticLogger {
     this.notify();
   }
 
+  public recordPushStart(key: string, path: string) {
+    const timeStr = new Date().toLocaleTimeString('ar-EG', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+
+    this.addEvent({
+      time: timeStr,
+      type: 'INFO',
+      title: 'PUSH START',
+      key,
+      path,
+      details: `Key: ${key} | Target: ${path}`
+    });
+  }
+
   public recordPushSuccess(key: string, path: string, data: any) {
     const timeStr = new Date().toLocaleTimeString('ar-EG', {
       hour: '2-digit',
@@ -107,13 +135,17 @@ class SyncDiagnosticLogger {
       status: 'SUCCESS'
     };
 
+    try {
+      safeStorage.setItem('cafe_last_push_info', JSON.stringify(this.lastPush));
+    } catch (e) {}
+
     this.addEvent({
       time: timeStr,
       type: 'PUSH_SUCCESS',
-      title: `PUSH ${key} SUCCESS`,
+      title: 'PUSH SUCCESS',
       key,
       path,
-      details: `Path: ${path} | Size: ${(sizeBytes / 1024).toFixed(2)} KB`
+      details: `Key: ${key} | Path: ${path} | Size: ${(sizeBytes / 1024).toFixed(2)} KB`
     });
   }
 
@@ -133,13 +165,17 @@ class SyncDiagnosticLogger {
       error: errorMsg
     };
 
+    try {
+      safeStorage.setItem('cafe_last_push_info', JSON.stringify(this.lastPush));
+    } catch (e) {}
+
     this.addEvent({
       time: timeStr,
       type: 'PUSH_FAILED',
-      title: `PUSH ${key} FAILED`,
+      title: 'PUSH FAILED',
       key,
       path,
-      details: `Path: ${path} | Error: ${errorMsg}`
+      details: `Key: ${key} | Path: ${path} | Reason: ${errorMsg}`
     });
   }
 

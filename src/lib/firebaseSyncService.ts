@@ -247,6 +247,8 @@ class FirebaseSyncService {
    * Push a specific key's mutation to Firestore
    */
   public async pushKeyToCloud(key: string, data: any): Promise<void> {
+    const docPath = `cafes/${this.cafeId}/sync_store/${key}`;
+
     if (this.isProcessingRemoteChange) {
       // Do not re-push incoming remote changes back to cloud
       return;
@@ -259,21 +261,24 @@ class FirebaseSyncService {
     if (!navigator.onLine) {
       this.status = 'offline';
       this.notifyState();
+      syncDiagnosticLogger.recordPushFailure(key, docPath, 'الجهاز غير متصل بالإنترنت (navigator.onLine = false)');
       return;
     }
 
     this.status = 'syncing';
     this.notifyState();
 
+    // Record PUSH START in Realtime Log immediately
+    syncDiagnosticLogger.recordPushStart(key, docPath);
+
     try {
       this.updateCafeIdFromSettings();
       console.log("===== PUSH START =====");
       console.log("Cafe ID:", this.cafeId);
       console.log("Key:", key);
-      console.log("Document Path:", `cafes/${this.cafeId}/sync_store/${key}`);
+      console.log("Document Path:", docPath);
       console.log("Payload:", data);
 
-      const docPath = `cafes/${this.cafeId}/sync_store/${key}`;
       console.log(`WRITING TO: ${docPath}`);
       const docRef = doc(db, 'cafes', this.cafeId, 'sync_store', key);
       const sanitizedData = data !== undefined ? JSON.parse(JSON.stringify(data)) : null;
@@ -302,9 +307,9 @@ class FirebaseSyncService {
       console.error(`Failed to push key ${key} to cloud:`, error);
 
       const errStr = error?.message || String(error);
-      syncDiagnosticLogger.recordPushFailure(key, `cafes/${this.cafeId}/sync_store/${key}`, errStr);
+      syncDiagnosticLogger.recordPushFailure(key, docPath, errStr);
 
-      handleFirestoreError(error, OperationType.WRITE, `cafes/${this.cafeId}/sync_store/${key}`);
+      handleFirestoreError(error, OperationType.WRITE, docPath);
       this.status = 'error';
     } finally {
       this.notifyState();
