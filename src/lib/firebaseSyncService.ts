@@ -165,6 +165,7 @@ class FirebaseSyncService {
         this.notifyState();
 
         let updatedAny = false;
+        const updatedKeys: string[] = [];
 
         snapshot.docChanges().forEach((change) => {
           if (change.type === 'removed') return;
@@ -174,7 +175,7 @@ class FirebaseSyncService {
           if (!docData || !docData.key) return;
 
           const key = docData.key;
-          const remoteData = docData.data;
+          let remoteData = docData.data;
           const remoteUpdatedAt = docData.updatedAt || 0;
 
           this.cloudTimestamps.set(key, remoteUpdatedAt);
@@ -196,10 +197,18 @@ class FirebaseSyncService {
               if (remoteData === null || remoteData === undefined) {
                 safeStorage.removeItem(key);
               } else {
+                if (key === 'cafe_settings') {
+                  const setupWasDoneLocally = safeStorage.getItem('cafe_setup_completed') === 'true';
+                  if (remoteData.is_setup_completed === true || setupWasDoneLocally) {
+                    remoteData.is_setup_completed = true;
+                    safeStorage.setItem('cafe_setup_completed', 'true');
+                  }
+                }
                 safeStorage.setItem(key, JSON.stringify(remoteData));
               }
               safeStorage.setItem(localMetaKey, String(remoteUpdatedAt));
               updatedAny = true;
+              updatedKeys.push(key);
             } catch (err) {
               console.error(`Error applying remote sync for key ${key}:`, err);
             } finally {
@@ -223,7 +232,7 @@ class FirebaseSyncService {
         this.notifyState();
 
         if (updatedAny && typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+          window.dispatchEvent(new CustomEvent('cafe_db_synced_remote', { detail: { updatedKeys } }));
           window.dispatchEvent(new CustomEvent('open_invoices_updated'));
           window.dispatchEvent(new CustomEvent('storage'));
         }

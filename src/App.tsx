@@ -397,7 +397,12 @@ function AppContent() {
 
   // Sync state helpers
   const handleRefreshSettingsAndDrawer = () => {
-    setSettings(dbService.getSettings());
+    const freshSettings = dbService.getSettings();
+    console.log('[SESSION DEBUG] handleRefreshSettingsAndDrawer called:', {
+      freshSettings,
+      rawSettingsInStorage: safeStorage.getItem('cafe_settings')
+    });
+    setSettings(freshSettings);
     setActiveDrawer(dbService.getActiveDrawer());
   };
 
@@ -496,6 +501,19 @@ function AppContent() {
       </div>
     );
   }
+
+  // --- Diagnostic Session Debug Logs ---
+  const rawCafeSettings = safeStorage.getItem('cafe_settings');
+  console.log('[SESSION DEBUG]', {
+    authUser: currentUser ? currentUser.username : null,
+    uid: currentUser ? currentUser.id : null,
+    email: currentUser ? currentUser.username : null,
+    role: currentUser ? currentUser.role : null,
+    settingsLoaded: isDbLoaded,
+    cafeSettingsExists: !!rawCafeSettings,
+    setupComplete: !!(settings && settings.is_setup_completed),
+    showSetupWizard: isDbLoaded && (!settings || !settings.is_setup_completed)
+  });
 
   // --- First-time Setup Wizard check ---
   if (!settings || !settings.is_setup_completed) {
