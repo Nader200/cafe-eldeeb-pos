@@ -145,12 +145,22 @@ class FirebaseSyncService {
 
     this.updateCafeIdFromSettings();
     const storePath = `cafes/${this.cafeId}/sync_store`;
-    console.log(`[GLOBAL SYNC] LISTENING TO COLLECTION: ${storePath}`);
+    const projectId = (db.app.options as any)?.projectId || 'cafe-eldeeb-pos';
+
+    console.log('CASHIER LISTENER', projectId, this.cafeId, storePath);
     const storeRef = collection(db, 'cafes', this.cafeId, 'sync_store');
 
     this.unsubscribeSnapshot = onSnapshot(
       storeRef,
       (snapshot) => {
+        console.log(
+          'CASHIER SNAPSHOT',
+          'exists:', !snapshot.empty,
+          'fromCache:', snapshot.metadata.fromCache,
+          'hasPendingWrites:', snapshot.metadata.hasPendingWrites,
+          'data:', snapshot.docs.map(d => ({ id: d.id, key: d.data()?.key, data: d.data()?.data }))
+        );
+
         this.status = 'syncing';
         this.notifyState();
 
@@ -304,6 +314,8 @@ class FirebaseSyncService {
       cafeId: cafeId
     };
 
+    console.log('ADMIN WRITE', projectId, cafeId, docPath, payload);
+
     const start = Date.now();
 
     try {
@@ -311,6 +323,7 @@ class FirebaseSyncService {
 
       await setDoc(docRef, payload);
 
+      console.log('WRITE COMPLETED');
       const duration = Date.now() - start;
 
       // Print REQUIRED post-write diagnostics to console

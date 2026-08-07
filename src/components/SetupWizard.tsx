@@ -29,29 +29,43 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
   const [loading, setLoading] = useState(false);
 
   const handleNext = () => {
+    console.log(`[SETUP WIZARD] handleNext called at step ${step}`);
     if (step === 1 && (!cafeName.trim() || !ownerName.trim())) {
+      console.warn('[SETUP WIZARD] Step 1 validation failed: cafeName or ownerName missing');
       return;
     }
     if (step === 2 && (!phone.trim() || !address.trim() || !currency.trim())) {
+      console.warn('[SETUP WIZARD] Step 2 validation failed: phone, address or currency missing');
       return;
     }
     if (step < 3) {
+      console.log(`[SETUP WIZARD] Moving to step ${step + 1}`);
       setStep(prev => prev + 1);
     } else {
+      console.log('[SETUP WIZARD] Step 3: Button clicked: "إنشاء قاعدة البيانات الآن"');
       handleSubmit();
     }
   };
 
   const handleBack = () => {
     if (step > 1) {
+      console.log(`[SETUP WIZARD] Moving back from step ${step} to ${step - 1}`);
       setStep(prev => prev - 1);
     }
   };
 
   const handleSubmit = () => {
+    console.log('[SETUP WIZARD STEP 3 - SUBMIT] Initializing database creation...');
+    console.log('Cafe Name:', cafeName);
+    console.log('Owner Name:', ownerName);
+    console.log('Phone:', phone);
+    console.log('Address:', address);
+    console.log('Currency:', currency);
+
     setLoading(true);
     setTimeout(() => {
       setLoading(false);
+      console.log('[SETUP WIZARD STEP 3 - CALLING ONCOMPLETE] Invoking onComplete callback...');
       onComplete({
         cafe_name: cafeName,
         owner_name: ownerName,

@@ -21,11 +21,17 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     e.preventDefault();
     setErrorMsg(null);
 
+    console.log('[STEP 1 - LOGIN SUBMITTED] Login form submit triggered.');
+    console.log('Username entered:', username);
+    console.log('Password length:', password.length);
+
     if (!username.trim()) {
+      console.warn('[LOGIN FAILED - EMPTY USERNAME] Username is empty.');
       setErrorMsg('يرجى كتابة اسم المستخدم للمتابعة');
       return;
     }
     if (!password) {
+      console.warn('[LOGIN FAILED - EMPTY PASSWORD] Password is empty.');
       setErrorMsg('يرجى كتابة كلمة المرور الخاصة بحسابك');
       return;
     }
@@ -33,9 +39,14 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     setLoading(true);
 
     setTimeout(() => {
+      console.log('[STEP 2 - AUTHENTICATING] Calling dbService.authenticateUser...');
       const authenticatedUser = dbService.authenticateUser(username, password);
 
       if (authenticatedUser) {
+        console.log('[STEP 3 - AUTH SUCCESS] User authenticated successfully:', authenticatedUser);
+        console.log('Role:', authenticatedUser.role);
+        console.log('User ID:', authenticatedUser.id);
+
         // Record Audit Log
         const now = new Date();
         const dateStr = now.toISOString().split('T')[0];
@@ -51,8 +62,10 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           timestamp: now.toISOString()
         });
 
+        console.log('[STEP 4 - ON LOGIN SUCCESS CALLBACK] Invoking onLoginSuccess...');
         onLoginSuccess(authenticatedUser, rememberMe);
       } else {
+        console.error('[LOGIN FAILED - INVALID CREDENTIALS] Authentication returned null for username:', username);
         setLoading(false);
         setErrorMsg('اسم المستخدم أو كلمة المرور غير صحيحة! يرجى التحقق وإعادة المحاولة.');
       }
@@ -60,6 +73,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   };
 
   const handleQuickFill = (u: string, p: string) => {
+    console.log('[LOGIN DIAGNOSTIC] Quick fill clicked:', u);
     setUsername(u);
     setPassword(p);
     setErrorMsg(null);

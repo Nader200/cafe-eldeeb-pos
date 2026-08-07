@@ -502,7 +502,12 @@ function AppContent() {
     return (
       <SetupWizard
         onComplete={(formData) => {
+          console.log('=== SETUP WIZARD ONCOMPLETE STARTED ===');
+          console.log('[STEP 1] Received formData from wizard:', formData);
+          
           const currentSettings = dbService.getSettings();
+          console.log('[STEP 2] Current settings before update:', currentSettings);
+
           const updated: AppSettings = {
             ...currentSettings,
             cafe_name: formData.cafe_name,
@@ -513,13 +518,18 @@ function AppContent() {
             is_setup_completed: true,
             updated_at: new Date().toISOString()
           };
+
+          console.log('[STEP 3] Calling dbService.saveSettings with updated settings:', updated);
           dbService.saveSettings(updated);
           
-          // Open cash drawer with 0 to ensure stats and drawer are fully clean
+          console.log('[STEP 4] Opening cash drawer with 0 balance...');
           dbService.openCashDrawer(0);
           
+          console.log('[STEP 5] Updating React state setSettings & setActiveDrawer...');
           setSettings(updated);
           setActiveDrawer(dbService.getActiveDrawer());
+
+          console.log('=== SETUP WIZARD ONCOMPLETE COMPLETED SUCCESSFULLY ===');
           showSuccessAlert(`تهانينا الحارة! تم تهيئة نظام كافيه "${formData.cafe_name}" الملوكي بنجاح وقاعدة البيانات فارغة 100% لعملك الخاص!`);
         }}
       />
@@ -531,6 +541,8 @@ function AppContent() {
     return (
       <LoginScreen
         onLoginSuccess={(user, rememberMe) => {
+          console.log('=== LOGIN SUCCESS HANDLER IN APP.TSX ===');
+          console.log('User logged in:', user.name, '| Role:', user.role);
           login(user, rememberMe);
           showSuccessAlert(`مرحباً بك يا سيد ${user.name}! تم تسجيل الدخول الملوكي بنجاح بصلاحية (${user.role === 'Admin' ? 'المدير العام' : 'الكاشير'}).`);
         }}

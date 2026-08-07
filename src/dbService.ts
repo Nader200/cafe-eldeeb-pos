@@ -353,33 +353,14 @@ export const clearDatabase = (preserveSettings = true): void => {
     updated_at: new Date().toISOString()
   };
 
-  setLocal(KEYS.SETTINGS, resetSettings);
+  localStorage.setItem(KEYS.SETTINGS, JSON.stringify(resetSettings));
 
-  // Initialize empty arrays for all data tables
-  setLocal(KEYS.CATEGORIES, []);
-  setLocal(KEYS.PRODUCTS, []);
-  setLocal(KEYS.CUSTOMERS, []);
-  setLocal(KEYS.SUPPLIERS, []);
-  setLocal(KEYS.CASH_DRAWERS, []);
-  setLocal(KEYS.EXPENSES, []);
-  setLocal(KEYS.INVOICES, []);
-  setLocal(KEYS.INVOICE_ITEMS, []);
-  setLocal(KEYS.INVENTORY_TRANSACTIONS, []);
-  setLocal(KEYS.CREDIT_PAYMENTS, []);
-  setLocal(KEYS.CREDIT_TRANSACTIONS, []);
-  setLocal(KEYS.DAILY_CLOSES, []);
-  setLocal(KEYS.BACKUP_LOGS, []);
-  setLocal(KEYS.COMMUNICATION_LOGS, []);
-  setLocal(KEYS.AUDIT_LOGS, []);
-  setLocal(KEYS.ITEM_MODIFICATIONS, []);
-  setLocal(KEYS.EMPLOYEES, []);
-  setLocal(KEYS.EMPLOYEE_TRANSACTIONS, []);
-  setLocal(KEYS.PS_DEVICES, []);
-  setLocal(KEYS.PS_SESSIONS, []);
-  setLocal(KEYS.INVENTORY_BATCHES, []);
-  setLocal(KEYS.INVENTORY_BATCH_LOGS, []);
-  setLocal(KEYS.PARTNERS, []);
-  setLocal(KEYS.PARTNER_DRAWINGS, []);
+  // Clear all data table keys locally without pushing empty arrays to cloud Firestore
+  Object.values(KEYS).forEach(k => {
+    if (k !== KEYS.SETTINGS) {
+      localStorage.removeItem(k);
+    }
+  });
 
   // Clear IndexedDB if any
   if (typeof window !== 'undefined' && window.indexedDB && window.indexedDB.databases) {
@@ -395,6 +376,7 @@ export const clearDatabase = (preserveSettings = true): void => {
 
 // Seeding Initial Data (No demo data, empty database)
 export const seedDatabase = (force = false) => {
+  console.log(`[SEED DATABASE DIAGNOSTIC] seedDatabase called with force=${force}`);
   // Check if any existing data is present in ANY of the critical tables
   const hasCategories = getLocal<Category[]>(KEYS.CATEGORIES, []).length > 0;
   const hasProducts = getLocal<Product[]>(KEYS.PRODUCTS, []).length > 0;
@@ -403,22 +385,27 @@ export const seedDatabase = (force = false) => {
   const storedSettings = localStorage.getItem(KEYS.SETTINGS);
   const hasSettings = storedSettings !== null && storedSettings !== undefined && storedSettings !== '{}';
 
+  console.log(`[SEED STATUS] hasCategories:${hasCategories}, hasProducts:${hasProducts}, hasCustomers:${hasCustomers}, hasInvoices:${hasInvoices}, hasSettings:${hasSettings}`);
+
   if (!hasSettings) {
-    setLocal(KEYS.SETTINGS, defaultSettings);
+    console.log('[SEED ACTION] No settings found. Initializing local defaultSettings.');
+    localStorage.setItem(KEYS.SETTINGS, JSON.stringify(defaultSettings));
   }
 
   if (!force && (hasCategories || hasProducts || hasCustomers || hasInvoices || hasSettings)) {
+    console.log('[SEED ACTION SKIPPED] Data already exists and force is false. Returning.');
     return;
   }
 
-  // Complete a clean initialization of an empty database if forcing, or if truly empty
+  // Ensure settings exist if forcing empty database init
   if (force && !hasCategories && !hasProducts && !hasCustomers && !hasInvoices) {
-    clearDatabase(true);
     const existing = getLocal<AppSettings | null>(KEYS.SETTINGS, null);
     if (!existing) {
-      setLocal(KEYS.SETTINGS, defaultSettings);
+      localStorage.setItem(KEYS.SETTINGS, JSON.stringify(defaultSettings));
     }
     console.log('Cafe Eldeeb empty enterprise database initialized successfully!');
+  } else {
+    console.log('[SEED ACTION NOTE] seedDatabase force=true condition not fully met or tables already populated.');
   }
 };
 
@@ -783,18 +770,7 @@ export const dbService = {
         syncToServer();
         return true;
       } else {
-        // Server database is empty or not configured yet.
-        // Check if there is already some data in local storage
         isDatabaseLoadedFromServer = true;
-        const hasProducts = getLocal<any[]>(KEYS.PRODUCTS, []).length > 0;
-        const hasCustomers = getLocal<any[]>(KEYS.CUSTOMERS, []).length > 0;
-        if (hasProducts || hasCustomers) {
-          // Client has existing local data, so let's push/migrate it to the server!
-          syncToServer();
-        } else {
-          // Seed default settings and empty tables
-          seedDatabase(true);
-        }
         return false;
       }
     } catch (e) {
@@ -833,7 +809,7 @@ export const dbService = {
     }
 
     if (uniqueList.length !== list.length) {
-      setLocal(KEYS.CATEGORIES, uniqueList);
+      try { localStorage.setItem(KEYS.CATEGORIES, JSON.stringify(uniqueList)); } catch (e) {}
     }
     return uniqueList.sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
   },
@@ -904,7 +880,7 @@ export const dbService = {
     }
 
     if (uniqueList.length !== list.length) {
-      setLocal(KEYS.PRODUCTS, uniqueList);
+      try { localStorage.setItem(KEYS.PRODUCTS, JSON.stringify(uniqueList)); } catch (e) {}
     }
     return uniqueList;
   },
@@ -961,7 +937,7 @@ export const dbService = {
       }
     }
     if (uniqueList.length !== list.length) {
-      setLocal(KEYS.CUSTOMERS, uniqueList);
+      try { localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(uniqueList)); } catch (e) {}
     }
     return uniqueList;
   },
