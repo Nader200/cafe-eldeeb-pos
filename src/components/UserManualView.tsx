@@ -111,7 +111,7 @@ export default function UserManualView({ currentUser, onNavigateTab }: UserManua
       category: 'core',
       icon: <Lock className="w-5 h-5 text-gold-400" />,
       badge: 'الأمان والصلاحيات',
-      targetRoles: ['Admin', 'Cashier', 'Barista'],
+      targetRoles: ['Admin', 'Cashier'],
       summary: 'آلية تأمين جلسات العمل، تسجيل الدخول برمز PIN السرّي، وإدارة أدوار ومستويات وصول المستخدمين.',
       steps: [
         {
@@ -501,12 +501,12 @@ export default function UserManualView({ currentUser, onNavigateTab }: UserManua
       category: 'system_integrations',
       icon: <RefreshCw className="w-5 h-5 text-gold-400" />,
       badge: 'المزامنة الفورية',
-      targetRoles: ['Admin', 'Cashier', 'Barista'],
-      summary: 'ربط أجهزة الكافيه (كاشير ١ + كاشير ٢ + شاشة البارستا + الموبايل) بمزامنة فائقة السرعة.',
+      targetRoles: ['Admin', 'Cashier'],
+      summary: 'ربط أجهزة الكافيه (كاشير ١ + كاشير ٢ + الموبايل) بمزامنة فائقة السرعة.',
       steps: [
         {
           title: '١. المزامنة اللحظية متعددة الأجهزة',
-          description: 'أي طلب يتم إدخاله في الكاشير يظهر فوراً في شاشة البارستا وشاشة الفواتير المفتوحة بدون الحاجة لتحديث الصفحة.',
+          description: 'أي طلب يتم إدخاله في الكاشير يظهر فوراً في الأجهزة المرتبطة وشاشة الفواتير المفتوحة بدون الحاجة لتحديث الصفحة.',
           tip: 'يعمل النظام بوضع أوفلاين (Offline Store & Forward) في حال انقطاع الإنترنت ويقوم بالمزامنة فور عودة الاتصال.'
         }
       ]
@@ -530,29 +530,6 @@ export default function UserManualView({ currentUser, onNavigateTab }: UserManua
         {
           title: '٢. تخصيص رأس وذيل الفاتورة',
           description: 'إضافة شعار كافيه الديب، اسم الفرع، رقم الضريبي، أرقام الدليفري، وعبارات الترحيب في أسفل الفاتورة.'
-        }
-      ]
-    },
-
-    // 19. BARISTA & KITCHEN PREPARATION SCREEN
-    {
-      id: 'barista_kds',
-      title: 'شاشة البارستا وطاقم التحضير (Barista Kitchen Screen - KDS)',
-      category: 'core',
-      icon: <Coffee className="w-5 h-5 text-amber-500" />,
-      badge: 'شاشة التحضير',
-      targetRoles: ['Admin', 'Barista', 'Cashier'],
-      summary: 'شاشة تذكريات التحضير المباشرة للبارستا مع التنبيهات الصوتية وتحديث حالات الطلب.',
-      steps: [
-        {
-          title: '١. استقبال طلبات المشروبات والمأكولات',
-          description: 'تظهر الطلبات الجديدة في كروت واضحة ملونة تحتوي على رقم الطلب، رقم الطاولة، قائمة الأصناف، والإضافات المخصصة.',
-          tip: 'يتم تشغيل جرس تنبيه صوتي فوري 🔔 عند وصول أي طلب جديد للبارستا.'
-        },
-        {
-          title: '٢. تتبع مسار وتغيير حالة الطلب',
-          description: '١. "بدء التحضير 🍳" ➔ يتغير لون الكارت للبرتقالي. ٢. "جاهز للاستلام 🔔" ➔ يرسل إشعاراً لشبكة الكاشير. ٣. "تم التسليم للعميل 🚶" ➔ أرشفة تذكرة البارستا.',
-          tip: 'البارستا لا يتحكم في سداد الفواتير أو إلغائها، ودوره يقتصر تماماً على التحضير والتسليم التشغيلي.'
         }
       ]
     }
@@ -628,11 +605,11 @@ export default function UserManualView({ currentUser, onNavigateTab }: UserManua
                 معاينة دليل الصلاحية:
               </span>
               <span className="text-gold-400 font-extrabold">
-                {activeRoleView === 'Admin' ? '👑 أدمن المدير العام' : activeRoleView === 'Cashier' ? '☕ كاشير المبيعات' : '🥤 البارستا والتحضير'}
+                {activeRoleView === 'Admin' ? '👑 أدمن المدير العام' : '☕ كاشير المبيعات'}
               </span>
             </div>
 
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-2 gap-1.5">
               <button
                 type="button"
                 onClick={() => setActiveRoleView('Admin')}
@@ -656,22 +633,10 @@ export default function UserManualView({ currentUser, onNavigateTab }: UserManua
               >
                 <span>☕ كاشير</span>
               </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveRoleView('Barista')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  activeRoleView === 'Barista'
-                    ? 'bg-amber-600 text-black font-extrabold shadow-md'
-                    : 'bg-gray-900/60 text-gray-400 hover:text-white border border-gray-800'
-                }`}
-              >
-                <span>🥤 بارستا</span>
-              </button>
             </div>
             {userActualRole !== 'Admin' && (
               <p className="text-[10px] text-gray-500 text-center font-medium pt-1">
-                (أنت مسجل حالياً بصلاحية {userActualRole === 'Cashier' ? 'الكاشير' : 'البارستا'})
+                (أنت مسجل حالياً بصلاحية الكاشير)
               </p>
             )}
           </div>

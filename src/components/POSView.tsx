@@ -49,7 +49,7 @@ import {
 } from 'lucide-react';
 import { dbService, safeStorage, getItemCategoryIcon } from '../dbService';
 const localStorage = safeStorage;
-import { Product, Category, Customer, CartItem, PaymentType, Invoice, BaristaOrderItem } from '../types';
+import { Product, Category, Customer, CartItem, PaymentType, Invoice } from '../types';
 import { safeHtml2Canvas } from '../utils/html2canvasHelper';
 import { shareInvoicePDFToWhatsApp } from '../utils/pdfInvoiceGenerator';
 import { useAuth } from '../contexts/AuthContext';
@@ -514,20 +514,18 @@ export default function POSView({
     };
   }, []);
 
-  const handleSendToBarista = async () => {
+  const handleSaveOpenInvoice = async () => {
     if (cart.length === 0) {
-      onShowWarningAlert('يرجى إضافة سلع أو مشروبات أولاً لإرسال طلب التحضير للبارستا!');
+      onShowWarningAlert('يرجى إضافة سلع أو مشروبات أولاً لإرسال طلب الفاتورة المفتوحة!');
       return;
     }
 
     const tableNumberStr = tableNumber ? (tableNumber.includes('طاولة') ? tableNumber : `طاولة ${tableNumber}`) : '';
-
     const customerObj = customers.find(c => c.id === selectedCustomer);
-    const customerNameStr = customerObj ? customerObj.full_name : 'عميل مباشر';
     const cashierName = currentUser?.name || 'الكاشير';
 
     try {
-      // 1. Save or ensure Open Invoice in DB
+      // 1. Save Open Invoice in DB
       const savedOpenRes = dbService.saveOpenInvoice(
         activeInvoiceId,
         cart,
@@ -547,37 +545,9 @@ export default function POSView({
         receiptImageUrl
       );
 
-      // 2. Prepare Barista Order Items with full metadata
-      const baristaItems: BaristaOrderItem[] = cart.map((item, idx) => ({
-        id: `bitm_${Date.now()}_${idx}`,
-        product_id: item.product.id,
-        product_name_ar: item.product.name_ar,
-        product_name_en: item.product.name_en,
-        category_id: item.product.category_id,
-        category_name: categories.find(c => c.id === item.product.category_id)?.name_ar || '',
-        quantity: item.quantity,
-        notes: (item.notes || item.kitchen_notes || '').trim(),
-        category_icon: getItemCategoryIcon(categories.find(c => c.id === item.product.category_id)?.name_ar, item.product.name_ar),
-        unit_price: item.custom_price !== undefined ? item.custom_price : item.product.selling_price,
-        cost_price: item.product.cost_price,
-        total_price: (item.custom_price !== undefined ? item.custom_price : item.product.selling_price) * item.quantity
-      }));
+      onShowSuccessAlert(`تم حفظ الطلب رقم #${savedOpenRes.invoice.invoice_number} كفاتورة مفتوحة 📋!`);
 
-      // 3. Dispatch to Barista Kitchen Screen & await direct Cloud Push Confirmation
-      await dbService.addBaristaOrderAsync({
-        order_number: savedOpenRes.invoice.invoice_number,
-        invoice_id: savedOpenRes.invoice.id,
-        table_number: tableNumberStr,
-        customer_name: customerNameStr,
-        cashier_name: cashierName,
-        items: baristaItems,
-        notes: invoiceNotes,
-        status: 'NEW'
-      });
-
-      onShowSuccessAlert(`تم إرسال الطلب رقم #${savedOpenRes.invoice.invoice_number} للبارستا وتوثيقه كفاتورة مفتوحة ☕!`);
-
-      // 4. Reset cart state for cashier
+      // 2. Reset cart state for cashier
       setCart([]);
       setDiscount(0);
       setTaxPercentage(settings.default_tax_percentage !== undefined ? settings.default_tax_percentage : 0);
@@ -586,15 +556,15 @@ export default function POSView({
       setSelectedCustomer('c_general');
       setPaymentMethod('CASH');
       setReferenceNumber('');
+      setPaymentNotes('');
       setSenderPhone('');
       setReceiptImageUrl('');
-      setPaymentNotes('');
       setActiveInvoiceId(undefined);
       if (clearReopenedInvoiceId) {
         clearReopenedInvoiceId();
       }
-    } catch (err: any) {
-      onShowWarningAlert(err.message || 'حدث خطأ أثناء إرسال الطلب للبارستا');
+    } catch (e: any) {
+      onShowWarningAlert(`حدث خطأ أثناء حفظ الفاتورة: ${e?.message || e}`);
     }
   };
 
@@ -1093,57 +1063,6 @@ export default function POSView({
       setCustomers(dbService.getCustomers()); // refresh customer list and balances
     } catch (e: any) {
       onShowWarningAlert(e.message || 'حدث خطأ غير متوقع أثناء تسجيل الدفع');
-    }
-  };
-
-  const handleSaveOpenInvoice = () => {
-    if (cart.length === 0) {
-      onShowWarningAlert('يرجى إضافة سلع أولاً لحفظ الفاتورة المفتوحة!');
-      return;
-    }
-    try {
-      const res = dbService.saveOpenInvoice(
-        activeInvoiceId,
-        cart,
-        paymentType,
-        selectedCustomer === 'c_general' ? null : selectedCustomer,
-        discount,
-        taxPercentage,
-        0,
-        'أدمن النظام / نادر الديب',
-        invoiceNotes,
-        tableNumber,
-        paymentMethod,
-        referenceNumber,
-        paymentNotes,
-        'OPEN',
-        senderPhone,
-        receiptImageUrl
-      );
-
-      onShowSuccessAlert(`تم حفظ الفاتورة بنجاح كـ فاتورة مفتوحة برقم: ${res.invoice.invoice_number}`);
-
-      // Clear Cart state
-      setCart([]);
-      setDiscount(0);
-      setTaxPercentage(settings.default_tax_percentage !== undefined ? settings.default_tax_percentage : 0);
-      setInvoiceNotes('');
-      setTableNumber('');
-      setSelectedCustomer('c_general');
-      setPaymentMethod('CASH');
-      setReferenceNumber('');
-      setSenderPhone('');
-      setReceiptImageUrl('');
-      setPaymentNotes('');
-      setActiveInvoiceId(undefined);
-      if (clearReopenedInvoiceId) {
-        clearReopenedInvoiceId();
-      }
-      setProducts(dbService.getProducts()); // refresh product stock displays
-      setCustomers(dbService.getCustomers()); // refresh customer list and balances
-      onNavigate('open-invoices');
-    } catch (e: any) {
-      onShowWarningAlert(e.message || 'حدث خطأ أثناء حفظ الفاتورة المفتوحة');
     }
   };
 
@@ -1676,9 +1595,9 @@ export default function POSView({
             <div className="flex flex-col gap-1.5">
               <div className="grid grid-cols-2 gap-1.5">
                 <button
-                  id="pos-send-barista-btn"
+                  id="pos-save-open-invoice-btn"
                   type="button"
-                  onClick={handleSendToBarista}
+                  onClick={handleSaveOpenInvoice}
                   disabled={cart.length === 0}
                   className={`py-2 px-2 text-[10px] md:text-xs font-black rounded-xl border transition-all flex items-center justify-center gap-1.5 shadow-md cursor-pointer ${
                     cart.length === 0
@@ -1686,8 +1605,8 @@ export default function POSView({
                       : 'bg-amber-950/40 border-amber-500/50 hover:bg-amber-900 text-amber-300 active:scale-[0.98]'
                   }`}
                 >
-                  <Coffee className="w-4 h-4 text-amber-400 stroke-[2.5]" />
-                  <span>إرسال للبارستا ☕</span>
+                  <ClipboardList className="w-4 h-4 text-amber-400 stroke-[2.5]" />
+                  <span>فاتورة مفتوحة 📋</span>
                 </button>
 
                 <button

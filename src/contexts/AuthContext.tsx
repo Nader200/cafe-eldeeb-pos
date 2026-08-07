@@ -70,11 +70,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (tab === 'user_manual' || tab === 'manual' || tab === 'help') return true;
     if (currentUser.role === 'Admin') return true;
 
-    // Barista allowed tabs (incoming orders only, no prices, no inventory, no financial reports)
-    if (currentUser.role === 'Barista') {
-      return tab === 'barista' || tab === 'user_manual';
-    }
-
     // Cashier allowed tabs
     if (currentUser.role === 'Cashier') {
       const allowedCashierTabs = [

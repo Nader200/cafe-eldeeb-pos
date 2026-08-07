@@ -58,7 +58,7 @@ if (typeof window !== 'undefined' && window.localStorage) {
 export const db = (() => {
   try {
     const settings = {
-      experimentalAutoDetectLongPolling: true,
+      experimentalForceLongPolling: true,
       localCache: memoryLocalCache()
     };
     return databaseId && databaseId !== '(default)'

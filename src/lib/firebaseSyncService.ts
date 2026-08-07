@@ -6,8 +6,6 @@
 import { doc, setDoc, getDoc, onSnapshot, collection, Unsubscribe } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from './firebaseClient';
 import { safeStorage } from './safeStorage';
-import { syncDiagnosticLogger } from './syncDiagnosticLogger';
-import { playBaristaNewOrderSound } from './audioService';
 
 export type SyncStatus = 'connected' | 'syncing' | 'offline' | 'error';
 
@@ -51,9 +49,9 @@ class FirebaseSyncService {
   private lastSyncTime: string | null = null;
   private listeners: ((state: SyncState) => void)[] = [];
   private unsubscribeSnapshot: Unsubscribe | null = null;
-  private unsubscribeBaristaSnapshot: Unsubscribe | null = null;
   private isProcessingRemoteChange: boolean = false;
   private cloudTimestamps: Map<string, number> = new Map();
+  private activePushes: Map<string, Promise<void>> = new Map();
 
   constructor() {
     this.init();
@@ -111,10 +109,6 @@ class FirebaseSyncService {
       this.unsubscribeSnapshot();
       this.unsubscribeSnapshot = null;
     }
-    if (this.unsubscribeBaristaSnapshot) {
-      this.unsubscribeBaristaSnapshot();
-      this.unsubscribeBaristaSnapshot = null;
-    }
   }
 
   public subscribe(callback: (state: SyncState) => void): () => void {
@@ -148,9 +142,6 @@ class FirebaseSyncService {
     if (this.unsubscribeSnapshot) {
       this.unsubscribeSnapshot();
     }
-    if (this.unsubscribeBaristaSnapshot) {
-      this.unsubscribeBaristaSnapshot();
-    }
 
     this.updateCafeIdFromSettings();
     const storePath = `cafes/${this.cafeId}/sync_store`;
@@ -176,14 +167,6 @@ class FirebaseSyncService {
           const remoteData = docData.data;
           const remoteUpdatedAt = docData.updatedAt || 0;
 
-          syncDiagnosticLogger.recordSnapshot(
-            docSnap.id,
-            `cafes/${this.cafeId}/sync_store`,
-            change.type,
-            docData.deviceId || 'unknown',
-            docData.data
-          );
-
           this.cloudTimestamps.set(key, remoteUpdatedAt);
 
           const localMetaKey = `__meta_updated_${key}`;
@@ -192,9 +175,7 @@ class FirebaseSyncService {
 
           const isFromOtherDevice = docData.deviceId && docData.deviceId !== this.deviceId;
 
-          // Always accept cafe_barista_orders, or newer updates, or changes from other devices
           if (
-            key === 'cafe_barista_orders' ||
             remoteUpdatedAt >= localUpdatedAt - 120000 ||
             isFromOtherDevice ||
             localUpdatedAt === 0 ||
@@ -202,22 +183,6 @@ class FirebaseSyncService {
           ) {
             this.isProcessingRemoteChange = true;
             try {
-              if (key === 'cafe_barista_orders' && Array.isArray(remoteData)) {
-                // Check if new orders exist for sound notification
-                try {
-                  const existingStr = safeStorage.getItem('cafe_barista_orders');
-                  const existingList = existingStr ? JSON.parse(existingStr) : [];
-                  const existingIds = new Set(Array.isArray(existingList) ? existingList.map((o: any) => o.id) : []);
-                  const hasNewOrder = remoteData.some((o: any) => !existingIds.has(o.id) && o.status === 'NEW');
-                  if (hasNewOrder && isFromOtherDevice) {
-                    console.log('[GLOBAL SYNC] New barista order detected from remote device! Playing alert sound 🔔');
-                    playBaristaNewOrderSound();
-                  }
-                } catch (soundErr) {
-                  console.error('[GLOBAL SYNC] Error checking sound alert:', soundErr);
-                }
-              }
-
               if (remoteData === null || remoteData === undefined) {
                 safeStorage.removeItem(key);
               } else {
@@ -248,74 +213,16 @@ class FirebaseSyncService {
         this.notifyState();
 
         if (updatedAny && typeof window !== 'undefined') {
-          syncDiagnosticLogger.recordUIRefresh('POSView & BaristaView & InvoicesView');
           window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
-          window.dispatchEvent(new CustomEvent('barista_orders_updated'));
           window.dispatchEvent(new CustomEvent('open_invoices_updated'));
           window.dispatchEvent(new CustomEvent('storage'));
         }
       },
       (error: any) => {
         console.error('Firestore sync error:', error);
-        syncDiagnosticLogger.recordError('Firestore Listener Error', error?.message || String(error));
         handleFirestoreError(error, OperationType.LIST, `cafes/${this.cafeId}/sync_store`);
         this.status = 'error';
         this.notifyState();
-      }
-    );
-
-    // Dedicated direct listener for cafe_barista_orders to guarantee cross-device real-time updates
-    const baristaDocPath = `cafes/${this.cafeId}/sync_store/cafe_barista_orders`;
-    console.log(`[GLOBAL BARISTA SYNC] INITIALIZING DEDICATED REALTIME LISTENER: ${baristaDocPath}`);
-    const baristaDocRef = doc(db, 'cafes', this.cafeId, 'sync_store', 'cafe_barista_orders');
-
-    this.unsubscribeBaristaSnapshot = onSnapshot(
-      baristaDocRef,
-      (snapshot) => {
-        if (!snapshot.exists()) return;
-        const docData = snapshot.data();
-        if (!docData || !Array.isArray(docData.data)) return;
-
-        const freshOrders = docData.data;
-        const isFromOtherDevice = docData.deviceId && docData.deviceId !== this.deviceId;
-
-        syncDiagnosticLogger.recordSnapshot(
-          'cafe_barista_orders',
-          `cafes/${this.cafeId}/sync_store`,
-          'modified',
-          docData.deviceId || 'unknown',
-          freshOrders
-        );
-
-        try {
-          const existingStr = safeStorage.getItem('cafe_barista_orders');
-          const existingList = existingStr ? JSON.parse(existingStr) : [];
-          const existingIds = new Set(Array.isArray(existingList) ? existingList.map((o: any) => o.id) : []);
-          const hasNewOrder = freshOrders.some((o: any) => !existingIds.has(o.id) && o.status === 'NEW');
-
-          if (hasNewOrder && isFromOtherDevice) {
-            console.log('[DEDICATED BARISTA SYNC] New order received from remote device! Triggering audio alert 🔔');
-            playBaristaNewOrderSound();
-          }
-        } catch (e) {
-          console.error('[DEDICATED BARISTA SYNC] Sound check error:', e);
-        }
-
-        try {
-          safeStorage.setItem('cafe_barista_orders', JSON.stringify(freshOrders));
-          safeStorage.setItem('__meta_updated_cafe_barista_orders', String(docData.updatedAt || Date.now()));
-          
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('barista_orders_updated'));
-            window.dispatchEvent(new CustomEvent('storage'));
-          }
-        } catch (err) {
-          console.error('[DEDICATED BARISTA SYNC] Failed to save orders:', err);
-        }
-      },
-      (error) => {
-        console.error(`[DEDICATED BARISTA SYNC ERROR] ${baristaDocPath}:`, error);
-        handleFirestoreError(error, OperationType.GET, baristaDocPath);
       }
     );
   }
@@ -327,6 +234,25 @@ class FirebaseSyncService {
     const cafeId = 'main_cafe_eldeeb';
     this.cafeId = cafeId;
     const docPath = `cafes/${cafeId}/sync_store/${key}`;
+    const projectId = (db.app.options as any)?.projectId || 'cafe-eldeeb-pos';
+
+    // Concurrency control: check if a push for this key is already in flight
+    const existingPush = this.activePushes.get(key);
+    if (existingPush) {
+      console.warn(`[CONCURRENCY DETECTED] Multiple calls to pushKeyToCloud("${key}") detected at the same time!`);
+      console.warn(`[CONCURRENCY CONTROL] Waiting for active push on key "${key}" to complete before starting new push...`);
+      try {
+        await existingPush;
+      } catch (e) {
+        // Continue after previous push finishes or fails
+      }
+    }
+
+    let pushResolver: () => void = () => {};
+    const pushPromise = new Promise<void>((resolve) => {
+      pushResolver = resolve;
+    });
+    this.activePushes.set(key, pushPromise);
 
     const now = Date.now();
     safeStorage.setItem(`__meta_updated_${key}`, String(now));
@@ -335,47 +261,62 @@ class FirebaseSyncService {
     if (!navigator.onLine) {
       this.status = 'offline';
       this.notifyState();
-      syncDiagnosticLogger.recordPushFailure(key, docPath, 'الجهاز غير متصل بالإنترنت (navigator.onLine = false)');
+      this.activePushes.delete(key);
+      pushResolver();
       return;
     }
 
     this.status = 'syncing';
     this.notifyState();
 
-    // Record PUSH START in Realtime Log immediately
-    syncDiagnosticLogger.recordPushStart(key, docPath);
+    let sanitizedData: any = null;
+    if (data !== undefined && data !== null) {
+      try {
+        sanitizedData = JSON.parse(JSON.stringify(data, (k, v) => (v === undefined ? null : v)));
+      } catch (e) {
+        console.warn(`[SYNC] Failed to JSON stringify payload for key ${key}:`, e);
+        sanitizedData = data;
+      }
+    }
+
+    let payloadSizeBytes = 0;
+    try {
+      payloadSizeBytes = new Blob([JSON.stringify(sanitizedData || {})]).size;
+    } catch (e) {
+      payloadSizeBytes = 0;
+    }
+
+    // Print REQUIRED pre-write diagnostics to console
+    console.log(`=== PUSH WRITE START [${key}] ===`);
+    console.log('Writing to:', docPath);
+    console.log('Project ID:', projectId);
+    console.log('Cafe ID:', cafeId);
+    console.log('Device ID:', this.deviceId);
+    console.log('Document Path:', docPath);
+    console.log('Payload Size (Bytes):', payloadSizeBytes);
+
+    const docRef = doc(db, 'cafes', cafeId, 'sync_store', key);
+    const payload = {
+      key,
+      data: sanitizedData,
+      updatedAt: now,
+      deviceId: this.deviceId,
+      cafeId: cafeId
+    };
+
+    const start = Date.now();
 
     try {
-      console.log(`[SYNC DIRECT PUSH] Starting write to ${docPath}`);
-      const docRef = doc(db, 'cafes', cafeId, 'sync_store', key);
-
-      let sanitizedData: any = null;
-      if (data !== undefined && data !== null) {
-        try {
-          sanitizedData = JSON.parse(JSON.stringify(data, (k, v) => (v === undefined ? null : v)));
-        } catch (e) {
-          console.warn(`[SYNC] Failed to JSON stringify payload for key ${key}:`, e);
-          sanitizedData = data;
-        }
-      }
-
-      const payload = {
-        key,
-        data: sanitizedData,
-        updatedAt: now,
-        deviceId: this.deviceId,
-        cafeId: cafeId
-      };
-
       console.log(`[SYNC DIRECT PUSH] Invoking setDoc on ${docPath}...`);
-      const start = Date.now();
 
       await setDoc(docRef, payload);
 
       const duration = Date.now() - start;
-      console.log(`[SYNC DIRECT PUSH SUCCESS] Completed setDoc on ${docPath} in ${duration}ms`);
 
-      syncDiagnosticLogger.recordPushSuccess(key, docPath, sanitizedData);
+      // Print REQUIRED post-write diagnostics to console
+      console.log(`=== PUSH WRITE END [${key}] ===`);
+      console.log('هل انتهى await setDoc؟: نعم (COMPLETED)');
+      console.log('كم استغرق بالمللي ثانية؟:', duration, 'ms');
 
       this.lastSyncTime = new Date().toLocaleTimeString('ar-EG', {
         hour: '2-digit',
@@ -384,13 +325,20 @@ class FirebaseSyncService {
       });
       this.status = 'connected';
     } catch (error: any) {
-      console.error(`[SYNC DIRECT PUSH FAILED] Error writing to ${docPath}:`, error);
-      const errStr = error?.message || String(error);
-      syncDiagnosticLogger.recordPushFailure(key, docPath, errStr);
+      const duration = Date.now() - start;
+      console.error(`=== PUSH WRITE FAILED [${key}] after ${duration}ms ===`);
+      console.error('setDoc FAILED for path:', docPath);
+      console.error('Error object:', error);
+      console.error('Error code:', error?.code);
+      console.error('Error message:', error?.message);
+      console.error('Error stack:', error?.stack);
+
       handleFirestoreError(error, OperationType.WRITE, docPath);
       this.status = 'error';
       throw error;
     } finally {
+      this.activePushes.delete(key);
+      pushResolver();
       this.notifyState();
     }
   }
@@ -416,7 +364,7 @@ class FirebaseSyncService {
       'cafe_ps_sessions', 'cafe_daily_raw_materials', 'cafe_raw_materials', 'cafe_raw_materials_seeded',
       'cafe_raw_materials_deleted', 'cafe_inventory_batches', 'cafe_inventory_batch_logs',
       'cafe_batch_consumptions', 'cafe_auth_users', 'cafe_auth_audit_logs', 'cafe_partners',
-      'cafe_partner_drawings', 'cafe_update_logs', 'cafe_barista_orders'
+      'cafe_partner_drawings', 'cafe_update_logs'
     ];
 
     try {
@@ -450,12 +398,6 @@ class FirebaseSyncService {
    * Force push all local keys regardless of timestamp comparison
    */
   public async forcePushAllKeys(): Promise<number> {
-    syncDiagnosticLogger.addEvent({
-      type: 'ACTION',
-      title: 'بدء رفع كلي لجميع المستندات المحلية (Force Push All)',
-      details: 'Pushing all local keys directly to Firestore...'
-    });
-
     const keysToSync = [
       'cafe_categories', 'cafe_products', 'cafe_customers', 'cafe_suppliers',
       'cafe_invoices', 'cafe_invoice_items', 'cafe_expenses', 'cafe_inventory_transactions',
@@ -467,7 +409,7 @@ class FirebaseSyncService {
       'cafe_ps_sessions', 'cafe_daily_raw_materials', 'cafe_raw_materials', 'cafe_raw_materials_seeded',
       'cafe_raw_materials_deleted', 'cafe_inventory_batches', 'cafe_inventory_batch_logs',
       'cafe_batch_consumptions', 'cafe_auth_users', 'cafe_auth_audit_logs', 'cafe_partners',
-      'cafe_partner_drawings', 'cafe_update_logs', 'cafe_barista_orders'
+      'cafe_partner_drawings', 'cafe_update_logs'
     ];
 
     let pushedCount = 0;
@@ -484,12 +426,6 @@ class FirebaseSyncService {
       }
     }
 
-    syncDiagnosticLogger.addEvent({
-      type: 'ACTION',
-      title: `اكتمل الرفع الكلي: تم رفع ${pushedCount} مستند`,
-      details: `Force Push finished with ${pushedCount} documents.`
-    });
-
     return pushedCount;
   }
 
@@ -497,12 +433,6 @@ class FirebaseSyncService {
    * Restart Firestore listener explicitly
    */
   public restartFirestoreListener(): void {
-    syncDiagnosticLogger.addEvent({
-      type: 'ACTION',
-      title: 'إعادة تشغيل مستمع Firestore (Restart Listener)',
-      details: 'Restarting Firestore snapshot listener...'
-    });
-
     if (this.unsubscribeSnapshot) {
       this.unsubscribeSnapshot();
       this.unsubscribeSnapshot = null;

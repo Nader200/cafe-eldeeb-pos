@@ -176,20 +176,12 @@ export default function OpenInvoicesView({
       dbService.saveInvoices(invoices);
     }
 
-    // Also update matching Barista Order notes
-    const currentUser = dbService.getCurrentUser();
-    await dbService.updateBaristaOrderNotesAsync(
-      editingNotesInvoice.id,
-      trimmed,
-      currentUser?.name || 'الكاشير'
-    );
-
     if (selectedInvoice && selectedInvoice.id === editingNotesInvoice.id) {
       setSelectedInvoice({ ...selectedInvoice, notes: trimmed });
     }
 
     if (onShowSuccessAlert) {
-      onShowSuccessAlert(`تم تحديث ملاحظات الفاتورة #${editingNotesInvoice.invoice_number} وتزامنها مع البارستا! 🔔`);
+      onShowSuccessAlert(`تم تحديث ملاحظات الفاتورة #${editingNotesInvoice.invoice_number} بنجاح! 📋`);
     }
 
     setEditingNotesInvoice(null);

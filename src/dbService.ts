@@ -51,14 +51,11 @@ import {
   Partner,
   PartnerDrawing,
   UpdateLog,
-  BaristaOrder,
-  BaristaOrderItem,
-  BaristaOrderStatus,
   OrderNoteHistoryItem,
   OperationalStatus
 } from './types';
 import { sanitizePaymentMethod } from './utils/paymentUtils';
-import { playBaristaNewOrderSound, playOrderReadySound, playBaristaNoteUpdatedSound } from './lib/audioService';
+import { playOrderReadySound } from './lib/audioService';
 
 import { safeStorage } from './lib/safeStorage';
 export { safeStorage };
@@ -124,46 +121,20 @@ export function isServiceOrNonInventoryProduct(prod: any): boolean {
 }
 
 import { firebaseSyncService } from './lib/firebaseSyncService';
-import { syncDiagnosticLogger } from './lib/syncDiagnosticLogger';
 
 const setLocal = <T>(key: string, value: T): void => {
-  console.log('SETLOCAL CALLED:', key);
-  syncDiagnosticLogger.addEvent({
-    type: 'INFO',
-    title: 'SETLOCAL CALLED',
-    key,
-    details: `Key: ${key} | Data type/length: ${Array.isArray(value) ? value.length + ' items' : typeof value}`
-  });
-
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch (err: any) {
     console.error('localStorage.setItem failed:', err);
-    syncDiagnosticLogger.recordError('localStorage setItem Error', err?.message || String(err));
   }
 
   syncToServer();
 
-  console.log('PUSHKEYTOCLOUD WILL BE CALLED:', key);
-  syncDiagnosticLogger.addEvent({
-    type: 'INFO',
-    title: 'PUSHKEYTOCLOUD WILL BE CALLED',
-    key,
-    details: `Invoking pushKeyToCloud for key: ${key}`
-  });
-
   try {
     firebaseSyncService.pushKeyToCloud(key, value);
-    console.log('PUSHKEYTOCLOUD FINISHED:', key);
-    syncDiagnosticLogger.addEvent({
-      type: 'INFO',
-      title: 'PUSHKEYTOCLOUD FINISHED',
-      key,
-      details: `pushKeyToCloud execution started for key: ${key}`
-    });
   } catch (err: any) {
     console.error('pushKeyToCloud Exception in setLocal:', err);
-    syncDiagnosticLogger.recordError(`pushKeyToCloud Exception (${key})`, err?.message || String(err));
   }
 };
 
@@ -208,8 +179,7 @@ const KEYS = {
   AUTH_AUDIT_LOGS: 'cafe_auth_audit_logs',
   PARTNERS: 'cafe_partners',
   PARTNER_DRAWINGS: 'cafe_partner_drawings',
-  UPDATE_LOGS: 'cafe_update_logs',
-  BARISTA_ORDERS: 'cafe_barista_orders',
+  UPDATE_LOGS: 'cafe_update_logs'
 };
 
 // Sync current client database state to the server
@@ -552,16 +522,6 @@ export const defaultAuthUsers: AuthUser[] = [
     phone: '01100000000',
     is_active: true,
     created_at: new Date().toISOString()
-  },
-  {
-    id: 'user_barista',
-    username: 'barista',
-    name: 'محضر المشروبات / البارستا',
-    role: 'Barista',
-    passwordHash: '123456',
-    phone: '01200000000',
-    is_active: true,
-    created_at: new Date().toISOString()
   }
 ];
 
@@ -879,19 +839,9 @@ export const dbService = {
   },
   saveCategory: (category: Category) => {
     console.log('SAVE CATEGORY CALLED:', category);
-    syncDiagnosticLogger.addEvent({
-      type: 'INFO',
-      title: 'SAVE CATEGORY CALLED',
-      details: `Category Name: ${category.name_ar} | ID: ${category.id || 'new'}`
-    });
 
     if (getCurrentUserRole() === 'Cashier') {
       console.warn('SAVE CATEGORY BLOCKED: Role Cashier');
-      syncDiagnosticLogger.addEvent({
-        type: 'ERROR',
-        title: 'SAVE CATEGORY BLOCKED',
-        details: 'Cashier role cannot save categories.'
-      });
       throw new Error('عذراً! هذه العملية تتطلب صلاحية مدير النظام (Admin). لا يمكن للكاشير إضافة أو تعديل التصنيفات.');
     }
     const list = dbService.getCategories();
@@ -960,19 +910,9 @@ export const dbService = {
   },
   saveProduct: (product: Product) => {
     console.log('SAVE PRODUCT CALLED:', product);
-    syncDiagnosticLogger.addEvent({
-      type: 'INFO',
-      title: 'SAVE PRODUCT CALLED',
-      details: `Product Name: ${product.name_ar || product.name_en || 'Unnamed'} | ID: ${product.id || 'new'}`
-    });
 
     if (getCurrentUserRole() === 'Cashier') {
       console.warn('SAVE PRODUCT BLOCKED: Role Cashier');
-      syncDiagnosticLogger.addEvent({
-        type: 'ERROR',
-        title: 'SAVE PRODUCT BLOCKED',
-        details: 'User role is Cashier, admin required.'
-      });
       throw new Error('عذراً! هذه العملية تتطلب صلاحية مدير النظام (Admin). لا يمكن للكاشير إضافة أو تعديل المنتجات.');
     }
     const list = dbService.getProducts();
@@ -1291,14 +1231,12 @@ export const dbService = {
 
   getInvoices: (includeOpen = false): Invoice[] => {
     const list = getLocal<Invoice[]>(KEYS.INVOICES, []);
-    const baristaOrders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
     const mapped = list.map(inv => {
       if (!inv.payment_status) {
         inv.payment_status = dbService.determinePaymentStatus(inv);
       }
       if (!inv.operational_status) {
-        const bo = baristaOrders.find(b => b.invoice_id === inv.id || b.order_number === inv.invoice_number);
-        inv.operational_status = bo ? bo.status : 'NEW';
+        inv.operational_status = 'NEW';
       }
       return inv;
     });
@@ -1309,7 +1247,6 @@ export const dbService = {
   },
   getOpenInvoices: (): Invoice[] => {
     const list = getLocal<Invoice[]>(KEYS.INVOICES, []);
-    const baristaOrders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
     return list
       .filter(inv => inv.invoice_status === 'OPEN' || inv.invoice_status === 'DRAFT')
       .map(inv => {
@@ -1317,8 +1254,7 @@ export const dbService = {
           inv.payment_status = dbService.determinePaymentStatus(inv);
         }
         if (!inv.operational_status) {
-          const bo = baristaOrders.find(b => b.invoice_id === inv.id || b.order_number === inv.invoice_number);
-          inv.operational_status = bo ? bo.status : 'NEW';
+          inv.operational_status = 'NEW';
         }
         return inv;
       });
@@ -2320,7 +2256,6 @@ export const dbService = {
         }
       }));
       window.dispatchEvent(new CustomEvent('open_invoices_updated'));
-      window.dispatchEvent(new CustomEvent('barista_orders_updated'));
       window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
     }
 
@@ -5523,424 +5458,6 @@ export const dbService = {
     return newLog;
   },
 
-  // --- BARISTA ORDER MANAGEMENT ---
-  getBaristaOrders: (): BaristaOrder[] => {
-    return getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
-  },
-
-  addBaristaOrder: (orderData: {
-    order_number: string;
-    invoice_id?: string;
-    table_number?: string;
-    customer_name?: string;
-    cashier_name?: string;
-    items: BaristaOrderItem[];
-    notes?: string;
-    notes_history?: OrderNoteHistoryItem[];
-    status?: BaristaOrderStatus;
-    sent_time?: string;
-  }): BaristaOrder => {
-    console.log('ADD BARISTA ORDER CALLED:', orderData);
-    syncDiagnosticLogger.addEvent({
-      type: 'INFO',
-      title: 'ADD BARISTA ORDER CALLED',
-      details: `Order Number: ${orderData.order_number} | Items: ${orderData.items?.length || 0} | Customer: ${orderData.customer_name || 'Direct'}`
-    });
-
-    const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
-
-    const initialNotes = (orderData.notes || '').trim();
-    const initialHistory: OrderNoteHistoryItem[] = orderData.notes_history || (initialNotes ? [{
-      id: `nh_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      timestamp: timeStr,
-      date: now.toLocaleDateString('ar-EG'),
-      author_name: orderData.cashier_name || 'الكاشير',
-      note: initialNotes
-    }] : []);
-
-    const newOrder: BaristaOrder = {
-      id: `bar_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      order_number: orderData.order_number,
-      invoice_id: orderData.invoice_id,
-      table_number: orderData.table_number || '',
-      customer_name: orderData.customer_name || 'عميل مباشر',
-      cashier_name: orderData.cashier_name || 'الكاشير',
-      status: orderData.status || 'NEW',
-      items: orderData.items || [],
-      created_at: now.toISOString(),
-      updated_at: now.toISOString(),
-      sent_time: orderData.sent_time || timeStr,
-      notes: initialNotes,
-      notes_history: initialHistory
-    };
-
-    // If active order already exists for same order_number or invoice_id, update items and timestamp
-    const existingIdx = orders.findIndex(o =>
-      (orderData.invoice_id && o.invoice_id === orderData.invoice_id) ||
-      (o.order_number === newOrder.order_number && o.status !== 'DELIVERED')
-    );
-
-    if (existingIdx >= 0) {
-      const prevOrder = orders[existingIdx];
-      let updatedHistory = prevOrder.notes_history || [];
-      if (prevOrder.notes && updatedHistory.length === 0) {
-        updatedHistory = [{
-          id: `nh_init_${prevOrder.id}`,
-          timestamp: prevOrder.sent_time || timeStr,
-          author_name: prevOrder.cashier_name || 'الكاشير',
-          note: prevOrder.notes
-        }];
-      }
-
-      if (initialNotes && initialNotes !== prevOrder.notes) {
-        updatedHistory = [
-          ...updatedHistory,
-          {
-            id: `nh_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            timestamp: timeStr,
-            date: now.toLocaleDateString('ar-EG'),
-            author_name: orderData.cashier_name || 'الكاشير',
-            note: initialNotes
-          }
-        ];
-      }
-
-      orders[existingIdx] = {
-        ...prevOrder,
-        ...newOrder,
-        id: prevOrder.id,
-        notes: initialNotes || prevOrder.notes || '',
-        notes_history: updatedHistory,
-        updated_at: now.toISOString()
-      };
-    } else {
-      orders.unshift(newOrder);
-    }
-
-    setLocal(KEYS.BARISTA_ORDERS, orders);
-
-    // Play notification chime
-    playBaristaNewOrderSound();
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('barista_orders_updated'));
-      window.dispatchEvent(new CustomEvent('barista_new_order', { detail: { order: newOrder } }));
-    }
-
-    return newOrder;
-  },
-
-  addBaristaOrderAsync: async (orderData: {
-    order_number: string;
-    invoice_id?: string;
-    table_number?: string;
-    customer_name?: string;
-    cashier_name?: string;
-    items: BaristaOrderItem[];
-    notes?: string;
-    notes_history?: OrderNoteHistoryItem[];
-    status?: BaristaOrderStatus;
-    sent_time?: string;
-  }): Promise<BaristaOrder> => {
-    const newOrder = dbService.addBaristaOrder(orderData);
-    const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
-    await firebaseSyncService.pushKeyToCloud(KEYS.BARISTA_ORDERS, orders);
-    return newOrder;
-  },
-
-  updateBaristaOrderNotes: (
-    orderId: string,
-    newNotes: string,
-    authorName: string,
-    itemNotesMap?: { [itemIdOrProdId: string]: string }
-  ): BaristaOrder | null => {
-    const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
-    const idx = orders.findIndex(o =>
-      o.id === orderId ||
-      o.invoice_id === orderId ||
-      o.order_number === orderId ||
-      `INV-${o.order_number}` === orderId
-    );
-    if (idx === -1) return null;
-
-    const existing = orders[idx];
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
-    const trimmedNotes = (newNotes || '').trim();
-
-    const newHistoryItem: OrderNoteHistoryItem = {
-      id: `nh_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      timestamp: timeStr,
-      date: now.toLocaleDateString('ar-EG'),
-      author_name: authorName || 'الكاشير',
-      note: trimmedNotes || 'تم مسح الملاحظات'
-    };
-
-    let existingHistory = existing.notes_history || [];
-    if (existingHistory.length === 0 && existing.notes && existing.notes.trim()) {
-      existingHistory = [{
-        id: `nh_init_${existing.id}`,
-        timestamp: existing.sent_time || timeStr,
-        author_name: existing.cashier_name || 'الكاشير',
-        note: existing.notes
-      }];
-    }
-
-    const updatedHistory = [...existingHistory, newHistoryItem];
-
-    // Update item-level notes if provided
-    let updatedItems = existing.items;
-    if (itemNotesMap) {
-      updatedItems = existing.items.map(it => {
-        if (itemNotesMap[it.id] !== undefined) {
-          return { ...it, notes: itemNotesMap[it.id] };
-        } else if (itemNotesMap[it.product_id] !== undefined) {
-          return { ...it, notes: itemNotesMap[it.product_id] };
-        }
-        return it;
-      });
-    }
-
-    const updatedOrder: BaristaOrder = {
-      ...existing,
-      notes: trimmedNotes,
-      notes_history: updatedHistory,
-      items: updatedItems,
-      updated_at: now.toISOString()
-    };
-
-    orders[idx] = updatedOrder;
-    setLocal(KEYS.BARISTA_ORDERS, orders);
-
-    // Sync matching invoice notes in local storage
-    const invoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
-    const invIdx = invoices.findIndex(i =>
-      (updatedOrder.invoice_id && i.id === updatedOrder.invoice_id) ||
-      i.id === updatedOrder.id ||
-      i.invoice_number === updatedOrder.order_number ||
-      i.invoice_number === `INV-${updatedOrder.order_number}` ||
-      updatedOrder.order_number.endsWith(i.invoice_number)
-    );
-    if (invIdx > -1) {
-      invoices[invIdx].notes = trimmedNotes;
-      invoices[invIdx].updated_at = now.toISOString();
-      setLocal(KEYS.INVOICES, invoices);
-    }
-
-    // Play notification sound
-    playBaristaNoteUpdatedSound();
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('barista_orders_updated'));
-      window.dispatchEvent(new CustomEvent('barista_notes_updated', {
-        detail: {
-          order: updatedOrder,
-          order_number: updatedOrder.order_number,
-          newNote: trimmedNotes,
-          authorName
-        }
-      }));
-      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
-    }
-
-    return updatedOrder;
-  },
-
-  updateBaristaOrderNotesAsync: async (
-    orderId: string,
-    newNotes: string,
-    authorName: string,
-    itemNotesMap?: { [itemIdOrProdId: string]: string }
-  ): Promise<BaristaOrder | null> => {
-    const updated = dbService.updateBaristaOrderNotes(orderId, newNotes, authorName, itemNotesMap);
-    if (updated) {
-      const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
-      await firebaseSyncService.pushKeyToCloud(KEYS.BARISTA_ORDERS, orders);
-    }
-    return updated;
-  },
-
-  updateBaristaOrderStatus: (orderId: string, status: BaristaOrderStatus): BaristaOrder | null => {
-    const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
-    const index = orders.findIndex(o => o.id === orderId || o.invoice_id === orderId || o.order_number === orderId);
-    if (index === -1) return null;
-
-    const nowIso = new Date().toISOString();
-    const updatedOrder: BaristaOrder = {
-      ...orders[index],
-      status,
-      updated_at: nowIso
-    };
-    orders[index] = updatedOrder;
-    setLocal(KEYS.BARISTA_ORDERS, orders);
-
-    // Sync operational_status on corresponding invoice
-    const invoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
-    let invIdx = invoices.findIndex(i =>
-      (updatedOrder.invoice_id && i.id === updatedOrder.invoice_id) ||
-      i.id === updatedOrder.id ||
-      i.invoice_number === updatedOrder.order_number ||
-      i.invoice_number === `INV-${updatedOrder.order_number}` ||
-      updatedOrder.order_number.endsWith(i.invoice_number)
-    );
-
-    if (invIdx > -1) {
-      invoices[invIdx].operational_status = status;
-      invoices[invIdx].updated_at = nowIso;
-
-      if (!invoices[invIdx].timeline) invoices[invIdx].timeline = [];
-
-      if (status === 'PREPARING') {
-        invoices[invIdx].timeline!.push({
-          status: 'PREPARING',
-          timestamp: nowIso,
-          operator: 'البارستا',
-          notes: 'بدء تحضير مشروبات الفاتورة في البارستا'
-        });
-      } else if (status === 'READY') {
-        invoices[invIdx].timeline!.push({
-          status: 'PREPARED',
-          timestamp: nowIso,
-          operator: 'البارستا',
-          notes: 'تم تجهيز الطلب بالكامل في البارستا'
-        });
-      } else if (status === 'DELIVERED') {
-        invoices[invIdx].delivery_time = nowIso;
-        if (invoices[invIdx].invoice_status !== 'CLOSED') {
-          invoices[invIdx].invoice_status = 'OPEN';
-        }
-        if (!invoices[invIdx].payment_status) {
-          invoices[invIdx].payment_status = 'UNPAID';
-        }
-
-        invoices[invIdx].timeline!.push({
-          status: 'DELIVERED_TO_CUSTOMER',
-          timestamp: nowIso,
-          operator: 'البارستا',
-          notes: 'تم التسليم للعميل بنجاح'
-        });
-
-        invoices[invIdx].timeline!.push({
-          status: 'OPEN_INVOICE',
-          timestamp: nowIso,
-          operator: 'الأنظمة',
-          notes: 'نقل الفاتورة إلى قائمة الفواتير المفتوحة'
-        });
-      }
-      setLocal(KEYS.INVOICES, invoices);
-    } else if (status === 'DELIVERED') {
-      // If invoice didn't exist yet, auto-create Open Invoice for this delivered order
-      const newInvId = `inv_bar_${updatedOrder.id}`;
-      const invNum = updatedOrder.order_number.startsWith('INV')
-        ? updatedOrder.order_number
-        : `INV-${updatedOrder.order_number}`;
-
-      const allProdsList = dbService.getProducts();
-      const totalVal = updatedOrder.items.reduce((acc, item) => {
-        const prodMatch = allProdsList.find(p => p.id === item.product_id);
-        const uPrice = item.unit_price ?? prodMatch?.selling_price ?? 0;
-        const tPrice = item.total_price ?? (uPrice * item.quantity);
-        return acc + tPrice;
-      }, 0);
-
-      const newInvoice: Invoice = {
-        id: newInvId,
-        invoice_number: invNum,
-        customer_id: null,
-        payment_type: 'CASH',
-        subtotal: totalVal,
-        discount: 0,
-        tax: 0,
-        total: totalVal,
-        paid_amount: 0,
-        remaining_amount: totalVal,
-        invoice_status: 'OPEN',
-        payment_status: 'UNPAID',
-        operational_status: 'DELIVERED',
-        cashier_name: updatedOrder.cashier_name || 'البارستا',
-        invoice_date: nowIso.split('T')[0],
-        notes: updatedOrder.notes || '',
-        table_number: updatedOrder.table_number || '',
-        delivery_time: nowIso,
-        created_at: updatedOrder.created_at || nowIso,
-        updated_at: nowIso,
-        timeline: [
-          { status: 'CREATED', timestamp: updatedOrder.created_at || nowIso, operator: updatedOrder.cashier_name || 'الأنظمة', notes: 'إنشاء طلب جديد' },
-          { status: 'DELIVERED_TO_CUSTOMER', timestamp: nowIso, operator: 'البارستا', notes: 'تم تسليم الطلب للعميل' },
-          { status: 'OPEN_INVOICE', timestamp: nowIso, operator: 'الأنظمة', notes: 'تحويل تلقائي إلى الفواتير المفتوحة' }
-        ]
-      };
-
-      invoices.unshift(newInvoice);
-      setLocal(KEYS.INVOICES, invoices);
-
-      // Save corresponding items
-      const existingItems = getLocal<InvoiceItem[]>(KEYS.INVOICE_ITEMS, []);
-      const newItemsList: InvoiceItem[] = updatedOrder.items.map(it => {
-        const prodMatch = allProdsList.find(p => p.id === it.product_id);
-        const uPrice = it.unit_price ?? prodMatch?.selling_price ?? 0;
-        const cPrice = it.cost_price ?? prodMatch?.cost_price ?? 0;
-        const tPrice = it.total_price ?? (uPrice * it.quantity);
-        return {
-          id: `item_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          invoice_id: newInvId,
-          product_id: it.product_id,
-          product_name_ar: it.product_name_ar,
-          quantity: it.quantity,
-          unit_price: uPrice,
-          cost_price: cPrice,
-          total_price: tPrice,
-          notes: it.notes || '',
-          created_at: nowIso,
-          updated_at: nowIso
-        };
-      });
-      setLocal(KEYS.INVOICE_ITEMS, [...existingItems, ...newItemsList]);
-    }
-
-    if (status === 'READY') {
-      playOrderReadySound();
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('barista_order_ready', { detail: { order: updatedOrder } }));
-      }
-    }
-
-    if (status === 'DELIVERED') {
-      dbService.logAuditAction(
-        'OPEN_INVOICE_CREATED',
-        `الطلب رقم #${updatedOrder.order_number} تم تسليمه للعميل بنجاح وتحويله إلى الفواتير المفتوحة`,
-        updatedOrder.cashier_name || 'البارستا'
-      );
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('open_invoice_created', {
-          detail: {
-            order: updatedOrder,
-            message: `الطلب رقم #${updatedOrder.order_number} تم تسليمه للعميل وتحويله إلى الفواتير المفتوحة 📋`
-          }
-        }));
-      }
-    }
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('barista_orders_updated'));
-      window.dispatchEvent(new CustomEvent('open_invoices_updated'));
-      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
-    }
-
-    return updatedOrder;
-  },
-
-  updateBaristaOrderStatusAsync: async (orderId: string, status: BaristaOrderStatus): Promise<BaristaOrder | null> => {
-    const updated = dbService.updateBaristaOrderStatus(orderId, status);
-    if (updated) {
-      const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
-      await firebaseSyncService.pushKeyToCloud(KEYS.BARISTA_ORDERS, orders);
-    }
-    return updated;
-  },
-
   updateInvoiceOperationalStatus: (invoiceId: string, status: OperationalStatus): Invoice | null => {
     const invoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
     const idx = invoices.findIndex(i => i.id === invoiceId || i.invoice_number === invoiceId);
@@ -5950,44 +5467,11 @@ export const dbService = {
     invoices[idx].updated_at = new Date().toISOString();
     setLocal(KEYS.INVOICES, invoices);
 
-    // Sync matching Barista order if found
-    const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
-    const baristaIdx = orders.findIndex(o =>
-      o.invoice_id === invoices[idx].id ||
-      o.order_number === invoices[idx].invoice_number ||
-      o.id === invoices[idx].id
-    );
-
-    if (baristaIdx > -1) {
-      orders[baristaIdx].status = status as BaristaOrderStatus;
-      orders[baristaIdx].updated_at = new Date().toISOString();
-      setLocal(KEYS.BARISTA_ORDERS, orders);
-    }
-
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('barista_orders_updated'));
       window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
     }
 
     return invoices[idx];
-  },
-
-  deleteBaristaOrder: (orderId: string): boolean => {
-    const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
-    const filtered = orders.filter(o => o.id !== orderId && o.invoice_id !== orderId && o.order_number !== orderId);
-    setLocal(KEYS.BARISTA_ORDERS, filtered);
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('barista_orders_updated'));
-    }
-    return true;
-  },
-
-  deleteBaristaOrderAsync: async (orderId: string): Promise<boolean> => {
-    const ok = dbService.deleteBaristaOrder(orderId);
-    const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
-    await firebaseSyncService.pushKeyToCloud(KEYS.BARISTA_ORDERS, orders);
-    return ok;
   },
 
   getCurrentUser: (): AuthUser | null => {

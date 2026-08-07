@@ -1832,7 +1832,6 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                   className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-600 text-right"
                 >
                   <option value="Cashier">☕ كاشير مبيعات (POS Only - مبيعات وفواتير دون تقارير)</option>
-                  <option value="Barista">🍹 بارستا ومحضر المشروبات (Barista - شاشة تحضير المشروبات والطلبات فقط)</option>
                   <option value="Admin">👑 مدير النظام (Admin - وصول كامل لكافة التقارير والإعدادات)</option>
                 </select>
               </div>

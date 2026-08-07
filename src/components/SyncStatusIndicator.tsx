@@ -4,9 +4,8 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Cloud, CloudOff, RefreshCw, CheckCircle2, AlertCircle, Laptop, ShieldCheck, Database, Info, X, Wrench } from 'lucide-react';
+import { Cloud, CloudOff, RefreshCw, CheckCircle2, AlertCircle, Laptop, ShieldCheck, Database, Info, X } from 'lucide-react';
 import { firebaseSyncService, SyncState } from '../lib/firebaseSyncService';
-import DebugSyncCenterModal from './DebugSyncCenterModal';
 
 interface SyncStatusIndicatorProps {
   className?: string;
@@ -15,7 +14,6 @@ interface SyncStatusIndicatorProps {
 export default function SyncStatusIndicator({ className = '' }: SyncStatusIndicatorProps) {
   const [syncState, setSyncState] = useState<SyncState>(firebaseSyncService.getState());
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
-  const [isDebugCenterOpen, setIsDebugCenterOpen] = useState<boolean>(false);
   const [isManualSyncing, setIsManualSyncing] = useState<boolean>(false);
 
   useEffect(() => {
@@ -166,28 +164,10 @@ export default function SyncStatusIndicator({ className = '' }: SyncStatusIndica
                 <RefreshCw className={`w-4 h-4 ${isManualSyncing ? 'animate-spin' : ''}`} />
                 {isManualSyncing ? 'جاري المزامنة...' : 'مزامنة الكافيه بالكامل الآن'}
               </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setIsModalOpen(false);
-                  setIsDebugCenterOpen(true);
-                }}
-                className="w-full sm:w-auto px-4 py-2.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <Wrench className="w-4 h-4 text-blue-400" />
-                <span>Debug Center 🔧</span>
-              </button>
             </div>
           </div>
         </div>
       )}
-
-      {/* Debug Sync Center Modal */}
-      <DebugSyncCenterModal
-        isOpen={isDebugCenterOpen}
-        onClose={() => setIsDebugCenterOpen(false)}
-      />
     </>
   );
 }

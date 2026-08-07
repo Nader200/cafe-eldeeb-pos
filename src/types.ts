@@ -633,9 +633,7 @@ export interface InventoryBatchLog {
 }
 
 // Authentication & Employee User Roles
-export type UserRole = 'Admin' | 'Cashier' | 'Barista';
-
-export type BaristaOrderStatus = 'NEW' | 'PREPARING' | 'READY' | 'DELIVERED';
+export type UserRole = 'Admin' | 'Cashier';
 
 export interface OrderNoteHistoryItem {
   id: string;
@@ -644,37 +642,6 @@ export interface OrderNoteHistoryItem {
   author_name: string;
   author_role?: string;
   note: string;
-}
-
-export interface BaristaOrderItem {
-  id: string;
-  product_id: string;
-  product_name_ar: string;
-  product_name_en?: string;
-  category_id?: string;
-  category_name?: string;
-  quantity: number;
-  notes?: string;
-  category_icon?: string;
-  unit_price?: number;
-  cost_price?: number;
-  total_price?: number;
-}
-
-export interface BaristaOrder {
-  id: string;
-  order_number: string;
-  invoice_id?: string;
-  table_number?: string;
-  customer_name?: string;
-  cashier_name: string;
-  status: BaristaOrderStatus;
-  items: BaristaOrderItem[];
-  created_at: string;
-  updated_at: string;
-  sent_time: string;
-  notes?: string;
-  notes_history?: OrderNoteHistoryItem[];
 }
 
 export interface AuthUser {

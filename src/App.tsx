@@ -75,23 +75,19 @@ import StartRawMaterialsView from './components/StartRawMaterialsView';
 import RawMaterialsView from './components/RawMaterialsView';
 import ProductionBatchesView from './components/ProductionBatchesView';
 import PartnerDrawingsView from './components/PartnerDrawingsView';
-import BaristaView from './components/BaristaView';
 import SyncStatusIndicator from './components/SyncStatusIndicator';
 import CalculatorModal from './components/CalculatorModal';
 import UpdateModal from './components/UpdateModal';
 import UserManualView from './components/UserManualView';
 import { checkForUpdates } from './services/updateService';
 import { UpdateCheckResult } from './config/version';
-import { BaristaOrder } from './types';
-import { playOrderReadySound } from './lib/audioService';
 
-type TabType = 'dashboard' | 'pos' | 'barista' | 'open-invoices' | 'invoices' | 'invoice-history' | 'products' | 'customers' | 'suppliers' | 'expenses' | 'reports' | 'settings' | 'cash_drawer' | 'employees' | 'playstation' | 'raw_materials' | 'production_batches' | 'partner_drawings' | 'user_manual';
+type TabType = 'dashboard' | 'pos' | 'open-invoices' | 'invoices' | 'invoice-history' | 'products' | 'customers' | 'suppliers' | 'expenses' | 'reports' | 'settings' | 'cash_drawer' | 'employees' | 'playstation' | 'raw_materials' | 'production_batches' | 'partner_drawings' | 'user_manual';
 
 const getTabFromPathname = (pathname: string): TabType | null => {
   const clean = pathname.toLowerCase().trim().replace(/^\/+|\/+$/g, '');
   if (!clean || clean === 'pos') return 'pos';
   if (clean === 'dashboard') return 'dashboard';
-  if (clean === 'barista' || clean === 'kitchen' || clean === 'bar') return 'barista';
   if (clean === 'open-invoices' || clean === 'open_invoices') return 'open-invoices';
   if (clean === 'invoices') return 'invoices';
   if (clean === 'invoice-history' || clean === 'invoice_history' || clean === 'history') return 'invoice-history';
@@ -149,7 +145,7 @@ function AppContent() {
 
   useEffect(() => {
     if (!currentUser) return;
-    const fallbackTab = currentUser.role === 'Barista' ? 'barista' : (currentUser.role === 'Cashier' ? 'pos' : 'dashboard');
+    const fallbackTab = currentUser.role === 'Cashier' ? 'pos' : 'dashboard';
     const requestedTab = getTabFromPathname(window.location.pathname);
 
     if (requestedTab) {
@@ -211,18 +207,7 @@ function AppContent() {
   const [showUpdateModal, setShowUpdateModal] = useState<boolean>(false);
   const [hasActiveInvoice, setHasActiveInvoice] = useState<boolean>(false);
 
-  // Barista Order Ready notification popup for Cashier/Admin
-  const [readyOrderPopup, setReadyOrderPopup] = useState<BaristaOrder | null>(null);
-
   useEffect(() => {
-    const handleOrderReady = (e: any) => {
-      const order = e.detail?.order as BaristaOrder;
-      if (order && (currentUser?.role === 'Cashier' || currentUser?.role === 'Admin')) {
-        playOrderReadySound();
-        setReadyOrderPopup(order);
-      }
-    };
-
     const handleOpenInvoiceCreated = (e: any) => {
       const msg = e.detail?.message || 'تم تحويل الطلب إلى الفواتير المفتوحة 📋';
       showSuccessAlert(msg);
@@ -238,13 +223,11 @@ function AppContent() {
       showSuccessAlert(msg);
     };
 
-    window.addEventListener('barista_order_ready', handleOrderReady as EventListener);
     window.addEventListener('open_invoice_created', handleOpenInvoiceCreated as EventListener);
     window.addEventListener('invoice_paid_notification', handleInvoicePaidNotif as EventListener);
     window.addEventListener('invoice_credit_notification', handleInvoiceCreditNotif as EventListener);
 
     return () => {
-      window.removeEventListener('barista_order_ready', handleOrderReady as EventListener);
       window.removeEventListener('open_invoice_created', handleOpenInvoiceCreated as EventListener);
       window.removeEventListener('invoice_paid_notification', handleInvoicePaidNotif as EventListener);
       window.removeEventListener('invoice_credit_notification', handleInvoiceCreditNotif as EventListener);
@@ -654,7 +637,6 @@ function AppContent() {
           {[
             { id: 'dashboard', label: 'لوحة القيادة والمؤشرات', icon: <LayoutDashboard className="w-4 h-4" /> },
             { id: 'pos', label: 'نقطة البيع الكاشير (POS)', icon: <ShoppingCart className="w-4 h-4" /> },
-            { id: 'barista', label: '☕ شاشة البارستا والتحضير', icon: <Coffee className="w-4 h-4 text-amber-500" /> },
             { id: 'open-invoices', label: 'الفواتير المفتوحة والمعلقة', icon: <ClipboardList className="w-4 h-4" /> },
             { id: 'invoice-history', label: 'سجل وتاريخ الفواتير الملوكي', icon: <History className="w-4 h-4" /> },
             { id: 'invoices', label: 'أرشيف الفواتير الملغية', icon: <Receipt className="w-4 h-4" /> },
@@ -1035,13 +1017,6 @@ function AppContent() {
             />
           )}
 
-          {activeTab === 'barista' && hasPermission('barista') && (
-            <BaristaView
-              onShowSuccessAlert={showSuccessAlert}
-              onShowWarningAlert={showWarningAlert}
-            />
-          )}
-
           {activeTab === 'cash_drawer' && hasPermission('cash_drawer') && (
             <CashDrawerView
               settings={settings}
@@ -1133,18 +1108,8 @@ function AppContent() {
             </button>
           )}
 
-          {/* Button 4: البارستا / البحث */}
-          {hasPermission('barista') && !hasPermission('pos') ? (
-            <button
-              onClick={() => handleNavigate('barista')}
-              className={`flex-1 h-full flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-all active:scale-95 ${
-                activeTab === 'barista' ? 'text-[#D4AF37]' : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <Coffee className="w-5 h-5 text-amber-500" />
-              <span className="text-[10px] font-black tracking-tighter">البارستا</span>
-            </button>
-          ) : hasPermission('invoice-history') ? (
+          {/* Button 4: البحث */}
+          {hasPermission('invoice-history') ? (
             <button
               onClick={() => {
                 handleNavigate('invoice-history');
@@ -1362,56 +1327,6 @@ function AppContent() {
                 className="py-3 bg-luxury-bg border border-gray-800 hover:bg-gray-900 text-gray-400 font-bold rounded-xl transition-all cursor-pointer text-xs"
               >
                 إغلاق التنبيه
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Barista Order Ready Notification Popup Modal */}
-      {readyOrderPopup && (
-        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 p-4 animate-fade-in" dir="rtl">
-          <div className="bg-luxury-card border border-emerald-500/50 rounded-3xl w-full max-w-sm p-6 relative shadow-[0_0_50px_rgba(16,185,129,0.25)] text-center">
-            <div className="w-16 h-16 bg-emerald-950/80 border border-emerald-500/50 rounded-full mx-auto flex items-center justify-center mb-4 text-emerald-400 text-3xl font-black animate-bounce shadow-lg">
-              ☕
-            </div>
-
-            <h3 className="text-lg font-black text-white mb-1">
-              الطلب رقم #{readyOrderPopup.order_number} جاهز للتسليم! 🔔
-            </h3>
-            <p className="text-gray-300 text-xs mb-4 font-bold">
-              {readyOrderPopup.table_number ? `الطاولة: ${readyOrderPopup.table_number} • ` : ''}
-              الزبون: {readyOrderPopup.customer_name || 'عميل مباشر'}
-            </p>
-
-            <div className="bg-black/60 border border-gray-850 rounded-2xl p-3 mb-5 text-right text-xs space-y-1 max-h-40 overflow-y-auto">
-              <span className="text-[10px] text-gray-400 font-bold block mb-1">عناصر الطلب والمشروبات:</span>
-              {readyOrderPopup.items.map((it, idx) => (
-                <div key={idx} className="flex justify-between items-center text-gray-200 font-bold text-xs py-1 border-b border-gray-900/50 last:border-0">
-                  <span>{it.product_name_ar}</span>
-                  <span className="font-mono text-gold-400 font-black">x{it.quantity}</span>
-                </div>
-              ))}
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <button
-                type="button"
-                onClick={async () => {
-                  await dbService.updateBaristaOrderStatusAsync(readyOrderPopup.id, 'DELIVERED');
-                  showSuccessAlert(`تم تسجيل تسليم الطلب رقم #${readyOrderPopup.order_number} للعميل بنجاح 🚶 (الفاتورة ما زالت قائمة في الفواتير المفتوحة بانتظار السداد)`);
-                  setReadyOrderPopup(null);
-                }}
-                className="py-2.5 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white font-black rounded-xl transition-all cursor-pointer shadow-md active:scale-95 flex items-center justify-center gap-1.5"
-              >
-                <span>تم التسليم للعميل 🚶</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setReadyOrderPopup(null)}
-                className="py-2.5 bg-luxury-bg border border-gray-800 hover:bg-gray-900 text-gray-400 font-bold rounded-xl transition-all cursor-pointer"
-              >
-                إغلاق
               </button>
             </div>
           </div>
