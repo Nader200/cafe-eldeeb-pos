@@ -5632,6 +5632,24 @@ export const dbService = {
     return newOrder;
   },
 
+  addBaristaOrderAsync: async (orderData: {
+    order_number: string;
+    invoice_id?: string;
+    table_number?: string;
+    customer_name?: string;
+    cashier_name?: string;
+    items: BaristaOrderItem[];
+    notes?: string;
+    notes_history?: OrderNoteHistoryItem[];
+    status?: BaristaOrderStatus;
+    sent_time?: string;
+  }): Promise<BaristaOrder> => {
+    const newOrder = dbService.addBaristaOrder(orderData);
+    const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
+    await firebaseSyncService.pushKeyToCloud(KEYS.BARISTA_ORDERS, orders);
+    return newOrder;
+  },
+
   updateBaristaOrderNotes: (
     orderId: string,
     newNotes: string,
@@ -5728,6 +5746,20 @@ export const dbService = {
     }
 
     return updatedOrder;
+  },
+
+  updateBaristaOrderNotesAsync: async (
+    orderId: string,
+    newNotes: string,
+    authorName: string,
+    itemNotesMap?: { [itemIdOrProdId: string]: string }
+  ): Promise<BaristaOrder | null> => {
+    const updated = dbService.updateBaristaOrderNotes(orderId, newNotes, authorName, itemNotesMap);
+    if (updated) {
+      const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
+      await firebaseSyncService.pushKeyToCloud(KEYS.BARISTA_ORDERS, orders);
+    }
+    return updated;
   },
 
   updateBaristaOrderStatus: (orderId: string, status: BaristaOrderStatus): BaristaOrder | null => {
@@ -5900,6 +5932,15 @@ export const dbService = {
     return updatedOrder;
   },
 
+  updateBaristaOrderStatusAsync: async (orderId: string, status: BaristaOrderStatus): Promise<BaristaOrder | null> => {
+    const updated = dbService.updateBaristaOrderStatus(orderId, status);
+    if (updated) {
+      const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
+      await firebaseSyncService.pushKeyToCloud(KEYS.BARISTA_ORDERS, orders);
+    }
+    return updated;
+  },
+
   updateInvoiceOperationalStatus: (invoiceId: string, status: OperationalStatus): Invoice | null => {
     const invoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
     const idx = invoices.findIndex(i => i.id === invoiceId || i.invoice_number === invoiceId);
@@ -5940,6 +5981,13 @@ export const dbService = {
       window.dispatchEvent(new CustomEvent('barista_orders_updated'));
     }
     return true;
+  },
+
+  deleteBaristaOrderAsync: async (orderId: string): Promise<boolean> => {
+    const ok = dbService.deleteBaristaOrder(orderId);
+    const orders = getLocal<BaristaOrder[]>(KEYS.BARISTA_ORDERS, []);
+    await firebaseSyncService.pushKeyToCloud(KEYS.BARISTA_ORDERS, orders);
+    return ok;
   },
 
   getCurrentUser: (): AuthUser | null => {

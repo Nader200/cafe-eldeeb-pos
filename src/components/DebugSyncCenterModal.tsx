@@ -28,7 +28,8 @@ import {
 import { firebaseSyncService, SyncState } from '../lib/firebaseSyncService';
 import { syncDiagnosticLogger, LogEvent, PushInfo, SnapshotInfo } from '../lib/syncDiagnosticLogger';
 import { db, auth } from '../lib/firebaseClient';
-import { doc, setDoc } from 'firebase/firestore';
+import { signInAnonymously } from 'firebase/auth';
+import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { dbService } from '../dbService';
 import { safeStorage } from '../lib/safeStorage';
 
@@ -179,6 +180,113 @@ export default function DebugSyncCenterModal({ isOpen, onClose }: DebugSyncCente
       syncDiagnosticLogger.clearLogs();
       setActionMessage('تم تفريغ سجل التشخيص المباشر!');
       setTimeout(() => setActionMessage(null), 3000);
+    }
+  };
+
+  const handleTestFirebaseAuth = async () => {
+    setIsProcessing(true);
+    setActionMessage('جاري تشغيل اختبار Firebase Auth المباشر...');
+
+    console.log('BEFORE signInAnonymously');
+
+    // 1. Check if user is already signed in
+    if (auth.currentUser) {
+      console.log('AFTER currentUser check - User already authenticated:', auth.currentUser.uid);
+      setActionMessage(`AFTER currentUser - مسجّل دخوله بالفعل! UID: ${auth.currentUser.uid}`);
+      setIsProcessing(false);
+      setTimeout(() => setActionMessage(null), 8000);
+      return;
+    }
+
+    let completed = false;
+    const timeoutTimer = setTimeout(() => {
+      if (!completed) {
+        completed = true;
+        console.log('AUTH_TIMEOUT');
+        setActionMessage('AUTH_TIMEOUT (انقضت 15 ثانية دون أي استجابة من Firebase Auth)');
+        setIsProcessing(false);
+      }
+    }, 15000);
+
+    try {
+      const userCredential = await signInAnonymously(auth);
+      if (!completed) {
+        completed = true;
+        clearTimeout(timeoutTimer);
+        console.log('AFTER signInAnonymously');
+        console.log('Firebase Auth Anonymous User UID:', userCredential.user?.uid);
+        setActionMessage(`AFTER signInAnonymously - تم الاتصال والمصادقة المجهولة بنجاح! UID: ${userCredential.user?.uid}`);
+      }
+    } catch (err: any) {
+      if (!completed) {
+        completed = true;
+        clearTimeout(timeoutTimer);
+        const code = err?.code || 'NO_CODE';
+        const message = err?.message || String(err);
+        console.log('Test Firebase Auth Result:', { code, message, fullError: err });
+        
+        let friendlyMsg = `كود الخطأ: ${code}`;
+        if (code === 'auth/admin-restricted-operation' || code === 'auth/operation-not-allowed') {
+          friendlyMsg = 'طريقة تسجيل الدخول المجهول (Anonymous Sign-in) غير مفعّلة في وحدة تحكم Firebase (Authentication -> Sign-in method).';
+        }
+
+        setActionMessage(`نتيجة اختبار Firebase Auth: (${friendlyMsg})`);
+      }
+    } finally {
+      setIsProcessing(false);
+      setTimeout(() => setActionMessage(null), 8000);
+    }
+  };
+
+  const handleFirebaseEnvironmentCheck = async () => {
+    setIsProcessing(true);
+    setActionMessage('جاري تشغيل فحص بيئة Firebase...');
+
+    console.log("=== FIREBASE ENVIRONMENT ===");
+    console.log("projectId:", db.app.options.projectId);
+    console.log("appId:", db.app.options.appId);
+    console.log("authDomain:", db.app.options.authDomain);
+    console.log("currentUser:", auth.currentUser?.uid ?? null);
+    console.log("currentUserEmail:", auth.currentUser?.email ?? null);
+    console.log("currentUserAnonymous:", auth.currentUser?.isAnonymous ?? null);
+    console.log("Firestore app:", db.app.name);
+
+    try {
+      const ref = doc(
+        db,
+        "cafes",
+        "main_cafe_eldeeb",
+        "sync_store",
+        "__connection_test__"
+      );
+
+      await setDoc(ref, {
+        timestamp: serverTimestamp(),
+        device: navigator.userAgent
+      });
+
+      console.log("DIRECT WRITE SUCCESS");
+
+      const snap = await getDoc(ref);
+
+      console.log("READ EXISTS:", snap.exists());
+      console.log("READ DATA:", snap.data());
+
+      setActionMessage(
+        `Firebase Env Check: projectId=${db.app.options.projectId}, currentUser=${auth.currentUser?.uid ?? 'null'} | setDoc: SUCCESS | getDoc: SUCCESS (exists: ${snap.exists()})`
+      );
+    } catch (error: any) {
+      console.error(error);
+      console.error("code:", error?.code);
+      console.error("message:", error?.message);
+      console.error("stack:", error?.stack);
+
+      setActionMessage(
+        `Firebase Env Check FAILED: code=${error?.code}, message=${error?.message}`
+      );
+    } finally {
+      setIsProcessing(false);
+      setTimeout(() => setActionMessage(null), 10000);
     }
   };
 
@@ -586,7 +694,27 @@ export default function DebugSyncCenterModal({ isOpen, onClose }: DebugSyncCente
               <h3 className="font-extrabold text-white text-sm">DIAGNOSTIC TOOLS (أدوات التحكم)</h3>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-8 gap-2">
+              <button
+                type="button"
+                disabled={isProcessing}
+                onClick={handleTestFirebaseAuth}
+                className="bg-purple-600/40 hover:bg-purple-600/60 text-purple-200 border border-purple-400/60 p-2.5 rounded-xl font-black text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 col-span-2 sm:col-span-1 shadow-lg shadow-purple-900/30"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-purple-300 animate-pulse" />
+                <span>Test Firebase Auth</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isProcessing}
+                onClick={handleFirebaseEnvironmentCheck}
+                className="bg-blue-600/40 hover:bg-blue-600/60 text-blue-200 border border-blue-400/60 p-2.5 rounded-xl font-black text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 col-span-2 sm:col-span-1 shadow-lg shadow-blue-900/30"
+              >
+                <Server className="w-3.5 h-3.5 text-blue-300" />
+                <span>Firebase Environment Check</span>
+              </button>
+
               <button
                 type="button"
                 disabled={isProcessing}

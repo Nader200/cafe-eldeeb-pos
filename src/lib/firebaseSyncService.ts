@@ -7,6 +7,7 @@ import { doc, setDoc, getDoc, onSnapshot, collection, Unsubscribe } from 'fireba
 import { db, auth, handleFirestoreError, OperationType } from './firebaseClient';
 import { safeStorage } from './safeStorage';
 import { syncDiagnosticLogger } from './syncDiagnosticLogger';
+import { playBaristaNewOrderSound } from './audioService';
 
 export type SyncStatus = 'connected' | 'syncing' | 'offline' | 'error';
 
@@ -50,6 +51,7 @@ class FirebaseSyncService {
   private lastSyncTime: string | null = null;
   private listeners: ((state: SyncState) => void)[] = [];
   private unsubscribeSnapshot: Unsubscribe | null = null;
+  private unsubscribeBaristaSnapshot: Unsubscribe | null = null;
   private isProcessingRemoteChange: boolean = false;
   private cloudTimestamps: Map<string, number> = new Map();
 
@@ -109,6 +111,10 @@ class FirebaseSyncService {
       this.unsubscribeSnapshot();
       this.unsubscribeSnapshot = null;
     }
+    if (this.unsubscribeBaristaSnapshot) {
+      this.unsubscribeBaristaSnapshot();
+      this.unsubscribeBaristaSnapshot = null;
+    }
   }
 
   public subscribe(callback: (state: SyncState) => void): () => void {
@@ -142,10 +148,13 @@ class FirebaseSyncService {
     if (this.unsubscribeSnapshot) {
       this.unsubscribeSnapshot();
     }
+    if (this.unsubscribeBaristaSnapshot) {
+      this.unsubscribeBaristaSnapshot();
+    }
 
     this.updateCafeIdFromSettings();
     const storePath = `cafes/${this.cafeId}/sync_store`;
-    console.log(`LISTENING TO: ${storePath}`);
+    console.log(`[GLOBAL SYNC] LISTENING TO COLLECTION: ${storePath}`);
     const storeRef = collection(db, 'cafes', this.cafeId, 'sync_store');
 
     this.unsubscribeSnapshot = onSnapshot(
@@ -159,31 +168,21 @@ class FirebaseSyncService {
         snapshot.docChanges().forEach((change) => {
           if (change.type === 'removed') return;
 
-          const doc = change.doc;
-          console.log("===== SNAPSHOT RECEIVED =====");
-          console.log("Document ID:", doc.id);
-          console.log("Changed key:", doc.id);
-          console.log("Data:", doc.data());
-          console.log("Time:", new Date().toISOString());
-
-          const docData = doc.data();
-          if (!docData || !docData.key) {
-            return;
-          }
+          const docSnap = change.doc;
+          const docData = docSnap.data();
+          if (!docData || !docData.key) return;
 
           const key = docData.key;
-          console.log(`RECEIVED REMOTE UPDATE FOR: cafes/${this.cafeId}/sync_store/${key}`, { type: change.type, deviceId: docData.deviceId });
-          
+          const remoteData = docData.data;
+          const remoteUpdatedAt = docData.updatedAt || 0;
+
           syncDiagnosticLogger.recordSnapshot(
-            key,
+            docSnap.id,
             `cafes/${this.cafeId}/sync_store`,
             change.type,
             docData.deviceId || 'unknown',
             docData.data
           );
-
-          const remoteData = docData.data;
-          const remoteUpdatedAt = docData.updatedAt || 0;
 
           this.cloudTimestamps.set(key, remoteUpdatedAt);
 
@@ -191,10 +190,34 @@ class FirebaseSyncService {
           const localUpdatedAt = parseInt(safeStorage.getItem(localMetaKey) || '0', 10);
           const localVal = safeStorage.getItem(key);
 
-          // If remote update is newer or local is uninitialized, accept remote data
-          if (remoteUpdatedAt >= localUpdatedAt || localUpdatedAt === 0 || !localVal) {
+          const isFromOtherDevice = docData.deviceId && docData.deviceId !== this.deviceId;
+
+          // Always accept cafe_barista_orders, or newer updates, or changes from other devices
+          if (
+            key === 'cafe_barista_orders' ||
+            remoteUpdatedAt >= localUpdatedAt - 120000 ||
+            isFromOtherDevice ||
+            localUpdatedAt === 0 ||
+            !localVal
+          ) {
             this.isProcessingRemoteChange = true;
             try {
+              if (key === 'cafe_barista_orders' && Array.isArray(remoteData)) {
+                // Check if new orders exist for sound notification
+                try {
+                  const existingStr = safeStorage.getItem('cafe_barista_orders');
+                  const existingList = existingStr ? JSON.parse(existingStr) : [];
+                  const existingIds = new Set(Array.isArray(existingList) ? existingList.map((o: any) => o.id) : []);
+                  const hasNewOrder = remoteData.some((o: any) => !existingIds.has(o.id) && o.status === 'NEW');
+                  if (hasNewOrder && isFromOtherDevice) {
+                    console.log('[GLOBAL SYNC] New barista order detected from remote device! Playing alert sound 🔔');
+                    playBaristaNewOrderSound();
+                  }
+                } catch (soundErr) {
+                  console.error('[GLOBAL SYNC] Error checking sound alert:', soundErr);
+                }
+              }
+
               if (remoteData === null || remoteData === undefined) {
                 safeStorage.removeItem(key);
               } else {
@@ -226,7 +249,6 @@ class FirebaseSyncService {
 
         if (updatedAny && typeof window !== 'undefined') {
           syncDiagnosticLogger.recordUIRefresh('POSView & BaristaView & InvoicesView');
-          // Notify React components across all views to re-render fresh data
           window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
           window.dispatchEvent(new CustomEvent('barista_orders_updated'));
           window.dispatchEvent(new CustomEvent('open_invoices_updated'));
@@ -241,13 +263,70 @@ class FirebaseSyncService {
         this.notifyState();
       }
     );
+
+    // Dedicated direct listener for cafe_barista_orders to guarantee cross-device real-time updates
+    const baristaDocPath = `cafes/${this.cafeId}/sync_store/cafe_barista_orders`;
+    console.log(`[GLOBAL BARISTA SYNC] INITIALIZING DEDICATED REALTIME LISTENER: ${baristaDocPath}`);
+    const baristaDocRef = doc(db, 'cafes', this.cafeId, 'sync_store', 'cafe_barista_orders');
+
+    this.unsubscribeBaristaSnapshot = onSnapshot(
+      baristaDocRef,
+      (snapshot) => {
+        if (!snapshot.exists()) return;
+        const docData = snapshot.data();
+        if (!docData || !Array.isArray(docData.data)) return;
+
+        const freshOrders = docData.data;
+        const isFromOtherDevice = docData.deviceId && docData.deviceId !== this.deviceId;
+
+        syncDiagnosticLogger.recordSnapshot(
+          'cafe_barista_orders',
+          `cafes/${this.cafeId}/sync_store`,
+          'modified',
+          docData.deviceId || 'unknown',
+          freshOrders
+        );
+
+        try {
+          const existingStr = safeStorage.getItem('cafe_barista_orders');
+          const existingList = existingStr ? JSON.parse(existingStr) : [];
+          const existingIds = new Set(Array.isArray(existingList) ? existingList.map((o: any) => o.id) : []);
+          const hasNewOrder = freshOrders.some((o: any) => !existingIds.has(o.id) && o.status === 'NEW');
+
+          if (hasNewOrder && isFromOtherDevice) {
+            console.log('[DEDICATED BARISTA SYNC] New order received from remote device! Triggering audio alert 🔔');
+            playBaristaNewOrderSound();
+          }
+        } catch (e) {
+          console.error('[DEDICATED BARISTA SYNC] Sound check error:', e);
+        }
+
+        try {
+          safeStorage.setItem('cafe_barista_orders', JSON.stringify(freshOrders));
+          safeStorage.setItem('__meta_updated_cafe_barista_orders', String(docData.updatedAt || Date.now()));
+          
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('barista_orders_updated'));
+            window.dispatchEvent(new CustomEvent('storage'));
+          }
+        } catch (err) {
+          console.error('[DEDICATED BARISTA SYNC] Failed to save orders:', err);
+        }
+      },
+      (error) => {
+        console.error(`[DEDICATED BARISTA SYNC ERROR] ${baristaDocPath}:`, error);
+        handleFirestoreError(error, OperationType.GET, baristaDocPath);
+      }
+    );
   }
 
   /**
    * Push a specific key's mutation to Firestore
    */
   public async pushKeyToCloud(key: string, data: any): Promise<void> {
-    const docPath = `cafes/${this.cafeId}/sync_store/${key}`;
+    const cafeId = 'main_cafe_eldeeb';
+    this.cafeId = cafeId;
+    const docPath = `cafes/${cafeId}/sync_store/${key}`;
 
     const now = Date.now();
     safeStorage.setItem(`__meta_updated_${key}`, String(now));
@@ -267,55 +346,34 @@ class FirebaseSyncService {
     syncDiagnosticLogger.recordPushStart(key, docPath);
 
     try {
-      this.updateCafeIdFromSettings();
-      console.log("===== PUSH START =====");
-      console.log("Cafe ID:", this.cafeId);
-      console.log("Key:", key);
-      console.log("Document Path:", docPath);
-      console.log("Payload:", data);
+      console.log(`[SYNC DIRECT PUSH] Starting write to ${docPath}`);
+      const docRef = doc(db, 'cafes', cafeId, 'sync_store', key);
 
-      console.log(`WRITING TO: ${docPath}`);
-      const docRef = doc(db, 'cafes', this.cafeId, 'sync_store', key);
-      const sanitizedData = data !== undefined ? JSON.parse(JSON.stringify(data)) : null;
+      let sanitizedData: any = null;
+      if (data !== undefined && data !== null) {
+        try {
+          sanitizedData = JSON.parse(JSON.stringify(data, (k, v) => (v === undefined ? null : v)));
+        } catch (e) {
+          console.warn(`[SYNC] Failed to JSON stringify payload for key ${key}:`, e);
+          sanitizedData = data;
+        }
+      }
 
-      console.log("[SYNC] BEFORE setDoc");
-      const start = Date.now();
-      await setDoc(docRef, {
+      const payload = {
         key,
         data: sanitizedData,
         updatedAt: now,
         deviceId: this.deviceId,
-        cafeId: this.cafeId
-      });
+        cafeId: cafeId
+      };
+
+      console.log(`[SYNC DIRECT PUSH] Invoking setDoc on ${docPath}...`);
+      const start = Date.now();
+
+      await setDoc(docRef, payload);
 
       const duration = Date.now() - start;
-      console.log("[SYNC] AFTER setDoc");
-      console.log(`زمن التنفيذ بالمللي ثانية: ${duration} ms`);
-
-      try {
-        const snap = await getDoc(docRef);
-        const exists = snap.exists();
-        const snapData = snap.data();
-        let itemsCount = 0;
-        if (snapData && snapData.data) {
-          if (Array.isArray(snapData.data)) {
-            itemsCount = snapData.data.length;
-          } else if (typeof snapData.data === 'object' && snapData.data !== null) {
-            itemsCount = Object.keys(snapData.data).length;
-          } else {
-            itemsCount = 1;
-          }
-        }
-        console.log("===== FIRESTORE TEST VERIFICATION =====");
-        console.log("هل المستند موجود؟", exists);
-        console.log("عدد العناصر الموجودة بداخله:", itemsCount);
-        console.log("مسار المستند الكامل:", docRef.path);
-      } catch (getErr: any) {
-        console.error("Failed to read document after setDoc:", getErr);
-      }
-
-      console.log("===== PUSH SUCCESS =====");
-      console.log("Document:", key);
+      console.log(`[SYNC DIRECT PUSH SUCCESS] Completed setDoc on ${docPath} in ${duration}ms`);
 
       syncDiagnosticLogger.recordPushSuccess(key, docPath, sanitizedData);
 
@@ -326,17 +384,12 @@ class FirebaseSyncService {
       });
       this.status = 'connected';
     } catch (error: any) {
-      console.error("===== PUSH FAILED =====");
-      console.error("code:", error?.code);
-      console.error("message:", error?.message);
-      console.error("stack:", error?.stack);
-      console.error(`Failed to push key ${key} to cloud:`, error);
-
+      console.error(`[SYNC DIRECT PUSH FAILED] Error writing to ${docPath}:`, error);
       const errStr = error?.message || String(error);
       syncDiagnosticLogger.recordPushFailure(key, docPath, errStr);
-
       handleFirestoreError(error, OperationType.WRITE, docPath);
       this.status = 'error';
+      throw error;
     } finally {
       this.notifyState();
     }

@@ -514,7 +514,7 @@ export default function POSView({
     };
   }, []);
 
-  const handleSendToBarista = () => {
+  const handleSendToBarista = async () => {
     if (cart.length === 0) {
       onShowWarningAlert('يرجى إضافة سلع أو مشروبات أولاً لإرسال طلب التحضير للبارستا!');
       return;
@@ -563,8 +563,8 @@ export default function POSView({
         total_price: (item.custom_price !== undefined ? item.custom_price : item.product.selling_price) * item.quantity
       }));
 
-      // 3. Dispatch to Barista Kitchen Screen
-      dbService.addBaristaOrder({
+      // 3. Dispatch to Barista Kitchen Screen & await direct Cloud Push Confirmation
+      await dbService.addBaristaOrderAsync({
         order_number: savedOpenRes.invoice.invoice_number,
         invoice_id: savedOpenRes.invoice.id,
         table_number: tableNumberStr,

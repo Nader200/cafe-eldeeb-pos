@@ -1397,8 +1397,8 @@ function AppContent() {
             <div className="grid grid-cols-2 gap-2 text-xs">
               <button
                 type="button"
-                onClick={() => {
-                  dbService.updateBaristaOrderStatus(readyOrderPopup.id, 'DELIVERED');
+                onClick={async () => {
+                  await dbService.updateBaristaOrderStatusAsync(readyOrderPopup.id, 'DELIVERED');
                   showSuccessAlert(`تم تسجيل تسليم الطلب رقم #${readyOrderPopup.order_number} للعميل بنجاح 🚶 (الفاتورة ما زالت قائمة في الفواتير المفتوحة بانتظار السداد)`);
                   setReadyOrderPopup(null);
                 }}

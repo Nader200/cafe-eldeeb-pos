@@ -163,7 +163,7 @@ export default function OpenInvoicesView({
     setNewInvoiceNotesInput(inv.notes || '');
   };
 
-  const handleSaveInvoiceNotes = () => {
+  const handleSaveInvoiceNotes = async () => {
     if (!editingNotesInvoice) return;
     const trimmed = newInvoiceNotesInput.trim();
 
@@ -178,7 +178,7 @@ export default function OpenInvoicesView({
 
     // Also update matching Barista Order notes
     const currentUser = dbService.getCurrentUser();
-    dbService.updateBaristaOrderNotes(
+    await dbService.updateBaristaOrderNotesAsync(
       editingNotesInvoice.id,
       trimmed,
       currentUser?.name || 'الكاشير'

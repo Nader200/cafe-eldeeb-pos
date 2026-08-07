@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType } from '../lib/firebaseClient';
+import { safeStorage } from '../lib/safeStorage';
 import {
   Coffee,
   Clock,
@@ -78,6 +81,55 @@ export default function BaristaView({ onShowSuccessAlert, onShowWarningAlert }: 
   useEffect(() => {
     loadOrders();
 
+    // 1 & 2 & 4 & 5. Initialize onSnapshot listener specifically for cafe_barista_orders on Barista view mount
+    const cafeId = 'main_cafe_eldeeb';
+    const storePath = `cafes/${cafeId}/sync_store/cafe_barista_orders`;
+    const baristaOrderDocRef = doc(db, 'cafes', cafeId, 'sync_store', 'cafe_barista_orders');
+
+    console.log(`[BARISTA ONSNAPSHOT INIT] Initializing real-time onSnapshot listener specifically for ${storePath}`);
+
+    const unsubscribeOnSnapshot = onSnapshot(
+      baristaOrderDocRef,
+      (snapshot) => {
+        console.log(`[BARISTA ONSNAPSHOT TRIGGERED] Received real-time update from ${storePath}:`, {
+          exists: snapshot.exists(),
+          id: snapshot.id,
+          time: new Date().toISOString(),
+          metadata: snapshot.metadata
+        });
+
+        if (snapshot.exists()) {
+          const docData = snapshot.data();
+          console.log('[BARISTA ONSNAPSHOT DATA]:', docData);
+          if (docData && docData.data && Array.isArray(docData.data)) {
+            const freshOrders: BaristaOrder[] = docData.data;
+
+            setOrders(prev => {
+              if (soundEnabled) {
+                const prevIds = new Set(prev.map(o => o.id));
+                const hasNewOrder = freshOrders.some(o => !prevIds.has(o.id) && o.status === 'NEW');
+                if (hasNewOrder) {
+                  console.log('[BARISTA ONSNAPSHOT] New order detected! Playing barista alert sound 🔔');
+                  playBaristaNewOrderSound();
+                }
+              }
+              return freshOrders;
+            });
+
+            try {
+              safeStorage.setItem('cafe_barista_orders', JSON.stringify(freshOrders));
+            } catch (e) {
+              console.error('[BARISTA ONSNAPSHOT] Failed to save fresh orders to safeStorage:', e);
+            }
+          }
+        }
+      },
+      (error) => {
+        console.error(`[BARISTA ONSNAPSHOT ERROR] Error listening to ${storePath}:`, error);
+        handleFirestoreError(error, OperationType.GET, storePath);
+      }
+    );
+
     const handleUpdate = () => loadOrders(true);
     const handleNewOrder = (e: any) => {
       loadOrders(false);
@@ -104,6 +156,8 @@ export default function BaristaView({ onShowSuccessAlert, onShowWarningAlert }: 
     window.addEventListener('storage', handleUpdate);
 
     return () => {
+      console.log(`[BARISTA ONSNAPSHOT CLEANUP] Unsubscribing onSnapshot for ${storePath}`);
+      unsubscribeOnSnapshot();
       window.removeEventListener('barista_orders_updated', handleUpdate);
       window.removeEventListener('barista_new_order', handleNewOrder as EventListener);
       window.removeEventListener('barista_notes_updated', handleNotesUpdated as EventListener);
@@ -113,8 +167,8 @@ export default function BaristaView({ onShowSuccessAlert, onShowWarningAlert }: 
   }, [soundEnabled, onShowSuccessAlert]);
 
   // Handle status update
-  const handleUpdateStatus = (orderId: string, newStatus: BaristaOrderStatus) => {
-    const updated = dbService.updateBaristaOrderStatus(orderId, newStatus);
+  const handleUpdateStatus = async (orderId: string, newStatus: BaristaOrderStatus) => {
+    const updated = await dbService.updateBaristaOrderStatusAsync(orderId, newStatus);
     if (updated) {
       loadOrders();
       if (newStatus === 'PREPARING') {
@@ -140,11 +194,11 @@ export default function BaristaView({ onShowSuccessAlert, onShowWarningAlert }: 
   };
 
   // Save updated notes
-  const handleSaveNotes = () => {
+  const handleSaveNotes = async () => {
     if (!editingOrder) return;
 
     const authorName = currentUser?.name || 'الكاشير';
-    const updated = dbService.updateBaristaOrderNotes(
+    const updated = await dbService.updateBaristaOrderNotesAsync(
       editingOrder.id,
       editGeneralNotes,
       authorName,
