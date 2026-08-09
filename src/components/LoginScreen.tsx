@@ -187,7 +187,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             <div className="p-3.5 bg-[#141414] border border-gold-500/20 rounded-2xl space-y-2 text-[11px] text-gray-300 animate-fade-in">
               <p className="font-bold text-gold-500 mb-1 flex items-center gap-1">
                 <Shield className="w-3.5 h-3.5" />
-                الحسابات المتاحة تجريبياً في النظام:
+                الحساب المتاح تجريبياً في النظام:
               </p>
               
               <div
@@ -199,17 +199,6 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                   <span className="text-[10px] text-gray-400 font-mono">admin / admin123</span>
                 </div>
                 <span className="text-[10px] bg-gold-600/20 text-gold-400 px-2 py-0.5 rounded-lg border border-gold-500/30 font-bold">تعبئة</span>
-              </div>
-
-              <div
-                onClick={() => handleQuickFill('cashier', '123456')}
-                className="p-2 bg-black/60 border border-emerald-500/30 hover:border-emerald-500 rounded-xl flex justify-between items-center cursor-pointer transition-all hover:scale-[1.02]"
-              >
-                <div>
-                  <span className="font-extrabold text-emerald-400 block">☕ كاشير المبيعات (Cashier POS)</span>
-                  <span className="text-[10px] text-gray-400 font-mono">cashier / 123456</span>
-                </div>
-                <span className="text-[10px] bg-emerald-600/20 text-emerald-400 px-2 py-0.5 rounded-lg border border-emerald-500/30 font-bold">تعبئة</span>
               </div>
             </div>
           )}

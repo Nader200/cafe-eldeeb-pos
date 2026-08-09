@@ -48,6 +48,7 @@ import {
 } from 'lucide-react';
 import { dbService, seedDatabase } from './dbService';
 import { AppSettings, CashDrawer } from './types';
+import { safeStorage } from './lib/safeStorage';
 import { uploadBackupToGoogleDrive } from './lib/googleDriveService';
 import { checkAndExpirePSSessions, ExpiredSessionNotification } from './lib/playstationNotifier';
 
@@ -79,15 +80,28 @@ import SyncStatusIndicator from './components/SyncStatusIndicator';
 import CalculatorModal from './components/CalculatorModal';
 import UpdateModal from './components/UpdateModal';
 import UserManualView from './components/UserManualView';
+import AdminReauthModal from './components/AdminReauthModal';
 import { checkForUpdates } from './services/updateService';
 import { UpdateCheckResult } from './config/version';
 
 type TabType = 'dashboard' | 'pos' | 'open-invoices' | 'invoices' | 'invoice-history' | 'products' | 'customers' | 'suppliers' | 'expenses' | 'reports' | 'settings' | 'cash_drawer' | 'employees' | 'playstation' | 'raw_materials' | 'production_batches' | 'partner_drawings' | 'user_manual';
 
+const PROTECTED_TABS: TabType[] = ['settings', 'employees', 'reports', 'partner_drawings', 'expenses', 'suppliers', 'products'];
+
+const TAB_LABELS: Record<string, string> = {
+  settings: 'الإعدادات وقفل الأمان',
+  employees: 'شؤون الموظفين والرواتب',
+  reports: 'التقارير المالية والأرباح',
+  partner_drawings: 'مسحوبات الشركاء المحاسبية',
+  expenses: 'المصروفات والنفقات العامة',
+  suppliers: 'إدارة الموردين والمشتريات',
+  products: 'المنيو وإدارة التصنيفات',
+};
+
 const getTabFromPathname = (pathname: string): TabType | null => {
   const clean = pathname.toLowerCase().trim().replace(/^\/+|\/+$/g, '');
-  if (!clean || clean === 'pos') return 'pos';
-  if (clean === 'dashboard') return 'dashboard';
+  if (!clean || clean === 'dashboard') return 'dashboard';
+  if (clean === 'pos') return 'pos';
   if (clean === 'open-invoices' || clean === 'open_invoices') return 'open-invoices';
   if (clean === 'invoices') return 'invoices';
   if (clean === 'invoice-history' || clean === 'invoice_history' || clean === 'history') return 'invoice-history';
@@ -127,25 +141,37 @@ function AppContent() {
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   const [reopenedInvoiceId, setReopenedInvoiceId] = useState<string | undefined>(undefined);
 
+  // Temporary in-memory Re-authentication state for sensitive screens (Resets on Refresh/Close)
+  const [isReauthenticated, setIsReauthenticated] = useState<boolean>(false);
+  const [showReauthModal, setShowReauthModal] = useState<boolean>(false);
+  const [pendingTargetTab, setPendingTargetTab] = useState<TabType | null>(null);
+
   const handleNavigate = (targetTab: string) => {
     const normalizedTab = targetTab as TabType;
     if (!hasPermission(normalizedTab)) {
-      setAlertMsg(`عذراً! حسابك الحالي بصلاحية (${currentUser?.role === 'Cashier' ? 'كاشير المبيعات' : currentUser?.role}) ولا يملك إذن الوصول لشاشة "${normalizedTab}".`);
+      setAlertMsg(`عذراً! لا يملك حسابك إذن الوصول لشاشة "${normalizedTab}".`);
       setAlertType('warning');
       setTimeout(() => setAlertMsg(null), 4000);
       if (!hasPermission(activeTab)) {
-        setActiveTab('pos');
-        try { window.history.replaceState({ tab: 'pos' }, '', '/pos'); } catch (e) {}
+        setActiveTab('dashboard');
+        try { window.history.replaceState({ tab: 'dashboard' }, '', '/dashboard'); } catch (e) {}
       }
       return;
     }
+
+    if (PROTECTED_TABS.includes(normalizedTab) && !isReauthenticated) {
+      setPendingTargetTab(normalizedTab);
+      setShowReauthModal(true);
+      return;
+    }
+
     setActiveTab(normalizedTab);
     try { window.history.pushState({ tab: normalizedTab }, '', `/${normalizedTab}`); } catch (e) {}
   };
 
   useEffect(() => {
     if (!currentUser) return;
-    const fallbackTab = currentUser.role === 'Cashier' ? 'pos' : 'dashboard';
+    const fallbackTab = 'dashboard';
     const requestedTab = getTabFromPathname(window.location.pathname);
 
     if (requestedTab) {
@@ -155,11 +181,21 @@ function AppContent() {
         setTimeout(() => setAlertMsg(null), 5000);
         setActiveTab(fallbackTab);
         try { window.history.replaceState({ tab: fallbackTab }, '', `/${fallbackTab}`); } catch (e) {}
+      } else if (PROTECTED_TABS.includes(requestedTab) && !isReauthenticated) {
+        setPendingTargetTab(requestedTab);
+        setShowReauthModal(true);
+        setActiveTab(fallbackTab);
+        try { window.history.replaceState({ tab: fallbackTab }, '', `/${fallbackTab}`); } catch (e) {}
       } else {
         setActiveTab(requestedTab);
       }
     } else {
       if (!hasPermission(activeTab)) {
+        setActiveTab(fallbackTab);
+        try { window.history.replaceState({ tab: fallbackTab }, '', `/${fallbackTab}`); } catch (e) {}
+      } else if (PROTECTED_TABS.includes(activeTab) && !isReauthenticated) {
+        setPendingTargetTab(activeTab);
+        setShowReauthModal(true);
         setActiveTab(fallbackTab);
         try { window.history.replaceState({ tab: fallbackTab }, '', `/${fallbackTab}`); } catch (e) {}
       }
@@ -277,7 +313,7 @@ function AppContent() {
 
       // Automatic update check on app startup if enabled
       if (loadedSettings.auto_update_checks_enabled !== false) {
-        checkForUpdates(loadedSettings.client_platform, 'Cashier')
+        checkForUpdates(loadedSettings.client_platform, 'Admin')
           .then((res) => {
             if (res.hasUpdate) {
               const isCartActive = Boolean((window as any).hasActivePOSCart);
@@ -562,7 +598,7 @@ function AppContent() {
           console.log('=== LOGIN SUCCESS HANDLER IN APP.TSX ===');
           console.log('User logged in:', user.name, '| Role:', user.role);
           login(user, rememberMe);
-          showSuccessAlert(`مرحباً بك يا سيد ${user.name}! تم تسجيل الدخول الملوكي بنجاح بصلاحية (${user.role === 'Admin' ? 'المدير العام' : 'الكاشير'}).`);
+          showSuccessAlert(`مرحباً بك يا سيد ${user.name}! تم تسجيل الدخول الملوكي بنجاح بصلاحية المدير العام.`);
         }}
       />
     );
@@ -854,12 +890,8 @@ function AppContent() {
               </div>
               <div className="text-right hidden sm:block">
                 <span className="text-xs font-black block text-white">{currentUser?.name || 'المستخدم'}</span>
-                <span className={`text-[9px] font-bold block px-1.5 py-0.2 rounded-md mt-0.5 inline-block ${
-                  currentUser?.role === 'Admin' 
-                    ? 'bg-gold-600/20 text-gold-400 border border-gold-500/30' 
-                    : 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30'
-                }`}>
-                  {currentUser?.role === 'Admin' ? '👑 أدمن المدير العام' : '☕ كاشير المبيعات'}
+                <span className="text-[9px] font-bold block px-1.5 py-0.2 rounded-md mt-0.5 inline-block bg-gold-600/20 text-gold-400 border border-gold-500/30">
+                  👑 أدمن المدير العام
                 </span>
               </div>
               <button
@@ -932,14 +964,41 @@ function AppContent() {
               </div>
               <h2 className="text-lg font-black text-white">عذراً! وصول غير مصرح به</h2>
               <p className="text-xs text-gray-400 leading-relaxed">
-                حسابك الحالي بصلاحية <strong className="text-emerald-400">({currentUser?.role === 'Cashier' ? 'كاشير المبيعات' : currentUser?.role})</strong> ولا يملك إذن الوصول إلى هذه الشاشة.
+                حسابك الحالي لا يملك إذن الوصول إلى هذه الشاشة.
               </p>
               <button
-                onClick={() => handleNavigate('pos')}
+                onClick={() => handleNavigate('dashboard')}
                 className="px-6 py-3 bg-gradient-to-r from-gold-600 to-gold-500 text-black font-black text-xs rounded-xl shadow-lg cursor-pointer hover:scale-105 transition-all font-mono"
               >
-                الانتقال لشاشة الكاشير (POS)
+                الانتقال للوحة التحكم (Dashboard)
               </button>
+            </div>
+          ) : PROTECTED_TABS.includes(activeTab) && !isReauthenticated ? (
+            <div className="bg-luxury-card border border-gold-500/30 p-8 md:p-12 rounded-3xl text-center space-y-5 my-12 max-w-lg mx-auto shadow-2xl animate-fade-in">
+              <div className="w-20 h-20 rounded-3xl bg-gold-500/10 border border-gold-500/30 flex items-center justify-center mx-auto text-gold-400 shadow-inner">
+                <Lock className="w-10 h-10 animate-pulse" />
+              </div>
+              <h2 className="text-xl font-black text-white">شاشة محمية بكلمة مرور الأدمن 🔒</h2>
+              <p className="text-xs text-gray-400 leading-relaxed font-bold">
+                يتطلب فتح هذه الشاشة الحساسة ({TAB_LABELS[activeTab] || activeTab}) تأكيد كلمة مرور مدير النظام (Admin).
+              </p>
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+                <button
+                  onClick={() => {
+                    setPendingTargetTab(activeTab);
+                    setShowReauthModal(true);
+                  }}
+                  className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-gold-600 via-amber-500 to-gold-500 hover:from-gold-500 hover:to-gold-400 text-black font-black text-xs rounded-xl shadow-lg cursor-pointer transition-all active:scale-95"
+                >
+                  إدخال كلمة المرور وفتح الشاشة
+                </button>
+                <button
+                  onClick={() => handleNavigate('dashboard')}
+                  className="w-full sm:w-auto px-5 py-3 bg-gray-900 border border-gray-800 hover:bg-gray-800 text-gray-300 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                >
+                  العودة للرئيسية
+                </button>
+              </div>
             </div>
           ) : (
             <>
@@ -1368,8 +1427,32 @@ function AppContent() {
         isOpen={showUpdateModal}
         updateInfo={updateCheckResult}
         onClose={() => setShowUpdateModal(false)}
-        userRole={currentUser?.role || 'Cashier'}
+        userRole={currentUser?.role || 'Admin'}
         hasActiveInvoice={hasActiveInvoice}
+      />
+
+      {/* Admin Re-authentication Modal for Sensitive Screens */}
+      <AdminReauthModal
+        isOpen={showReauthModal}
+        onClose={() => {
+          setShowReauthModal(false);
+          setPendingTargetTab(null);
+          if (PROTECTED_TABS.includes(activeTab) && !isReauthenticated) {
+            setActiveTab('dashboard');
+            try { window.history.replaceState({ tab: 'dashboard' }, '', '/dashboard'); } catch (e) {}
+          }
+        }}
+        onSuccess={() => {
+          setIsReauthenticated(true);
+          setShowReauthModal(false);
+          showSuccessAlert('تم التحقق من كلمة المرور الملوكية بنجاح! تم فتح الوصول للشاشات الحساسة.');
+          if (pendingTargetTab) {
+            setActiveTab(pendingTargetTab);
+            try { window.history.pushState({ tab: pendingTargetTab }, '', `/${pendingTargetTab}`); } catch (e) {}
+            setPendingTargetTab(null);
+          }
+        }}
+        targetTabName={pendingTargetTab ? TAB_LABELS[pendingTargetTab] : TAB_LABELS[activeTab]}
       />
 
     </div>

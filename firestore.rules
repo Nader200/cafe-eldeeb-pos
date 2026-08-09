@@ -4,9 +4,6 @@ service cloud.firestore {
     match /cafes/{cafeId}/sync_store/{document=**} {
       allow read, write: if true;
     }
-    match /cafe_barista_orders/{document=**} {
-      allow read, write: if true;
-    }
     match /test_connection/{document=**} {
       allow read, write: if true;
     }

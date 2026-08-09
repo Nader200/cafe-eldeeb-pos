@@ -758,7 +758,7 @@
     "printer_name": "Bluetooth-Thermal-XP80",
     "pin_code": "1234",
     "pin_protection_enabled": false,
-    "updated_at": "2026-08-03T09:52:38.298Z",
+    "updated_at": "2026-08-08T20:29:20.036Z",
     "reminder_days_friendly": 7,
     "reminder_days_statement": 15,
     "reminder_days_final": 30,
@@ -791,11 +791,15 @@
     ],
     "vodafone_cash_number": "01094793701",
     "instapay_number": "01094793701",
+    "instapay_id": "cafeeldeeb@instapay",
+    "digital_payment_account_owner": "Cafe Eldeeb",
+    "vodafone_cash_qr": "",
+    "instapay_qr": "",
     "employee_consumption_policy": "DEDUCT",
     "custom_expense_categories": [],
     "auto_update_checks_enabled": true,
-    "last_update_check_date": "2026-08-03T09:52:38.297Z",
-    "last_installed_version": "4.2.5",
+    "last_update_check_date": "2026-08-08T20:29:20.032Z",
+    "last_installed_version": "5.0.0",
     "force_update_enabled": false
   },
   "cafe_backup_logs": [
@@ -2258,26 +2262,6 @@
       "phone": "01000000000",
       "is_active": true,
       "created_at": "2026-07-29T14:15:36.407Z"
-    },
-    {
-      "id": "user_cashier",
-      "username": "cashier",
-      "name": "الكاشير / أحمد الديب",
-      "role": "Cashier",
-      "passwordHash": "123456",
-      "phone": "01100000000",
-      "is_active": true,
-      "created_at": "2026-07-29T14:15:36.407Z"
-    },
-    {
-      "id": "user_barista",
-      "username": "barista",
-      "name": "محضر المشروبات / البارستا",
-      "role": "Barista",
-      "passwordHash": "123456",
-      "phone": "01200000000",
-      "is_active": true,
-      "created_at": "2026-08-03T09:40:00.000Z"
     }
   ],
   "cafe_auth_audit_logs": [
@@ -2335,6 +2319,39 @@
   ],
   "cafe_partner_drawings": [],
   "cafe_update_logs": [
+    {
+      "id": "upd_1786220960109_pk4b",
+      "timestamp": "2026-08-08T20:29:20.109Z",
+      "action": "CHECK_FOR_UPDATES",
+      "installed_version": "5.0.0",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "INFO",
+      "details": "النظام يحدث بالفعل إلى أحدث إصدار (5.0.0)",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1786218576403_h7mq",
+      "timestamp": "2026-08-08T19:49:36.403Z",
+      "action": "CHECK_FOR_UPDATES",
+      "installed_version": "5.0.0",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "INFO",
+      "details": "النظام يحدث بالفعل إلى أحدث إصدار (5.0.0)",
+      "user_role": "Cashier"
+    },
+    {
+      "id": "upd_1786218576258_of36",
+      "timestamp": "2026-08-08T19:49:36.258Z",
+      "action": "CHECK_FOR_UPDATES",
+      "installed_version": "5.0.0",
+      "remote_version": "4.3.0",
+      "platform": "web",
+      "status": "INFO",
+      "details": "النظام يحدث بالفعل إلى أحدث إصدار (5.0.0)",
+      "user_role": "Cashier"
+    },
     {
       "id": "upd_1785750758354_cik4",
       "timestamp": "2026-08-03T09:52:38.354Z",
@@ -3401,77 +3418,6 @@
       "status": "INFO",
       "details": "تم تأجيل تثبيت التحديث (4.3.0) بواسطة Admin",
       "user_role": "Admin"
-    },
-    {
-      "id": "upd_1785582500223_xx88",
-      "timestamp": "2026-08-01T11:08:20.223Z",
-      "action": "UPDATE_DETECTED",
-      "installed_version": "4.2.5",
-      "remote_version": "4.3.0",
-      "platform": "web",
-      "status": "WARNING",
-      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
-      "user_role": "Admin"
-    },
-    {
-      "id": "upd_1785582496746_s6z8",
-      "timestamp": "2026-08-01T11:08:16.746Z",
-      "action": "UPDATE_DISMISSED",
-      "installed_version": "4.2.5",
-      "remote_version": "4.3.0",
-      "platform": "android",
-      "status": "INFO",
-      "details": "تم تأجيل تثبيت التحديث (4.3.0) بواسطة Admin",
-      "user_role": "Admin"
-    },
-    {
-      "id": "upd_1785582476904_jok6",
-      "timestamp": "2026-08-01T11:07:56.904Z",
-      "action": "UPDATE_DETECTED",
-      "installed_version": "4.2.5",
-      "remote_version": "4.3.0",
-      "platform": "android",
-      "status": "WARNING",
-      "details": "يتوفر تحديث جديد (4.3.0) لمنصة أندرويد",
-      "user_role": "Admin"
-    }
-  ],
-  "cafe_barista_orders": [
-    {
-      "id": "bar_1785750226886_qbpz",
-      "order_number": "1010",
-      "table_number": "",
-      "customer_name": "عميل مباشر",
-      "cashier_name": "أدمن النظام / نادر الديب",
-      "status": "NEW",
-      "items": [
-        {
-          "id": "bitm_1785750226882_0",
-          "product_id": "prod_1785570929284_388",
-          "product_name_ar": "معسل خطاط ",
-          "product_name_en": "",
-          "category_id": "cat_1785570879457_573",
-          "category_name": "الشيشة ",
-          "quantity": 1,
-          "notes": "",
-          "category_icon": "💨"
-        },
-        {
-          "id": "bitm_1785750226884_1",
-          "product_id": "prod_1784983378291_768",
-          "product_name_ar": "بن سادة فاتح ( وسط )",
-          "product_name_en": "",
-          "category_id": "cat_1784983348132_125",
-          "category_name": "مشروبات ساخنة ",
-          "quantity": 1,
-          "notes": "",
-          "category_icon": "☕"
-        }
-      ],
-      "created_at": "2026-08-03T09:43:46.885Z",
-      "updated_at": "2026-08-03T09:43:46.885Z",
-      "sent_time": "١٢:٤٣ م",
-      "notes": ""
     }
   ]
 }

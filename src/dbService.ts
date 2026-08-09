@@ -52,10 +52,15 @@ import {
   PartnerDrawing,
   UpdateLog,
   OrderNoteHistoryItem,
-  OperationalStatus
+  OperationalStatus,
+  Shift,
+  ShiftHandover,
+  ShiftType,
+  ShiftStatus
 } from './types';
 import { sanitizePaymentMethod } from './utils/paymentUtils';
 import { playOrderReadySound } from './lib/audioService';
+import { verifyAdminSecurityPassword } from './lib/securityService';
 
 import { safeStorage } from './lib/safeStorage';
 export { safeStorage };
@@ -179,7 +184,9 @@ const KEYS = {
   AUTH_AUDIT_LOGS: 'cafe_auth_audit_logs',
   PARTNERS: 'cafe_partners',
   PARTNER_DRAWINGS: 'cafe_partner_drawings',
-  UPDATE_LOGS: 'cafe_update_logs'
+  UPDATE_LOGS: 'cafe_update_logs',
+  SHIFTS: 'cafe_shifts',
+  SHIFT_HANDOVERS: 'cafe_shift_handovers'
 };
 
 // Sync current client database state to the server
@@ -499,16 +506,6 @@ export const defaultAuthUsers: AuthUser[] = [
     phone: '01000000000',
     is_active: true,
     created_at: new Date().toISOString()
-  },
-  {
-    id: 'user_cashier',
-    username: 'cashier',
-    name: 'الكاشير / أحمد الديب',
-    role: 'Cashier',
-    passwordHash: '123456',
-    phone: '01100000000',
-    is_active: true,
-    created_at: new Date().toISOString()
   }
 ];
 
@@ -671,9 +668,6 @@ export const dbService = {
       if (u.username.trim().toLowerCase() !== cleanUsername || !u.is_active) return false;
       if (u.passwordHash === cleanPassword) return true;
 
-      // Allow common passwords flexible login for cashier
-      if (cleanUsername === 'cashier' && (cleanPassword === '123456' || cleanPassword === 'cashier123' || cleanPassword === 'cashier')) return true;
-
       // Allow common passwords flexible login for admin
       if (cleanUsername === 'admin' && (cleanPassword === 'admin123' || cleanPassword === 'admin')) return true;
 
@@ -816,10 +810,6 @@ export const dbService = {
   saveCategory: (category: Category) => {
     console.log('SAVE CATEGORY CALLED:', category);
 
-    if (getCurrentUserRole() === 'Cashier') {
-      console.warn('SAVE CATEGORY BLOCKED: Role Cashier');
-      throw new Error('عذراً! هذه العملية تتطلب صلاحية مدير النظام (Admin). لا يمكن للكاشير إضافة أو تعديل التصنيفات.');
-    }
     const list = dbService.getCategories();
     const idx = list.findIndex(c => c.id === category.id);
     if (idx > -1) {
@@ -831,9 +821,6 @@ export const dbService = {
     return list;
   },
   deleteCategory: (id: string) => {
-    if (getCurrentUserRole() === 'Cashier') {
-      throw new Error('عذراً! هذه العملية تتطلب صلاحية مدير النظام (Admin). لا يمكن للكاشير حذف التصنيفات.');
-    }
     const categoryToDelete = dbService.getCategories().find(c => c.id === id);
     if (id === 'cat_raw_materials' || (categoryToDelete && categoryToDelete.name_ar.includes('مواد خام'))) {
       localStorage.setItem(KEYS.RAW_MATERIALS_DELETED, 'true');
@@ -887,10 +874,6 @@ export const dbService = {
   saveProduct: (product: Product) => {
     console.log('SAVE PRODUCT CALLED:', product);
 
-    if (getCurrentUserRole() === 'Cashier') {
-      console.warn('SAVE PRODUCT BLOCKED: Role Cashier');
-      throw new Error('عذراً! هذه العملية تتطلب صلاحية مدير النظام (Admin). لا يمكن للكاشير إضافة أو تعديل المنتجات.');
-    }
     const list = dbService.getProducts();
     const idx = list.findIndex(p => p.id === product.id);
     const updatedProd = { ...product, updated_at: new Date().toISOString() };
@@ -905,9 +888,6 @@ export const dbService = {
     return list;
   },
   deleteProduct: (id: string) => {
-    if (getCurrentUserRole() === 'Cashier') {
-      throw new Error('عذراً! هذه العملية تتطلب صلاحية مدير النظام (Admin). لا يمكن للكاشير حذف المنتجات.');
-    }
     const list = dbService.getProducts().filter(p => p.id !== id);
     setLocal(KEYS.PRODUCTS, list);
     return list;
@@ -3504,9 +3484,6 @@ export const dbService = {
     };
   },
   saveSettings: (settings: Partial<AppSettings>) => {
-    if (getCurrentUserRole() === 'Cashier') {
-      throw new Error('عذراً! هذه العملية تتطلب صلاحية مدير النظام (Admin). لا يمكن للكاشير تعديل إعدادات النظام.');
-    }
     const existing = dbService.getSettings();
     const updated: AppSettings = {
       ...defaultSettings,
@@ -4360,9 +4337,6 @@ export const dbService = {
     return getLocal<RawMaterial[]>(KEYS.RAW_MATERIALS, []);
   },
   saveRawMaterial: (rawMaterial: RawMaterial): RawMaterial[] => {
-    if (getCurrentUserRole() === 'Cashier') {
-      throw new Error('عذراً! هذه العملية تتطلب صلاحية مدير النظام (Admin). لا يمكن للكاشير إضافة أو تعديل المواد الخام.');
-    }
     const list = dbService.getRawMaterials();
     const idx = list.findIndex(r => r.id === rawMaterial.id);
     const updated = {
@@ -4381,9 +4355,6 @@ export const dbService = {
     return list;
   },
   deleteRawMaterial: (id: string): RawMaterial[] => {
-    if (getCurrentUserRole() === 'Cashier') {
-      throw new Error('عذراً! هذه العملية تتطلب صلاحية مدير النظام (Admin). لا يمكن للكاشير حذف المواد الخام.');
-    }
     const list = dbService.getRawMaterials().filter(r => r.id !== id);
     setLocal(KEYS.RAW_MATERIALS, list);
     return list;
@@ -5463,5 +5434,304 @@ export const dbService = {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
     }
+  },
+
+  // --- Shift Handover System ---
+  getShifts: (): Shift[] => {
+    return getLocal<Shift[]>(KEYS.SHIFTS, []);
+  },
+
+  getActiveShift: (): Shift | null => {
+    const shifts = dbService.getShifts();
+    const active = shifts.find(s => s.status === 'OPEN' || s.status === 'PENDING_HANDOVER');
+    if (!active) return null;
+    return dbService.calculateShiftMetrics(active);
+  },
+
+  getShiftHandovers: (): ShiftHandover[] => {
+    return getLocal<ShiftHandover[]>(KEYS.SHIFT_HANDOVERS, []);
+  },
+
+  calculateShiftMetrics: (shift: Shift): Shift => {
+    const invoices = dbService.getInvoices();
+    const expenses = dbService.getExpenses();
+    const creditPayments = getLocal<CreditPayment[]>(KEYS.CREDIT_PAYMENTS, []);
+    const cashMovements = dbService.getCashHistory();
+    const returns = dbService.getReturnTransactions();
+
+    const startTime = new Date(shift.started_at).getTime();
+    const endTime = shift.ended_at ? new Date(shift.ended_at).getTime() : Date.now();
+
+    let cashIn = 0;
+    let cashOut = 0;
+
+    // 1. Cash from Invoices
+    invoices.forEach(inv => {
+      if (inv.invoice_status === 'CANCELLED') return;
+      const invTime = new Date(inv.invoice_date).getTime();
+      if (invTime >= startTime && invTime <= endTime) {
+        if (inv.payment_type === 'CASH') {
+          cashIn += inv.paid_amount || inv.total;
+        } else if (inv.payment_type === 'SPLIT') {
+          cashIn += inv.paid_amount || 0;
+        }
+      }
+    });
+
+    // 2. Cash from Debt Repayments
+    creditPayments.forEach(cp => {
+      const pTime = new Date(cp.payment_date).getTime();
+      if (pTime >= startTime && pTime <= endTime) {
+        cashIn += cp.amount;
+      }
+    });
+
+    // 3. Manual Cash Movements
+    cashMovements.forEach(cm => {
+      if (!cm.created_at) return;
+      const cmTime = new Date(cm.created_at).getTime();
+      if (cmTime >= startTime && cmTime <= endTime) {
+        if (cm.transaction_type === 'CASH_ADJUSTMENT_ADD') {
+          cashIn += cm.amount;
+        } else if (cm.transaction_type === 'CASH_ADJUSTMENT_SUB') {
+          cashOut += cm.amount;
+        }
+      }
+    });
+
+    // 4. Cash Expenses
+    expenses.forEach(exp => {
+      if (!exp.payment_method || exp.payment_method === 'CASH') {
+        const expTime = new Date(exp.created_at || exp.expense_date).getTime();
+        if (expTime >= startTime && expTime <= endTime) {
+          cashOut += exp.amount;
+        }
+      }
+    });
+
+    // 5. Cash Refunds from Returns
+    returns.forEach(ret => {
+      const retTime = new Date(ret.created_at || ret.return_date).getTime();
+      if (retTime >= startTime && retTime <= endTime) {
+        cashOut += ret.total_return_amount;
+      }
+    });
+
+    const expectedCash = Math.round((shift.opening_balance + cashIn - cashOut) * 100) / 100;
+
+    return {
+      ...shift,
+      cash_in: Math.round(cashIn * 100) / 100,
+      cash_out: Math.round(cashOut * 100) / 100,
+      expected_cash: expectedCash
+    };
+  },
+
+  startShift: (shiftType: ShiftType, openingBalance: number, cashierName: string): Shift => {
+    const shifts = dbService.getShifts();
+    const existingActive = shifts.find(s => s.status === 'OPEN' || s.status === 'PENDING_HANDOVER');
+    if (existingActive) {
+      throw new Error('توجد وردية قائمة بالفعل. يجب إتمام عملية التسليم والاستلام أولًا.');
+    }
+
+    const now = new Date().toISOString();
+    const newShift: Shift = {
+      id: `shift_${Date.now()}`,
+      shift_type: shiftType,
+      cashier_name: cashierName || 'الكاشير',
+      status: 'OPEN',
+      opening_balance: openingBalance,
+      cash_in: 0,
+      cash_out: 0,
+      expected_cash: openingBalance,
+      started_at: now,
+      created_at: now,
+      updated_at: now
+    };
+
+    shifts.push(newShift);
+    setLocal(KEYS.SHIFTS, shifts);
+
+    // Sync CashDrawer opening balance
+    dbService.setOpeningCash(
+      openingBalance,
+      now.split('T')[0],
+      now.split('T')[1].substring(0, 8),
+      `بداية ${shiftType === 'DAY' ? 'وردية النهار' : 'وردية المساء'}`,
+      cashierName
+    );
+
+    dbService.logAuditAction('START_SHIFT', `بداية وردية جديدة (${shiftType === 'DAY' ? 'نهار' : 'مساء'}) برصيد افتتاحي ${openingBalance} ج.م`, cashierName);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shift_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
+    return newShift;
+  },
+
+  submitShiftForHandover: async (
+    shiftId: string,
+    declaredCash: number,
+    adminSecurityPassword: string,
+    cashierName?: string
+  ): Promise<Shift> => {
+    // Verify admin security password
+    const isValidPassword = await verifyAdminSecurityPassword(adminSecurityPassword);
+    if (!isValidPassword) {
+      throw new Error('كلمة مرور حماية الشاشات الحساسة غير صحيحة! لا يمكن إغلاق الوردية وتسليمها بدون التوثيق الإداري.');
+    }
+
+    const shifts = dbService.getShifts();
+    const idx = shifts.findIndex(s => s.id === shiftId);
+    if (idx === -1) {
+      throw new Error('الوردية غير موجودة!');
+    }
+
+    const shift = shifts[idx];
+    if (shift.status !== 'OPEN') {
+      throw new Error('هذه الوردية ليست مفتوحة للإغلاق!');
+    }
+
+    const now = new Date().toISOString();
+    const updatedWithMetrics = dbService.calculateShiftMetrics({
+      ...shift,
+      ended_at: now
+    });
+
+    const discrepancy = Math.round((declaredCash - updatedWithMetrics.expected_cash) * 100) / 100;
+
+    shifts[idx] = {
+      ...updatedWithMetrics,
+      status: 'PENDING_HANDOVER',
+      declared_cash: declaredCash,
+      discrepancy,
+      ended_at: now,
+      updated_at: now
+    };
+
+    setLocal(KEYS.SHIFTS, shifts);
+
+    dbService.logAuditAction(
+      'SUBMIT_SHIFT_HANDOVER',
+      `تم تسليم الوردية (${shifts[idx].shift_type === 'DAY' ? 'النهار' : 'المساء'}) بانتظار استلام الأدمن. المكتشف: ${declaredCash} ج.م | المتوقع: ${shifts[idx].expected_cash} ج.م | الفرق: ${discrepancy} ج.م`,
+      cashierName || shift.cashier_name
+    );
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shift_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
+    return shifts[idx];
+  },
+
+  completeShiftAndHandover: (
+    shiftId: string,
+    actualReceivedCash: number,
+    discrepancyReason: string,
+    adminName: string
+  ): { completedShift: Shift; newShift: Shift; handover: ShiftHandover } => {
+    const shifts = dbService.getShifts();
+    const idx = shifts.findIndex(s => s.id === shiftId);
+    if (idx === -1) {
+      throw new Error('الوردية غير موجودة!');
+    }
+
+    const currentShift = shifts[idx];
+    if (currentShift.status !== 'PENDING_HANDOVER') {
+      throw new Error('هذه الوردية ليست معلقة بانتظار الاستلام!');
+    }
+
+    const handoverDiscrepancy = Math.round((actualReceivedCash - currentShift.expected_cash) * 100) / 100;
+
+    if (handoverDiscrepancy !== 0 && (!discrepancyReason || !discrepancyReason.trim())) {
+      throw new Error('يجب إدخال سبب الفرق (العجز أو الزيادة) قبل تأكيد الاستلام!');
+    }
+
+    const now = new Date().toISOString();
+
+    // 1. Mark current shift as COMPLETED
+    shifts[idx] = {
+      ...currentShift,
+      status: 'COMPLETED',
+      actual_received_cash: actualReceivedCash,
+      discrepancy: handoverDiscrepancy,
+      discrepancy_reason: discrepancyReason.trim() || undefined,
+      updated_at: now
+    };
+
+    // 2. Record ShiftHandover
+    const handovers = dbService.getShiftHandovers();
+    const handover: ShiftHandover = {
+      id: `handover_${Date.now()}`,
+      shift_id: currentShift.id,
+      outgoing_user: currentShift.cashier_name,
+      incoming_user: adminName,
+      handed_amount: currentShift.declared_cash || 0,
+      accepted_amount: actualReceivedCash,
+      discrepancy: handoverDiscrepancy,
+      discrepancy_reason: discrepancyReason.trim() || undefined,
+      notes: `تسليم واستلام وردية من ${currentShift.cashier_name} إلى ${adminName}`,
+      handover_timestamp: now,
+      created_at: now
+    };
+    handovers.push(handover);
+    setLocal(KEYS.SHIFT_HANDOVERS, handovers);
+
+    // 3. Log Audit if discrepancy exists
+    if (handoverDiscrepancy !== 0) {
+      dbService.logAuditAction(
+        'SHIFT_DISCREPANCY',
+        `تأكيد استلام وردية مع وجود فرق (${handoverDiscrepancy > 0 ? 'زيادة' : 'عجز'} بقيمة ${Math.abs(handoverDiscrepancy)} ج.م). السبب: ${discrepancyReason}`,
+        adminName
+      );
+    } else {
+      dbService.logAuditAction(
+        'SHIFT_HANDOVER_SUCCESS',
+        `تم تسلم وردية ${currentShift.shift_type === 'DAY' ? 'النهار' : 'المساء'} بنجاح برصيد ${actualReceivedCash} ج.م وبدون أي فرق.`,
+        adminName
+      );
+    }
+
+    // 4. Automatically create next Shift
+    const nextType: ShiftType = currentShift.shift_type === 'DAY' ? 'NIGHT' : 'DAY';
+    const newShift: Shift = {
+      id: `shift_${Date.now() + 1}`,
+      shift_type: nextType,
+      cashier_name: adminName,
+      status: 'OPEN',
+      opening_balance: actualReceivedCash,
+      cash_in: 0,
+      cash_out: 0,
+      expected_cash: actualReceivedCash,
+      started_at: now,
+      created_at: now,
+      updated_at: now
+    };
+
+    shifts.push(newShift);
+    setLocal(KEYS.SHIFTS, shifts);
+
+    // Sync Cash Drawer opening balance
+    dbService.setOpeningCash(
+      actualReceivedCash,
+      now.split('T')[0],
+      now.split('T')[1].substring(0, 8),
+      `استلام وردية وبداية ${nextType === 'DAY' ? 'وردية النهار' : 'وردية المساء'}`,
+      adminName
+    );
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shift_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
+    return {
+      completedShift: shifts[idx],
+      newShift,
+      handover
+    };
   }
 };

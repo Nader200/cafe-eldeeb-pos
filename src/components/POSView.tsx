@@ -49,13 +49,15 @@ import {
 } from 'lucide-react';
 import { dbService, safeStorage, getItemCategoryIcon } from '../dbService';
 const localStorage = safeStorage;
-import { Product, Category, Customer, CartItem, PaymentType, Invoice } from '../types';
+import { Product, Category, Customer, CartItem, PaymentType, Invoice, Shift } from '../types';
 import { safeHtml2Canvas } from '../utils/html2canvasHelper';
 import { shareInvoicePDFToWhatsApp } from '../utils/pdfInvoiceGenerator';
 import { useAuth } from '../contexts/AuthContext';
 import SyncStatusIndicator from './SyncStatusIndicator';
 import { uploadReceiptImage } from '../lib/receiptStorage';
 import { getPaymentMethodLabel } from '../utils/paymentUtils';
+import ShiftHandoverModal from './ShiftHandoverModal';
+import { Sun, Moon, ArrowLeftRight } from 'lucide-react';
 
 interface POSViewProps {
   onNavigate: (tab: string) => void;
@@ -137,6 +139,24 @@ export default function POSView({
   const [invoiceNotes, setInvoiceNotes] = useState<string>('');
   const [tableNumber, setTableNumber] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'items' | 'cart'>('items'); // Mobile screen toggle
+
+  // Shift Handover System State
+  const [activeShift, setActiveShift] = useState<Shift | null>(() => dbService.getActiveShift());
+  const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
+
+  const refreshShiftState = () => {
+    setActiveShift(dbService.getActiveShift());
+  };
+
+  useEffect(() => {
+    refreshShiftState();
+    window.addEventListener('shift_updated', refreshShiftState);
+    window.addEventListener('cafe_db_synced_remote', refreshShiftState);
+    return () => {
+      window.removeEventListener('shift_updated', refreshShiftState);
+      window.removeEventListener('cafe_db_synced_remote', refreshShiftState);
+    };
+  }, []);
   
   // Draggable FAB position state
   const [fabPos, setFabPos] = useState<{ x: number | null; y: number | null; side: 'left' | 'right'; yPercent: number }>({
@@ -1113,6 +1133,41 @@ export default function POSView({
         {/* Top Navigation Bar: Quick Links for Cashier */}
         <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
           <SyncStatusIndicator />
+
+          {/* Compact Shift Status Badge */}
+          <button
+            type="button"
+            onClick={() => setIsShiftModalOpen(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#121216] border border-gold-500/30 hover:border-gold-500 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap active:scale-95 shrink-0"
+            title="إدارة وتسليم الوردية الحالية"
+          >
+            {activeShift ? (
+              activeShift.status === 'OPEN' ? (
+                <span className="flex items-center gap-1.5">
+                  {activeShift.shift_type === 'DAY' ? (
+                    <span className="text-amber-400 flex items-center gap-1 font-black">
+                      <Sun className="w-3.5 h-3.5" /> وردية النهار ☀️
+                    </span>
+                  ) : (
+                    <span className="text-indigo-400 flex items-center gap-1 font-black">
+                      <Moon className="w-3.5 h-3.5" /> وردية المساء 🌙
+                    </span>
+                  )}
+                  <span className="text-gray-400 font-medium text-[11px]">({activeShift.cashier_name})</span>
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-amber-300 font-black animate-pulse">
+                  <Clock className="w-3.5 h-3.5 text-amber-400" />
+                  تسليم معلّق ⏳
+                </span>
+              )
+            ) : (
+              <span className="flex items-center gap-1 text-gold-400 font-bold">
+                <Sun className="w-3.5 h-3.5 text-gold-500" />
+                بدء وردية 🚀
+              </span>
+            )}
+          </button>
 
           <button
             type="button"
@@ -3481,6 +3536,15 @@ export default function POSView({
           </div>
         </div>
       )}
+
+      {/* Shift Handover Modal */}
+      <ShiftHandoverModal
+        isOpen={isShiftModalOpen}
+        onClose={() => setIsShiftModalOpen(false)}
+        activeShift={activeShift}
+        onShiftUpdated={refreshShiftState}
+        cashierName={cashierName}
+      />
 
     </div>
   );

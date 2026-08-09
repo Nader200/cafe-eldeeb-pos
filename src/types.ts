@@ -280,6 +280,8 @@ export interface AppSettings {
   printer_name: string;
   pin_code: string; // login protection
   pin_protection_enabled?: boolean;
+  admin_security_password_hash?: string; // Hashed password for sensitive screens
+  admin_security_password_salt?: string; // Cryptographic salt for sensitive screen password
   updated_at: string;
   // --- Customer Credit Reminders Settings ---
   reminder_days_friendly?: number;
@@ -633,7 +635,7 @@ export interface InventoryBatchLog {
 }
 
 // Authentication & Employee User Roles
-export type UserRole = 'Admin' | 'Cashier';
+export type UserRole = 'Admin';
 
 export interface OrderNoteHistoryItem {
   id: string;
@@ -690,6 +692,44 @@ export interface PartnerDrawing {
   created_by?: string;
   created_at: string;
 }
+
+// Shift Handover System Types
+export type ShiftType = 'DAY' | 'NIGHT';
+export type ShiftStatus = 'OPEN' | 'PENDING_HANDOVER' | 'COMPLETED';
+
+export interface Shift {
+  id: string;
+  shift_type: ShiftType;
+  cashier_name: string;
+  status: ShiftStatus;
+  opening_balance: number;
+  cash_in: number;
+  cash_out: number;
+  expected_cash: number;
+  declared_cash?: number;
+  actual_received_cash?: number;
+  discrepancy?: number;
+  discrepancy_reason?: string;
+  started_at: string;
+  ended_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ShiftHandover {
+  id: string;
+  shift_id: string;
+  outgoing_user: string;
+  incoming_user: string;
+  handed_amount: number;
+  accepted_amount: number;
+  discrepancy: number;
+  discrepancy_reason?: string;
+  notes?: string;
+  handover_timestamp: string;
+  created_at: string;
+}
+
 
 
 

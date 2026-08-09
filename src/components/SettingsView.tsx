@@ -49,6 +49,7 @@ import { checkForUpdates, publishRemoteVersionConfig } from '../services/updateS
 import UpdateModal from './UpdateModal';
 import { useAuth } from '../contexts/AuthContext';
 import UserManualView from './UserManualView';
+import { isAdminSecurityPasswordSet, setAdminSecurityPassword } from '../lib/securityService';
 
 interface SettingsViewProps {
   onShowSuccessAlert: (msg: string) => void;
@@ -74,6 +75,11 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
   // PIN protection setting states
   const [pinProtectionEnabled, setPinProtectionEnabled] = useState<boolean>(false);
   const [pinCode, setPinCode] = useState<string>('1234');
+
+  // Admin Security Password states
+  const [secPassInput, setSecPassInput] = useState<string>('');
+  const [secPassConfirm, setSecPassConfirm] = useState<string>('');
+  const [isSecPassSet, setIsSecPassSet] = useState<boolean>(false);
 
   // Credit & reminder configuration states
   const [reminderDaysFriendly, setReminderDaysFriendly] = useState<number>(7);
@@ -334,6 +340,7 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
     setSeasonalTheme(s.seasonal_theme || 'LUXURY_COFFEE');
     setEnableThemeAnimations(s.enable_theme_animations !== false);
     setDefaultTaxPercentage(s.default_tax_percentage !== undefined ? s.default_tax_percentage : 0);
+    setIsSecPassSet(isAdminSecurityPasswordSet());
   }, []);
 
   const handleAddPaymentNumber = () => {
@@ -462,6 +469,30 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
       onSettingsChanged();
     }
     onShowSuccessAlert('تم حفظ وتثبيت إعدادات ورقم هاتف وعنوان الكافيه في قاعدة البيانات بنجاح! 💾');
+  };
+
+  const handleSaveSecurityPassword = async () => {
+    if (!secPassInput.trim()) {
+      onShowWarningAlert('يرجى كتابة كلمة مرور حماية جديدة للشاشات الحساسة!');
+      return;
+    }
+    if (secPassInput.trim().length < 4) {
+      onShowWarningAlert('كلمة مرور الحماية يجب أن تتكون من 4 خانات على الأقل!');
+      return;
+    }
+    if (secPassInput.trim() !== secPassConfirm.trim()) {
+      onShowWarningAlert('كلمتا المرور غير متطابقتين! يرجى إعادة التأكد.');
+      return;
+    }
+    try {
+      await setAdminSecurityPassword(secPassInput.trim());
+      setIsSecPassSet(true);
+      setSecPassInput('');
+      setSecPassConfirm('');
+      onShowSuccessAlert('تم حفظ وتحديث كلمة مرور حماية الشاشات الحساسة الملوكية بنجاح 🔐');
+    } catch (err) {
+      onShowWarningAlert('فشل حفظ كلمة مرور الحماية الجديدة!');
+    }
   };
 
   const handleManualCheckUpdate = async () => {
@@ -1282,6 +1313,60 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
                     placeholder="1234"
                     className="w-full bg-luxury-bg border border-gray-800 text-gold-500 font-black rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-600 text-center font-mono tracking-widest text-sm"
                   />
+                </div>
+              </div>
+            </div>
+
+            {/* Admin Security Password Section */}
+            <div className="mt-8 border-t border-gray-900 pt-6 space-y-4">
+              <h3 className="text-sm font-bold text-gold-400 flex items-center gap-2 mb-1">
+                <ShieldCheck className="w-4.5 h-4.5 text-gold-500" />
+                كلمة مرور حماية الشاشات الحساسة (مستقلة عن تسجيل الدخول) 🔐
+              </h3>
+              <p className="text-[11px] text-gray-400 leading-relaxed">
+                تُستخدم هذه كلمة المرور لفتح الشاشات الحساسة (الإعدادات، الرواتب، المصروفات، الماليّة، الموردين، الشركاء، المنيو). وهي كلمة مرور مستقلة تماماً ولا تقبل كلمة مرور تسجيل الدخول العادية كبديل.
+              </p>
+
+              <div className="bg-[#121212] border border-gold-500/20 rounded-2xl p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-gray-900 pb-3">
+                  <span className="text-xs font-bold text-gray-300">حالة كلمة مرور الحماية الحالية:</span>
+                  <span className={`text-xs font-extrabold px-3 py-1 rounded-full border text-center ${isSecPassSet ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-400' : 'bg-amber-950/80 border-amber-500/50 text-amber-400'}`}>
+                    {isSecPassSet ? 'مُعيّنة ومُشفرة بحفظ آمن 🔒' : 'غير مُعيّنة بعد (سيُطلب إعدادها عند فتح أول شاشة) ⚠️'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="text-xs text-gray-400 font-bold block mb-1">كلمة مرور الحماية الجديدة *</label>
+                    <input
+                      type="password"
+                      value={secPassInput}
+                      onChange={(e) => setSecPassInput(e.target.value)}
+                      placeholder="أدخل كلمة مرور الحماية..."
+                      className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-600 font-mono text-right"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 font-bold block mb-1">تأكيد كلمة مرور الحماية *</label>
+                    <input
+                      type="password"
+                      value={secPassConfirm}
+                      onChange={(e) => setSecPassConfirm(e.target.value)}
+                      placeholder="أعد إدخال كلمة المرور..."
+                      className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-600 font-mono text-right"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleSaveSecurityPassword}
+                    className="px-4 py-2 bg-gradient-to-r from-gold-600/30 to-amber-600/30 border border-gold-500/50 hover:border-gold-400 text-gold-300 hover:text-white text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>تحديث كلمة مرور حماية الشاشات الحساسة</span>
+                  </button>
                 </div>
               </div>
             </div>

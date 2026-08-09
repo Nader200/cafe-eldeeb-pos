@@ -84,7 +84,7 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
   const [authUserName, setAuthUserName] = useState<string>('');
   const [authUserUsername, setAuthUserUsername] = useState<string>('');
   const [authUserPassword, setAuthUserPassword] = useState<string>('');
-  const [authUserRole, setAuthUserRole] = useState<'Admin' | 'Cashier'>('Cashier');
+  const [authUserRole, setAuthUserRole] = useState<UserRole>('Admin');
   const [auditActionFilter, setAuditActionFilter] = useState<'ALL' | 'LOGIN' | 'LOGOUT'>('ALL');
 
   const handleOpenAddAuthUser = () => {
@@ -92,7 +92,7 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
     setAuthUserName('');
     setAuthUserUsername('');
     setAuthUserPassword('');
-    setAuthUserRole('Cashier');
+    setAuthUserRole('Admin');
     setShowAuthUserModal(true);
   };
 
@@ -137,15 +137,14 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
 
     dbService.saveAuthUser(userToSave);
     setShowAuthUserModal(false);
-    onShowSuccessAlert(`تم حفظ حساب الموظف (${userToSave.name}) بصلاحية (${userToSave.role === 'Admin' ? 'مدير النظام 👑' : 'كاشير مبيعات ☕'}) بنجاح!`);
+    onShowSuccessAlert(`تم حفظ حساب الموظف (${userToSave.name}) بصلاحية (مدير النظام 👑) بنجاح!`);
     loadData();
   };
 
   const handleToggleUserRole = (user: AuthUser) => {
-    const newRole: 'Admin' | 'Cashier' = user.role === 'Admin' ? 'Cashier' : 'Admin';
-    const updatedUser: AuthUser = { ...user, role: newRole };
+    const updatedUser: AuthUser = { ...user, role: 'Admin' };
     dbService.saveAuthUser(updatedUser);
-    onShowSuccessAlert(`تم تغيير صلاحية الموظف (${user.name}) إلى (${newRole === 'Admin' ? '👑 مدير النظام (Admin)' : '☕ كاشير مبيعات (Cashier)'}) بنجاح!`);
+    onShowSuccessAlert(`حساب الموظف (${user.name}) بصلاحية 👑 مدير النظام (Admin).`);
     loadData();
   };
 

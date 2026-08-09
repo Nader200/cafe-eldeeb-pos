@@ -47,9 +47,12 @@ export default function ReportsView({ onShowSuccessAlert }: ReportsViewProps) {
   const [partnerDrawingsList, setPartnerDrawingsList] = useState<PartnerDrawing[]>([]);
   const [selectedPartnerId, setSelectedPartnerId] = useState<string>('ALL');
   const [timeframe, setTimeframe] = useState<'WEEK' | 'MONTH'>('WEEK');
-  const [activeReportTab, setActiveReportTab] = useState<'daily_raw_materials' | 'general' | 'batch_profit' | 'partners_statement'>('batch_profit');
+  const [activeReportTab, setActiveReportTab] = useState<'daily_raw_materials' | 'general' | 'batch_profit' | 'partners_statement' | 'shifts_handovers'>('shifts_handovers');
   const [selectedDate, setSelectedDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [viewReceiptModalUrl, setViewReceiptModalUrl] = useState<string | null>(null);
+
+  const [shiftsList, setShiftsList] = useState<any[]>([]);
+  const [shiftHandoversList, setShiftHandoversList] = useState<any[]>([]);
 
   useEffect(() => {
     const loadData = () => {
@@ -61,6 +64,8 @@ export default function ReportsView({ onShowSuccessAlert }: ReportsViewProps) {
       setReturnTransactions(dbService.getReturnTransactions());
       setPartnersList(dbService.getPartners());
       setPartnerDrawingsList(dbService.getPartnerDrawings());
+      setShiftsList(dbService.getShifts().reverse());
+      setShiftHandoversList(dbService.getShiftHandovers().reverse());
     };
     loadData();
     window.addEventListener('cafe_db_synced_remote', loadData);
@@ -587,6 +592,17 @@ export default function ReportsView({ onShowSuccessAlert }: ReportsViewProps) {
 
       {/* Tab Switcher */}
       <div className="flex border-b border-gray-800 shrink-0">
+        <button
+          onClick={() => setActiveReportTab('shifts_handovers')}
+          className={`px-6 py-3 border-b-2 font-bold text-xs transition-all cursor-pointer flex items-center gap-2 ${
+            activeReportTab === 'shifts_handovers'
+              ? 'border-gold-600 text-gold-500 bg-gold-600/5'
+              : 'border-transparent text-gray-400 hover:text-white'
+          }`}
+        >
+          <span className="text-base">🔄</span>
+          سجل وتسليم الورديات (Shift Handover)
+        </button>
         <button
           onClick={() => setActiveReportTab('batch_profit')}
           className={`px-6 py-3 border-b-2 font-bold text-xs transition-all cursor-pointer flex items-center gap-2 ${
@@ -1632,6 +1648,130 @@ export default function ReportsView({ onShowSuccessAlert }: ReportsViewProps) {
                           <td className="py-3 px-3 text-gray-400">{drawing.created_by || 'المدير'}</td>
                         </tr>
                       ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* SHIFT HANDOVER REPORTS TAB */}
+      {activeReportTab === 'shifts_handovers' && (
+        <div className="flex flex-col gap-6 w-full animate-fade-in">
+          <div className="bg-luxury-card border border-luxury-border p-5 rounded-3xl shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+              <h3 className="text-base font-black text-white flex items-center gap-2">
+                <span>🔄</span> سجل وتسليم الورديات (Shift Handover Audit Logs)
+              </h3>
+              <p className="text-xs text-gray-400 mt-1">
+                تتبع تفصيلي لورديات النهار والمساء، المبيعات والمصروفات، الفروقات (عجز/زيادة) والتوثيق الإداري.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1.5 bg-gray-900 border border-gray-800 text-gold-400 rounded-xl text-xs font-bold font-mono">
+                إجمالي الورديات المسجلة: {shiftsList.length}
+              </span>
+            </div>
+          </div>
+
+          {/* Table of Shifts */}
+          <div className="bg-luxury-card border border-luxury-border rounded-3xl p-5 shadow-xl">
+            <h4 className="text-xs font-black text-gold-400 mb-4 flex items-center gap-2">
+              <span>📋</span> قائمة الورديات وسجلات التسليم والاستلام
+            </h4>
+
+            {shiftsList.length === 0 ? (
+              <div className="text-center py-12 text-gray-500 text-xs font-bold">
+                لا يوجد ورديات مسجلة حتى الآن.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-right text-xs">
+                  <thead>
+                    <tr className="border-b border-gray-800 text-gray-400 text-[11px]">
+                      <th className="py-3 px-3 font-bold">نوع الوردية</th>
+                      <th className="py-3 px-3 font-bold">المسؤول</th>
+                      <th className="py-3 px-3 font-bold">الحالة</th>
+                      <th className="py-3 px-3 font-bold">وقت البداية / النهاية</th>
+                      <th className="py-3 px-3 font-bold">الافتتاحي</th>
+                      <th className="py-3 px-3 font-bold">المبيعات</th>
+                      <th className="py-3 px-3 font-bold">المصروفات</th>
+                      <th className="py-3 px-3 font-bold">المتوقع</th>
+                      <th className="py-3 px-3 font-bold">عد الكاشير</th>
+                      <th className="py-3 px-3 font-bold">مقبوض الأدمن</th>
+                      <th className="py-3 px-3 font-bold">الفرق والسبب</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800/50">
+                    {shiftsList.map((shift) => {
+                      const metrics = dbService.calculateShiftMetrics(shift);
+                      return (
+                        <tr key={shift.id} className="hover:bg-gray-900/40 transition-colors">
+                          <td className="py-3.5 px-3">
+                            {shift.shift_type === 'DAY' ? (
+                              <span className="px-2.5 py-1 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/30 font-black text-[11px] inline-flex items-center gap-1">
+                                ☀️ وردية النهار
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-1 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 font-black text-[11px] inline-flex items-center gap-1">
+                                🌙 وردية المساء
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-3 font-black text-white">{shift.cashier_name}</td>
+                          <td className="py-3.5 px-3">
+                            {shift.status === 'COMPLETED' ? (
+                              <span className="px-2.5 py-1 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold text-[10px]">
+                                مكتملة ومستلمة
+                              </span>
+                            ) : shift.status === 'PENDING_HANDOVER' ? (
+                              <span className="px-2.5 py-1 rounded-xl bg-amber-500/10 text-amber-300 border border-amber-500/30 font-bold text-[10px] animate-pulse">
+                                ⏳ معلقة بانتظار الأدمن
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-1 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/30 font-bold text-[10px]">
+                                🟢 نشطة حاليًا
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-3 font-mono text-[11px] text-gray-300">
+                            <div>من: {new Date(shift.started_at).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' })}</div>
+                            {shift.ended_at && (
+                              <div className="text-gray-400 text-[10px]">إلى: {new Date(shift.ended_at).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' })}</div>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-3 font-mono font-bold text-amber-400">{metrics.opening_balance} ج.م</td>
+                          <td className="py-3.5 px-3 font-mono font-bold text-emerald-400">+{metrics.cash_in} ج.م</td>
+                          <td className="py-3.5 px-3 font-mono font-bold text-rose-400">-{metrics.cash_out} ج.م</td>
+                          <td className="py-3.5 px-3 font-mono font-black text-gold-300">{metrics.expected_cash} ج.م</td>
+                          <td className="py-3.5 px-3 font-mono font-bold text-amber-300">
+                            {shift.declared_cash !== undefined ? `${shift.declared_cash} ج.م` : '—'}
+                          </td>
+                          <td className="py-3.5 px-3 font-mono font-bold text-emerald-300">
+                            {shift.actual_received_cash !== undefined ? `${shift.actual_received_cash} ج.م` : '—'}
+                          </td>
+                          <td className="py-3.5 px-3 text-[11px]">
+                            {shift.discrepancy !== undefined ? (
+                              <div>
+                                <span className={`font-mono font-black ${
+                                  shift.discrepancy === 0 ? 'text-emerald-400' : shift.discrepancy > 0 ? 'text-emerald-300' : 'text-rose-400'
+                                }`}>
+                                  {shift.discrepancy === 0 ? 'بدون فرق (0)' : `${shift.discrepancy > 0 ? '+' : ''}${shift.discrepancy} ج.م`}
+                                </span>
+                                {shift.discrepancy_reason && (
+                                  <div className="text-[10px] text-gray-400 mt-0.5 max-w-[150px] truncate" title={shift.discrepancy_reason}>
+                                    السبب: {shift.discrepancy_reason}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

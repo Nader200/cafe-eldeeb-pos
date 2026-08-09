@@ -35,7 +35,7 @@ export async function fetchRemoteVersion(): Promise<RemoteVersionInfo> {
 
 export async function checkForUpdates(
   overridePlatform?: ClientPlatform,
-  userRole: string = 'Cashier'
+  userRole: string = 'Admin'
 ): Promise<UpdateCheckResult> {
   const platform = overridePlatform || detectClientPlatform();
   const remoteInfo = await fetchRemoteVersion();

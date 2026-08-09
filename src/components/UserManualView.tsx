@@ -111,7 +111,7 @@ export default function UserManualView({ currentUser, onNavigateTab }: UserManua
       category: 'core',
       icon: <Lock className="w-5 h-5 text-gold-400" />,
       badge: 'الأمان والصلاحيات',
-      targetRoles: ['Admin', 'Cashier'],
+      targetRoles: ['Admin'],
       summary: 'آلية تأمين جلسات العمل، تسجيل الدخول برمز PIN السرّي، وإدارة أدوار ومستويات وصول المستخدمين.',
       steps: [
         {
@@ -169,7 +169,7 @@ export default function UserManualView({ currentUser, onNavigateTab }: UserManua
       category: 'pos_tables',
       icon: <ShoppingCart className="w-5 h-5 text-gold-400" />,
       badge: 'الكاشير والمبيعات',
-      targetRoles: ['Admin', 'Cashier'],
+      targetRoles: ['Admin'],
       summary: 'إدخال الطلبات بسرعة فائقة، إطباق الخصومات، اختيار طرق الدفع، وإرسال بونات التحضير لشاشة البارستا.',
       steps: [
         {
@@ -206,7 +206,7 @@ export default function UserManualView({ currentUser, onNavigateTab }: UserManua
       category: 'pos_tables',
       icon: <ClipboardList className="w-5 h-5 text-gold-400" />,
       badge: 'الفواتير والخدمة',
-      targetRoles: ['Admin', 'Cashier'],
+      targetRoles: ['Admin'],
       summary: 'إدارة طلبات الصالة، حفظ الفواتير المعلقة، دمج ونقل الفواتير، وفصل الحالة التشغيلية عن الحالة المالية.',
       steps: [
         {
@@ -233,7 +233,7 @@ export default function UserManualView({ currentUser, onNavigateTab }: UserManua
       category: 'pos_tables',
       icon: <Users className="w-5 h-5 text-gold-400" />,
       badge: 'الذمم والآجل',
-      targetRoles: ['Admin', 'Cashier'],
+      targetRoles: ['Admin'],
       summary: 'متابعة حسابات العملاء الآجلة، وضع حدود الائتمان، تسجيل دفيعات السداد، وطباعة كشوف الحساب.',
       steps: [
         {
@@ -260,7 +260,7 @@ export default function UserManualView({ currentUser, onNavigateTab }: UserManua
       category: 'pos_tables',
       icon: <Award className="w-5 h-5 text-gold-400" />,
       badge: 'الولاء والعملاء',
-      targetRoles: ['Admin', 'Cashier'],
+      targetRoles: ['Admin'],
       summary: 'تسجيل بيانات العملاء، تجميع نقاط المشتريات تلقائياً، واستبدال النقاط بخصومات مادية.',
       steps: [
         {
@@ -282,7 +282,7 @@ export default function UserManualView({ currentUser, onNavigateTab }: UserManua
       category: 'pos_tables',
       icon: <FolderTree className="w-5 h-5 text-gold-400" />,
       badge: 'إدارة الصالة',
-      targetRoles: ['Admin', 'Cashier'],
+      targetRoles: ['Admin'],
       summary: 'عرض تفاعلي لطاولات الكافيه الـ ١٦، متابعة الطاولات المشغولة، وحجز الطاولات مسبقاً مع العربون.',
       steps: [
         {
@@ -438,7 +438,7 @@ export default function UserManualView({ currentUser, onNavigateTab }: UserManua
       category: 'finance_reports',
       icon: <Wallet className="w-5 h-5 text-gold-400" />,
       badge: 'تصفية الدرج',
-      targetRoles: ['Admin', 'Cashier'],
+      targetRoles: ['Admin'],
       summary: 'خطوات إغلاق الوردية، عد نقدية الدرج الفعلية، توثيق العجز أو الزيادة، وطباعة التقرير النهائي Z-Report.',
       steps: [
         {
@@ -501,7 +501,7 @@ export default function UserManualView({ currentUser, onNavigateTab }: UserManua
       category: 'system_integrations',
       icon: <RefreshCw className="w-5 h-5 text-gold-400" />,
       badge: 'المزامنة الفورية',
-      targetRoles: ['Admin', 'Cashier'],
+      targetRoles: ['Admin'],
       summary: 'ربط أجهزة الكافيه (كاشير ١ + كاشير ٢ + الموبايل) بمزامنة فائقة السرعة.',
       steps: [
         {
@@ -519,7 +519,7 @@ export default function UserManualView({ currentUser, onNavigateTab }: UserManua
       category: 'system_integrations',
       icon: <Printer className="w-5 h-5 text-gold-400" />,
       badge: 'الطباعة الحرارية',
-      targetRoles: ['Admin', 'Cashier'],
+      targetRoles: ['Admin'],
       summary: 'إعداد طابعات الفواتير الحرارية (Bluetooth / USB / LAN Network) بمقاسات 80mm و 58mm.',
       steps: [
         {
@@ -609,36 +609,11 @@ export default function UserManualView({ currentUser, onNavigateTab }: UserManua
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-1.5">
-              <button
-                type="button"
-                onClick={() => setActiveRoleView('Admin')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  activeRoleView === 'Admin'
-                    ? 'bg-gold-600 text-black font-extrabold shadow-md'
-                    : 'bg-gray-900/60 text-gray-400 hover:text-white border border-gray-800'
-                }`}
-              >
-                <span>👑 أدمن</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveRoleView('Cashier')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  activeRoleView === 'Cashier'
-                    ? 'bg-emerald-600 text-white font-extrabold shadow-md'
-                    : 'bg-gray-900/60 text-gray-400 hover:text-white border border-gray-800'
-                }`}
-              >
-                <span>☕ كاشير</span>
-              </button>
+            <div className="flex items-center justify-center">
+              <span className="px-4 py-1.5 rounded-xl text-xs font-black bg-gold-600 text-black shadow-md">
+                👑 دليل الأدمن والمدير العام
+              </span>
             </div>
-            {userActualRole !== 'Admin' && (
-              <p className="text-[10px] text-gray-500 text-center font-medium pt-1">
-                (أنت مسجل حالياً بصلاحية الكاشير)
-              </p>
-            )}
           </div>
         </div>
       </div>

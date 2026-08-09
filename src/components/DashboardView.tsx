@@ -41,7 +41,10 @@ import {
   Receipt,
   Package,
   MoreVertical,
-  Calculator
+  Calculator,
+  Sun,
+  Moon,
+  ArrowLeftRight
 } from 'lucide-react';
 import {
   AreaChart,
@@ -57,9 +60,10 @@ import {
   Legend
 } from 'recharts';
 import { dbService, isPurchaseExpense } from '../dbService';
-import { AppSettings, Customer, Invoice, Expense, AuditLog } from '../types';
+import { AppSettings, Customer, Invoice, Expense, AuditLog, Shift } from '../types';
 import SyncStatusIndicator from './SyncStatusIndicator';
 import { EldeebLogoFull } from './EldeebLogo';
+import ShiftHandoverModal from './ShiftHandoverModal';
 
 interface DashboardViewProps {
   settings: AppSettings;
@@ -86,13 +90,25 @@ export default function DashboardView({
 }: DashboardViewProps) {
   // 1. Reactive Datasets
   const [tick, setTick] = useState(0);
+  const [activeShift, setActiveShift] = useState<Shift | null>(() => dbService.getActiveShift());
+  const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
+
+  const refreshShiftState = () => {
+    setActiveShift(dbService.getActiveShift());
+  };
 
   useEffect(() => {
-    const handleSync = () => setTick(t => t + 1);
+    const handleSync = () => {
+      setTick(t => t + 1);
+      refreshShiftState();
+    };
+    refreshShiftState();
     window.addEventListener('cafe_db_synced_remote', handleSync);
+    window.addEventListener('shift_updated', handleSync);
     window.addEventListener('storage', handleSync);
     return () => {
       window.removeEventListener('cafe_db_synced_remote', handleSync);
+      window.removeEventListener('shift_updated', handleSync);
       window.removeEventListener('storage', handleSync);
     };
   }, []);
@@ -234,11 +250,27 @@ export default function DashboardView({
     }
   };
 
-  // Active shift cash drawer calculation
-  const activeShiftCash = useMemo(() => {
-    const drawer = dbService.getActiveDrawer();
-    return drawer ? (drawer.opening_balance + drawer.cash_in - drawer.cash_out) : 0;
-  }, []);
+  // Active shift cash drawer calculation (Single Source of Truth)
+  const shiftCashMetrics = useMemo(() => {
+    const shift = activeShift || dbService.getActiveShift();
+    if (shift) {
+      return {
+        opening_balance: shift.opening_balance,
+        cash_in: shift.cash_in,
+        cash_out: shift.cash_out,
+        expected_cash: shift.expected_cash
+      };
+    }
+    const drawer = cashDrawer;
+    return {
+      opening_balance: drawer?.opening_balance || 0,
+      cash_in: drawer?.cash_in || 0,
+      cash_out: drawer?.cash_out || 0,
+      expected_cash: drawer ? (drawer.opening_balance + drawer.cash_in - drawer.cash_out) : 0
+    };
+  }, [activeShift, cashDrawer, tick]);
+
+  const activeShiftCash = shiftCashMetrics.expected_cash;
 
   // 3. Core Calculations for Stats Grid
   const metrics = useMemo(() => {
@@ -808,6 +840,36 @@ export default function DashboardView({
         </div>
       </div>
 
+      {/* PENDING SHIFT HANDOVER ADMIN NOTIFICATION BANNER */}
+      {activeShift && activeShift.status === 'PENDING_HANDOVER' && (
+        <div className="w-full max-w-lg mx-auto bg-gradient-to-r from-amber-950/90 via-[#181206] to-amber-950/90 border-2 border-amber-500/60 rounded-2xl p-3.5 shadow-[0_0_20px_rgba(245,158,11,0.25)] flex flex-col sm:flex-row items-center justify-between gap-3 text-right select-none animate-pulse-soft">
+          <div className="flex items-start gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center font-black shrink-0 mt-0.5">
+              <Clock className="w-5 h-5 text-amber-400 animate-spin" style={{ animationDuration: '6s' }} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black text-amber-300">🔔 يوجد تسليم وردية معلّق</span>
+                <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30 font-black text-[10px]">
+                  {activeShift.shift_type === 'DAY' ? 'وردية النهار ☀️' : 'وردية المساء 🌙'}
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-300 mt-1 font-medium">
+                المسؤول: <strong className="text-white">{activeShift.cashier_name}</strong> | المتوقع: <strong className="text-amber-400">{activeShift.expected_cash} ج.م</strong> | عد الكاشير: <strong className="text-emerald-400">{activeShift.declared_cash ?? '—'} ج.م</strong>
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setIsShiftModalOpen(true)}
+            className="px-4 py-2 bg-gradient-to-r from-amber-500 to-gold-400 hover:from-amber-400 hover:to-gold-300 text-black font-black text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 active:scale-95"
+          >
+            <span>مراجعة واستلام الوردية 📥</span>
+          </button>
+        </div>
+      )}
+
       {/* ==================================================
           3.5. SMALL WIDGET: CURRENT CASH DRAWER BOOK BALANCE (شاشة الرصيد الدفتري للدرج)
           ================================================== */}
@@ -848,18 +910,54 @@ export default function DashboardView({
 
           {/* Breakdown pill badges */}
           <div className="flex items-center gap-1.5 flex-wrap text-[10px] font-bold font-mono">
-            <div className="bg-black/60 border border-gray-800 rounded-lg px-2 py-1 text-gray-300" title="الرصيد الافتتاحي للدرج">
+            <div className="bg-black/60 border border-gray-800 rounded-lg px-2 py-1 text-gray-300" title="الرصيد الافتتاحي للوردية الحالية">
               <span className="text-gray-500 text-[9px] block">الافتتاحي:</span>
-              <span className="text-gold-300">{(cashDrawer?.opening_balance || 0).toLocaleString('ar-EG')} ج</span>
+              <span className="text-gold-300">{shiftCashMetrics.opening_balance.toLocaleString('ar-EG')} ج</span>
             </div>
-            <div className="bg-emerald-950/40 border border-emerald-800/60 rounded-lg px-2 py-1 text-emerald-400" title="إجمالي المبيعات والنقدية الداخلة">
+            <div className="bg-emerald-950/40 border border-emerald-800/60 rounded-lg px-2 py-1 text-emerald-400" title="إجمالي المقبوضات النقدية للوردية الحالية">
               <span className="text-emerald-500/80 text-[9px] block">وارد (+):</span>
-              <span>+{(cashDrawer?.cash_in || 0).toLocaleString('ar-EG')} ج</span>
+              <span>+{shiftCashMetrics.cash_in.toLocaleString('ar-EG')} ج</span>
             </div>
-            <div className="bg-red-950/40 border border-red-800/60 rounded-lg px-2 py-1 text-red-400" title="إجمالي المصروفات والنقدية الخارجة">
+            <div className="bg-red-950/40 border border-red-800/60 rounded-lg px-2 py-1 text-red-400" title="إجمالي المصروفات النقدية للوردية الحالية">
               <span className="text-red-500/80 text-[9px] block">منصرف (-):</span>
-              <span>-{(cashDrawer?.cash_out || 0).toLocaleString('ar-EG')} ج</span>
+              <span>-{shiftCashMetrics.cash_out.toLocaleString('ar-EG')} ج</span>
             </div>
+          </div>
+        </div>
+
+        {/* Current Shift Info Row inside Cash Drawer Card */}
+        <div className="mt-2.5 pt-2 border-t border-[#D4AF37]/15 flex items-center justify-between text-[11px] gap-2">
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+            <span className="text-gray-400 font-bold shrink-0">الوردية الحالية:</span>
+            {activeShift ? (
+              <span className="font-black text-white flex items-center gap-1 shrink-0">
+                {activeShift.shift_type === 'DAY' ? 'وردية النهار ☀️' : 'وردية المساء 🌙'}
+                <span className="text-gray-400 text-[10px] font-normal">({activeShift.cashier_name})</span>
+              </span>
+            ) : (
+              <span className="text-gray-500 font-bold shrink-0">لا توجد وردية نشطة</span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {activeShift && (
+              <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border ${
+                activeShift.status === 'OPEN'
+                  ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-400'
+                  : 'bg-amber-950/40 border-amber-500/40 text-amber-300 animate-pulse'
+              }`}>
+                {activeShift.status === 'OPEN' ? 'مفتوحة 🟢' : 'معلقة ⏳'}
+              </span>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setIsShiftModalOpen(true)}
+              className="px-2.5 py-1 bg-gold-500/10 hover:bg-gold-500/20 text-gold-400 border border-gold-500/30 rounded-lg font-black text-[10px] transition-all cursor-pointer flex items-center gap-1 active:scale-95"
+            >
+              <ArrowLeftRight className="w-3 h-3 text-gold-500" />
+              <span>{activeShift?.status === 'PENDING_HANDOVER' ? 'استلام الوردية' : 'إدارة الوردية'}</span>
+            </button>
           </div>
         </div>
       </div>
@@ -1285,6 +1383,18 @@ export default function DashboardView({
           </div>
         )}
       </AnimatePresence>
+
+      {/* Shift Handover Modal */}
+      <ShiftHandoverModal
+        isOpen={isShiftModalOpen}
+        onClose={() => setIsShiftModalOpen(false)}
+        activeShift={activeShift}
+        onShiftUpdated={() => {
+          refreshShiftState();
+          setTick(t => t + 1);
+        }}
+        cashierName="الأدمن"
+      />
 
     </div>
   );

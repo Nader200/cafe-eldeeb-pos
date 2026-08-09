@@ -29,7 +29,7 @@ export default function UpdateModal({
   isOpen,
   updateInfo,
   onClose,
-  userRole = 'Cashier',
+  userRole = 'Admin',
   hasActiveInvoice = false
 }: UpdateModalProps) {
   if (!isOpen || !updateInfo) return null;
