@@ -63,6 +63,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y imagemagick
+          echo "ImageMagick version:"
+          convert --version
 
       - name: Generate Android App Icon
         run: |
@@ -85,11 +87,11 @@ jobs:
           mkdir -p android/app/src/main/res/mipmap-xxhdpi
           mkdir -p android/app/src/main/res/mipmap-xxxhdpi
 
-          magick "$LOGO" -auto-orient -resize 48x48^ -gravity center -extent 48x48 android/app/src/main/res/mipmap-mdpi/ic_launcher.png
-          magick "$LOGO" -auto-orient -resize 72x72^ -gravity center -extent 72x72 android/app/src/main/res/mipmap-hdpi/ic_launcher.png
-          magick "$LOGO" -auto-orient -resize 96x96^ -gravity center -extent 96x96 android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
-          magick "$LOGO" -auto-orient -resize 144x144^ -gravity center -extent 144x144 android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
-          magick "$LOGO" -auto-orient -resize 192x192^ -gravity center -extent 192x192 android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+          convert "$LOGO" -auto-orient -resize 48x48^ -gravity center -extent 48x48 android/app/src/main/res/mipmap-mdpi/ic_launcher.png
+          convert "$LOGO" -auto-orient -resize 72x72^ -gravity center -extent 72x72 android/app/src/main/res/mipmap-hdpi/ic_launcher.png
+          convert "$LOGO" -auto-orient -resize 96x96^ -gravity center -extent 96x96 android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
+          convert "$LOGO" -auto-orient -resize 144x144^ -gravity center -extent 144x144 android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
+          convert "$LOGO" -auto-orient -resize 192x192^ -gravity center -extent 192x192 android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
 
           cp android/app/src/main/res/mipmap-mdpi/ic_launcher.png android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
           cp android/app/src/main/res/mipmap-hdpi/ic_launcher.png android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
