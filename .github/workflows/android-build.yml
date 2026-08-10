@@ -59,11 +59,45 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
+      - name: Install ImageMagick
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
+
       - name: Generate Android App Icon
         run: |
-          npx @capacitor/assets generate \
-            --android \
-            --iconPath "src/Images/eldeeb-app-logo.png"
+          set -e
+
+          LOGO="src/Images/eldeeb-app-logo.png"
+
+          if [ ! -f "$LOGO" ]; then
+            echo "ERROR: Logo file not found: $LOGO"
+            exit 1
+          fi
+
+          echo "Using logo:"
+          file "$LOGO"
+          identify "$LOGO"
+
+          mkdir -p android/app/src/main/res/mipmap-mdpi
+          mkdir -p android/app/src/main/res/mipmap-hdpi
+          mkdir -p android/app/src/main/res/mipmap-xhdpi
+          mkdir -p android/app/src/main/res/mipmap-xxhdpi
+          mkdir -p android/app/src/main/res/mipmap-xxxhdpi
+
+          magick "$LOGO" -auto-orient -resize 48x48^ -gravity center -extent 48x48 android/app/src/main/res/mipmap-mdpi/ic_launcher.png
+          magick "$LOGO" -auto-orient -resize 72x72^ -gravity center -extent 72x72 android/app/src/main/res/mipmap-hdpi/ic_launcher.png
+          magick "$LOGO" -auto-orient -resize 96x96^ -gravity center -extent 96x96 android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
+          magick "$LOGO" -auto-orient -resize 144x144^ -gravity center -extent 144x144 android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
+          magick "$LOGO" -auto-orient -resize 192x192^ -gravity center -extent 192x192 android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+
+          cp android/app/src/main/res/mipmap-mdpi/ic_launcher.png android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
+          cp android/app/src/main/res/mipmap-hdpi/ic_launcher.png android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
+          cp android/app/src/main/res/mipmap-xhdpi/ic_launcher.png android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
+          cp android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
+          cp android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
+
+          echo "Android launcher icons generated successfully."
 
       - name: Install Gradle 8.7
         uses: gradle/actions/setup-gradle@v4
