@@ -59,10 +59,16 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
+      - name: Generate Android App Icon
+        run: |
+          npx @capacitor/assets generate \
+            --android \
+            --iconPath "src/Images/eldeeb-app-logo.png"
+
       - name: Install Gradle 8.7
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.7'
+          gradle-version: "8.7"
 
       - name: Generate Gradle Wrapper
         working-directory: android
