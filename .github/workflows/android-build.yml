@@ -68,7 +68,7 @@ jobs:
         run: |
           set -e
 
-          LOGO="src/Images/eldeeb-app-logo.png"
+          LOGO="src/assets/images/eldeeb-app-logo.png"
 
           if [ ! -f "$LOGO" ]; then
             echo "ERROR: Logo file not found: $LOGO"
