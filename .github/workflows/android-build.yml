@@ -59,12 +59,23 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
-      - name: Prepare Gradle Wrapper
+      - name: Install Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Generate Gradle Wrapper
         working-directory: android
         run: |
-          if [ ! -f "gradlew" ]; then
-            gradle wrapper --gradle-version 8.7
-          fi
+          gradle wrapper --gradle-version 8.7
+
+      - name: Verify Gradle Wrapper
+        working-directory: android
+        run: |
+          test -f gradlew
+          test -f gradle/wrapper/gradle-wrapper.jar
+          ls -lh gradlew
+          ls -lh gradle/wrapper/
 
       - name: Build Android Debug APK
         working-directory: android
