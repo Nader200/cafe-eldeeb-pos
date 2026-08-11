@@ -755,6 +755,16 @@ export const dbService = {
               }
             });
             localStorage.setItem(key, JSON.stringify(mergedItems));
+          } else if (key === KEYS.SETTINGS) {
+            const localSettings = getLocal<AppSettings | null>(KEYS.SETTINGS, null);
+            const serverSettings = val as AppSettings;
+            if (localSettings && localSettings.is_setup_completed && (!serverSettings || !serverSettings.is_setup_completed)) {
+              localStorage.setItem(key, JSON.stringify({ ...defaultSettings, ...serverSettings, ...localSettings, is_setup_completed: true }));
+            } else if (localSettings && localSettings.cafe_name && (!serverSettings || !serverSettings.cafe_name)) {
+              localStorage.setItem(key, JSON.stringify({ ...defaultSettings, ...serverSettings, ...localSettings }));
+            } else {
+              localStorage.setItem(key, JSON.stringify(val));
+            }
           } else {
             localStorage.setItem(key, JSON.stringify(val));
           }
@@ -3470,6 +3480,7 @@ export const dbService = {
   // --- App Settings ---
   getSettings: (): AppSettings => {
     const saved = getLocal<AppSettings>(KEYS.SETTINGS, defaultSettings);
+    const hasExistingCafeName = Boolean(saved?.cafe_name && saved.cafe_name.trim().length > 0);
     return {
       ...defaultSettings,
       ...saved,
@@ -3480,7 +3491,7 @@ export const dbService = {
       currency: saved?.currency ?? defaultSettings.currency,
       receipt_footer: saved?.receipt_footer ?? defaultSettings.receipt_footer,
       logo_path: saved?.logo_path ?? defaultSettings.logo_path,
-      is_setup_completed: saved?.is_setup_completed ?? defaultSettings.is_setup_completed
+      is_setup_completed: Boolean(saved?.is_setup_completed || hasExistingCafeName)
     };
   },
   saveSettings: (settings: Partial<AppSettings>) => {

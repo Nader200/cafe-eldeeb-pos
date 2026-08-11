@@ -6,6 +6,8 @@
 import firebaseConfig from '../../firebase-applet-config.json';
 import { auth } from './firebaseClient';
 import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { GoogleSignIn } from '@capawesome/capacitor-google-sign-in';
+import { Capacitor } from '@capacitor/core';
 
 export interface GoogleDriveUser {
   email: string;
@@ -76,7 +78,62 @@ export async function fetchGoogleProfile(accessToken: string): Promise<{ email: 
  * Trigger OAuth Sign-In flow with Google Identity Services or Custom Token Prompt
  */
 export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleDriveUser | null> {
-  // 1. Primary: Try Firebase Auth Google Popup
+  const configClientId = (firebaseConfig as any)?.oAuthClientId || (firebaseConfig as any)?.OAuthClientId;
+  const envClientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
+  const storedSettings = ((): any => {
+    try {
+      const s = localStorage.getItem('cafe_settings') || localStorage.getItem('cafe_eldeeb_settings');
+      return s ? JSON.parse(s) : null;
+    } catch { return null; }
+  })();
+  const settingsClientId = storedSettings?.google_drive_client_id;
+
+  const resolvedClientId = (clientId && clientId.includes('.apps.googleusercontent.com'))
+    ? clientId
+    : (settingsClientId && settingsClientId.includes('.apps.googleusercontent.com'))
+      ? settingsClientId
+      : (envClientId && envClientId.includes('.apps.googleusercontent.com'))
+        ? envClientId
+        : (configClientId && configClientId.includes('.apps.googleusercontent.com'))
+          ? configClientId
+          : '864337937711-gi69esgs44rn7d2li3mb6bfjhdspe2pv.apps.googleusercontent.com';
+
+  // 0. On Native Android/iOS, use CapAwesome Native Google Sign-In
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const scopes = [
+        DRIVE_FILE_SCOPE,
+        'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/userinfo.profile'
+      ];
+      try {
+        await GoogleSignIn.initialize({
+          clientId: resolvedClientId,
+          scopes
+        });
+      } catch (initErr) {
+        // May already be initialized
+      }
+
+      const result = await GoogleSignIn.signIn();
+      const tokenStr = result.accessToken || result.idToken;
+
+      if (tokenStr) {
+        const profile = await fetchGoogleProfile(tokenStr);
+        return {
+          accessToken: tokenStr,
+          expiresAt: Date.now() + 3600 * 1000,
+          email: profile?.email || result.email || 'user@google.com',
+          name: profile?.name || result.displayName || result.givenName || 'مستخدم Google',
+          picture: profile?.picture || result.imageUrl || undefined
+        };
+      }
+    } catch (nativeErr) {
+      console.warn('Native Google Sign-In failed for Drive:', nativeErr);
+    }
+  }
+
+  // 1. Primary for Web: Try Firebase Auth Google Popup
   try {
     const provider = new GoogleAuthProvider();
     provider.addScope(DRIVE_FILE_SCOPE);
@@ -128,7 +185,7 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
         const envClientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
         const storedSettings = ((): any => {
           try {
-            const s = localStorage.getItem('cafe_eldeeb_settings');
+            const s = localStorage.getItem('cafe_settings') || localStorage.getItem('cafe_eldeeb_settings');
             return s ? JSON.parse(s) : null;
           } catch { return null; }
         })();
@@ -142,7 +199,7 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
               ? envClientId
               : (configClientId && configClientId.includes('.apps.googleusercontent.com'))
                 ? configClientId
-                : null;
+                : '864337937711-gi69esgs44rn7d2li3mb6bfjhdspe2pv.apps.googleusercontent.com';
 
         if (!resolvedClientId) {
           console.warn('No valid Google OAuth Client ID available for GIS token client.');

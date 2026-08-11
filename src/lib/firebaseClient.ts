@@ -4,7 +4,7 @@
  */
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, signInWithEmailAndPassword, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, setPersistence, browserLocalPersistence, indexedDBLocalPersistence } from 'firebase/auth';
 import {
   initializeFirestore,
   getFirestore,
@@ -73,6 +73,15 @@ export const db = (() => {
 console.log("Firestore App:", db.app.name);
 
 export const auth = getAuth(app);
+
+// Configure persistent auth state for browser / Capacitor WebView
+if (typeof window !== 'undefined') {
+  setPersistence(auth, indexedDBLocalPersistence).catch(() => {
+    setPersistence(auth, browserLocalPersistence).catch((err) => {
+      console.warn('[Firebase Auth] Persistence set warning:', err);
+    });
+  });
+}
 
 // Auto-login check for Firebase Authentication
 if (typeof window !== 'undefined') {

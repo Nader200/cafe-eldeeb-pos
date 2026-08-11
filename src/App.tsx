@@ -552,13 +552,26 @@ function AppContent() {
   });
 
   // --- First-time Setup Wizard check ---
-  if (!settings || !settings.is_setup_completed) {
+  const rawCafeSettingsStr = safeStorage.getItem('cafe_settings');
+  let parsedRawSettings: any = null;
+  try { parsedRawSettings = rawCafeSettingsStr ? JSON.parse(rawCafeSettingsStr) : null; } catch (e) {}
+
+  const activeSettings = settings || dbService.getSettings();
+  const isSetupDone = Boolean(
+    (parsedRawSettings && (parsedRawSettings.is_setup_completed === true || (parsedRawSettings.cafe_name && parsedRawSettings.cafe_name.trim().length > 0))) ||
+    (activeSettings && (activeSettings.is_setup_completed || (activeSettings.cafe_name && activeSettings.cafe_name.trim().length > 0))) ||
+    safeStorage.getItem('cafe_setup_completed') === 'true'
+  );
+
+  if (!isSetupDone) {
     return (
       <SetupWizard
         onComplete={(formData) => {
           console.log('=== SETUP WIZARD ONCOMPLETE STARTED ===');
           console.log('[STEP 1] Received formData from wizard:', formData);
           
+          safeStorage.setItem('cafe_setup_completed', 'true');
+
           const currentSettings = dbService.getSettings();
           console.log('[STEP 2] Current settings before update:', currentSettings);
 

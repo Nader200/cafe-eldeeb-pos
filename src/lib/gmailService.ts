@@ -6,6 +6,8 @@
 import firebaseConfig from '../../firebase-applet-config.json';
 import { auth } from './firebaseClient';
 import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { GoogleSignIn } from '@capawesome/capacitor-google-sign-in';
+import { Capacitor } from '@capacitor/core';
 
 export interface GmailUser {
   email: string;
@@ -44,7 +46,63 @@ export function loadGisScript(): Promise<void> {
  * Prompt user for Gmail OAuth token using Firebase Auth popup or Google Identity Services (GIS)
  */
 export async function requestGmailAuth(clientId?: string): Promise<GmailUser | null> {
-  // 1. Primary: Try Firebase Auth Google Popup
+  const configClientId = (firebaseConfig as any)?.oAuthClientId || (firebaseConfig as any)?.OAuthClientId;
+  const envClientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
+  const storedSettings = ((): any => {
+    try {
+      const s = localStorage.getItem('cafe_settings') || localStorage.getItem('cafe_eldeeb_settings');
+      return s ? JSON.parse(s) : null;
+    } catch { return null; }
+  })();
+  const settingsClientId = storedSettings?.google_drive_client_id || storedSettings?.gmail_client_id;
+
+  const resolvedClientId = (clientId && clientId.includes('.apps.googleusercontent.com'))
+    ? clientId
+    : (settingsClientId && settingsClientId.includes('.apps.googleusercontent.com'))
+      ? settingsClientId
+      : (envClientId && envClientId.includes('.apps.googleusercontent.com'))
+        ? envClientId
+        : (configClientId && configClientId.includes('.apps.googleusercontent.com'))
+          ? configClientId
+          : '864337937711-gi69esgs44rn7d2li3mb6bfjhdspe2pv.apps.googleusercontent.com';
+
+  // 0. On Native Android/iOS, use CapAwesome Native Google Sign-In
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const scopes = [
+        'https://www.googleapis.com/auth/gmail.send',
+        'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/userinfo.profile'
+      ];
+      try {
+        await GoogleSignIn.initialize({
+          clientId: resolvedClientId,
+          scopes
+        });
+      } catch (initErr) {
+        // May already be initialized
+      }
+
+      const result = await GoogleSignIn.signIn();
+      const tokenStr = result.accessToken || result.idToken;
+
+      if (tokenStr) {
+        const profile = await fetchGmailProfile(tokenStr);
+        const userEmail = result.email || profile?.emailAddress || 'user@gmail.com';
+        return {
+          email: userEmail,
+          accessToken: tokenStr,
+          access_token: tokenStr,
+          messagesTotal: profile?.messagesTotal,
+          threadsTotal: profile?.threadsTotal
+        };
+      }
+    } catch (nativeErr) {
+      console.warn('Native Google Sign-In failed for Gmail:', nativeErr);
+    }
+  }
+
+  // 1. Primary for Web: Try Firebase Auth Google Popup
   try {
     const provider = new GoogleAuthProvider();
     provider.addScope('https://www.googleapis.com/auth/gmail.send');
@@ -89,7 +147,7 @@ export async function requestGmailAuth(clientId?: string): Promise<GmailUser | n
     const envClientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
     const storedSettings = ((): any => {
       try {
-        const s = localStorage.getItem('cafe_eldeeb_settings');
+        const s = localStorage.getItem('cafe_settings') || localStorage.getItem('cafe_eldeeb_settings');
         return s ? JSON.parse(s) : null;
       } catch { return null; }
     })();
@@ -103,7 +161,7 @@ export async function requestGmailAuth(clientId?: string): Promise<GmailUser | n
           ? envClientId
           : (configClientId && configClientId.includes('.apps.googleusercontent.com'))
             ? configClientId
-            : null;
+            : '864337937711-gi69esgs44rn7d2li3mb6bfjhdspe2pv.apps.googleusercontent.com';
 
     if (!resolvedClientId) {
       console.warn('No valid Google OAuth Client ID available for GIS token client.');

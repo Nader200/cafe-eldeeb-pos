@@ -22,18 +22,6 @@ const DEVICE_ID_KEY = 'cafe_device_id';
 const DEFAULT_CAFE_ID = 'main_cafe_eldeeb';
 
 function getDeviceId(): string {
-  if (typeof window !== 'undefined' && window.sessionStorage) {
-    try {
-      let tabDevId = window.sessionStorage.getItem('cafe_tab_device_id');
-      if (!tabDevId) {
-        tabDevId = 'dev_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36);
-        window.sessionStorage.setItem('cafe_tab_device_id', tabDevId);
-      }
-      return tabDevId;
-    } catch (e) {
-      // Fallback if sessionStorage is disabled
-    }
-  }
   let devId = safeStorage.getItem(DEVICE_ID_KEY);
   if (!devId) {
     devId = 'dev_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36);
@@ -194,16 +182,44 @@ class FirebaseSyncService {
           ) {
             this.isProcessingRemoteChange = true;
             try {
+              if (key === 'cafe_settings') {
+                const existingLocalStr = safeStorage.getItem('cafe_settings');
+                let existingLocal: any = null;
+                try { existingLocal = existingLocalStr ? JSON.parse(existingLocalStr) : null; } catch (e) {}
+
+                const isLocallyComplete = Boolean(
+                  (existingLocal && (existingLocal.is_setup_completed === true || (existingLocal.cafe_name && existingLocal.cafe_name.trim().length > 0))) ||
+                  safeStorage.getItem('cafe_setup_completed') === 'true'
+                );
+
+                const isRemoteComplete = Boolean(
+                  remoteData &&
+                  (remoteData.is_setup_completed === true || (remoteData.cafe_name && remoteData.cafe_name.trim().length > 0))
+                );
+
+                if (isLocallyComplete) {
+                  safeStorage.setItem('cafe_setup_completed', 'true');
+                  if (!isRemoteComplete) {
+                    // Local settings are complete, but remote snapshot is empty/incomplete.
+                    // DO NOT OVERWRITE local settings with empty/incomplete remote data!
+                    console.warn('[FirebaseSync] Guarded local complete cafe_settings from incomplete remote snapshot');
+                    const repairedLocal = {
+                      ...(existingLocal || {}),
+                      is_setup_completed: true
+                    };
+                    safeStorage.setItem('cafe_settings', JSON.stringify(repairedLocal));
+                    safeStorage.setItem(localMetaKey, String(Date.now()));
+                    this.pushKeyToCloud('cafe_settings', repairedLocal);
+                    return;
+                  }
+                } else if (isRemoteComplete) {
+                  safeStorage.setItem('cafe_setup_completed', 'true');
+                }
+              }
+
               if (remoteData === null || remoteData === undefined) {
                 safeStorage.removeItem(key);
               } else {
-                if (key === 'cafe_settings') {
-                  const setupWasDoneLocally = safeStorage.getItem('cafe_setup_completed') === 'true';
-                  if (remoteData.is_setup_completed === true || setupWasDoneLocally) {
-                    remoteData.is_setup_completed = true;
-                    safeStorage.setItem('cafe_setup_completed', 'true');
-                  }
-                }
                 safeStorage.setItem(key, JSON.stringify(remoteData));
               }
               safeStorage.setItem(localMetaKey, String(remoteUpdatedAt));
