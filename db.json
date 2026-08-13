@@ -758,7 +758,7 @@
     "printer_name": "Bluetooth-Thermal-XP80",
     "pin_code": "1234",
     "pin_protection_enabled": false,
-    "updated_at": "2026-08-08T20:29:20.036Z",
+    "updated_at": "2026-08-12T13:23:08.179Z",
     "reminder_days_friendly": 7,
     "reminder_days_statement": 15,
     "reminder_days_final": 30,
@@ -798,7 +798,7 @@
     "employee_consumption_policy": "DEDUCT",
     "custom_expense_categories": [],
     "auto_update_checks_enabled": true,
-    "last_update_check_date": "2026-08-08T20:29:20.032Z",
+    "last_update_check_date": "2026-08-12T13:23:08.177Z",
     "last_installed_version": "5.0.0",
     "force_update_enabled": false
   },
@@ -2320,6 +2320,17 @@
   "cafe_partner_drawings": [],
   "cafe_update_logs": [
     {
+      "id": "upd_1786540988201_y44k",
+      "timestamp": "2026-08-12T13:23:08.201Z",
+      "action": "CHECK_FOR_UPDATES",
+      "installed_version": "5.0.0",
+      "remote_version": "4.3.0",
+      "platform": "android",
+      "status": "INFO",
+      "details": "النظام يحدث بالفعل إلى أحدث إصدار (5.0.0)",
+      "user_role": "Admin"
+    },
+    {
       "id": "upd_1786220960109_pk4b",
       "timestamp": "2026-08-08T20:29:20.109Z",
       "action": "CHECK_FOR_UPDATES",
@@ -3407,17 +3418,39 @@
       "status": "WARNING",
       "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
       "user_role": "Cashier"
-    },
+    }
+  ],
+  "cafe_shifts": [
     {
-      "id": "upd_1785582502709_1yap",
-      "timestamp": "2026-08-01T11:08:22.709Z",
-      "action": "UPDATE_DISMISSED",
-      "installed_version": "4.2.5",
-      "remote_version": "4.3.0",
-      "platform": "web",
-      "status": "INFO",
-      "details": "تم تأجيل تثبيت التحديث (4.3.0) بواسطة Admin",
-      "user_role": "Admin"
+      "id": "shift_1786246390923",
+      "shift_type": "DAY",
+      "cashier_name": "أدمن النظام / نادر الديب (Admin)",
+      "status": "PENDING_HANDOVER",
+      "opening_balance": 3200,
+      "cash_in": 0,
+      "cash_out": 0,
+      "expected_cash": 3200,
+      "started_at": "2026-08-09T03:33:10.923Z",
+      "created_at": "2026-08-09T03:33:10.923Z",
+      "updated_at": "2026-08-09T10:03:04.329Z",
+      "ended_at": "2026-08-09T10:03:04.329Z",
+      "declared_cash": 3200,
+      "discrepancy": 0
+    }
+  ],
+  "cafe_shift_handovers": [
+    {
+      "id": "handover_1786269816228",
+      "shift_id": "shift_1786246390923",
+      "outgoing_user": "أدمن النظام / نادر الديب (Admin)",
+      "incoming_user": "الأدمن",
+      "handed_amount": 3200,
+      "accepted_amount": 3200,
+      "discrepancy": 0,
+      "discrepancy_reason": null,
+      "notes": "تسليم واستلام وردية من أدمن النظام / نادر الديب (Admin) إلى الأدمن",
+      "handover_timestamp": "2026-08-09T10:03:36.227Z",
+      "created_at": "2026-08-09T10:03:36.227Z"
     }
   ]
 }
