@@ -98,7 +98,7 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
           ? configClientId
           : '864337937711-gi69esgs44rn7d2li3mb6bfjhdspe2pv.apps.googleusercontent.com';
 
-  // 0. On Native Android/iOS, use CapAwesome Native Google Sign-In
+  // 0. On Native Android/iOS, try CapAwesome Native Google Sign-In first
   if (Capacitor.isNativePlatform()) {
     try {
       const scopes = [
@@ -116,12 +116,11 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
       }
 
       const result = await GoogleSignIn.signIn();
-      const tokenStr = result.accessToken || result.idToken;
-
-      if (tokenStr) {
-        const profile = await fetchGoogleProfile(tokenStr);
+      // Ensure accessToken is a real OAuth2 access token (not an ID Token starting with eyJ)
+      if (result.accessToken && !result.accessToken.startsWith('eyJ')) {
+        const profile = await fetchGoogleProfile(result.accessToken);
         return {
-          accessToken: tokenStr,
+          accessToken: result.accessToken,
           expiresAt: Date.now() + 3600 * 1000,
           email: profile?.email || result.email || 'user@google.com',
           name: profile?.name || result.displayName || result.givenName || 'مستخدم Google',
@@ -129,40 +128,16 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
         };
       }
     } catch (nativeErr) {
-      console.warn('Native Google Sign-In failed for Drive:', nativeErr);
+      console.warn('Native Google Sign-In skipped or failed for Drive:', nativeErr);
     }
   }
 
-  // 1. Primary for Web: Try Firebase Auth Google Popup
-  try {
-    const provider = new GoogleAuthProvider();
-    provider.addScope(DRIVE_FILE_SCOPE);
-    provider.addScope('https://www.googleapis.com/auth/userinfo.email');
-    provider.addScope('https://www.googleapis.com/auth/userinfo.profile');
-    provider.setCustomParameters({ prompt: 'select_account' });
-
-    const result = await signInWithPopup(auth, provider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    const token = credential?.accessToken;
-    const user = result.user;
-
-    if (token) {
-      return {
-        accessToken: token,
-        expiresAt: Date.now() + 3600 * 1000,
-        email: user.email || 'user@google.com',
-        name: user.displayName || 'مستخدم Google',
-        picture: user.photoURL || undefined
-      };
-    }
-  } catch (fbErr: any) {
-    console.warn('Firebase Auth Google popup warning for Drive:', fbErr?.code || fbErr?.message || fbErr);
-  }
-
-  // 2. Secondary: Fallback to GIS (Google Identity Services)
+  // 1. Primary for Web & WebView: GIS (Google Identity Services) Token Client
+  // GIS Token Client is popup-based, does NOT trigger redirects, does NOT rely on sessionStorage,
+  // and directly yields a valid OAuth2 Access Token for Drive API.
   await loadGisScript();
 
-  return new Promise((resolve) => {
+  const gisUser = await new Promise<GoogleDriveUser | null>((resolve) => {
     let hasResolved = false;
     const safeResolve = (user: GoogleDriveUser | null) => {
       if (!hasResolved) {
@@ -172,7 +147,6 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
       }
     };
 
-    // Safety timeout: 45 seconds maximum for popup completion
     const timeoutId = setTimeout(() => {
       console.warn('Google Drive auth timed out or popup closed');
       safeResolve(null);
@@ -181,32 +155,6 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
     const google = (window as any).google;
     if (google?.accounts?.oauth2) {
       try {
-        const configClientId = (firebaseConfig as any)?.oAuthClientId || (firebaseConfig as any)?.OAuthClientId;
-        const envClientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
-        const storedSettings = ((): any => {
-          try {
-            const s = localStorage.getItem('cafe_settings') || localStorage.getItem('cafe_eldeeb_settings');
-            return s ? JSON.parse(s) : null;
-          } catch { return null; }
-        })();
-        const settingsClientId = storedSettings?.google_drive_client_id;
-
-        const resolvedClientId = (clientId && clientId.includes('.apps.googleusercontent.com'))
-          ? clientId
-          : (settingsClientId && settingsClientId.includes('.apps.googleusercontent.com'))
-            ? settingsClientId
-            : (envClientId && envClientId.includes('.apps.googleusercontent.com'))
-              ? envClientId
-              : (configClientId && configClientId.includes('.apps.googleusercontent.com'))
-                ? configClientId
-                : '864337937711-gi69esgs44rn7d2li3mb6bfjhdspe2pv.apps.googleusercontent.com';
-
-        if (!resolvedClientId) {
-          console.warn('No valid Google OAuth Client ID available for GIS token client.');
-          safeResolve(null);
-          return;
-        }
-
         const client = google.accounts.oauth2.initTokenClient({
           client_id: resolvedClientId,
           scope: `${DRIVE_FILE_SCOPE} https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile`,
@@ -250,6 +198,38 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
       safeResolve(null);
     }
   });
+
+  if (gisUser) {
+    return gisUser;
+  }
+
+  // 2. Secondary Fallback: Try Firebase Auth Google Popup (only if GIS was blocked)
+  try {
+    const provider = new GoogleAuthProvider();
+    provider.addScope(DRIVE_FILE_SCOPE);
+    provider.addScope('https://www.googleapis.com/auth/userinfo.email');
+    provider.addScope('https://www.googleapis.com/auth/userinfo.profile');
+    provider.setCustomParameters({ prompt: 'select_account' });
+
+    const result = await signInWithPopup(auth, provider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    const token = credential?.accessToken;
+    const user = result.user;
+
+    if (token) {
+      return {
+        accessToken: token,
+        expiresAt: Date.now() + 3600 * 1000,
+        email: user.email || 'user@google.com',
+        name: user.displayName || 'مستخدم Google',
+        picture: user.photoURL || undefined
+      };
+    }
+  } catch (fbErr: any) {
+    console.warn('Firebase Auth Google popup warning for Drive:', fbErr?.code || fbErr?.message || fbErr);
+  }
+
+  return null;
 }
 
 /**

@@ -66,7 +66,7 @@ export async function requestGmailAuth(clientId?: string): Promise<GmailUser | n
           ? configClientId
           : '864337937711-gi69esgs44rn7d2li3mb6bfjhdspe2pv.apps.googleusercontent.com';
 
-  // 0. On Native Android/iOS, use CapAwesome Native Google Sign-In
+  // 0. On Native Android/iOS, try CapAwesome Native Google Sign-In first
   if (Capacitor.isNativePlatform()) {
     try {
       const scopes = [
@@ -84,51 +84,29 @@ export async function requestGmailAuth(clientId?: string): Promise<GmailUser | n
       }
 
       const result = await GoogleSignIn.signIn();
-      const tokenStr = result.accessToken || result.idToken;
-
-      if (tokenStr) {
-        const profile = await fetchGmailProfile(tokenStr);
+      // Ensure accessToken is a real OAuth2 access token (not an ID Token starting with eyJ)
+      if (result.accessToken && !result.accessToken.startsWith('eyJ')) {
+        const profile = await fetchGmailProfile(result.accessToken);
         const userEmail = result.email || profile?.emailAddress || 'user@gmail.com';
         return {
           email: userEmail,
-          accessToken: tokenStr,
-          access_token: tokenStr,
+          accessToken: result.accessToken,
+          access_token: result.accessToken,
           messagesTotal: profile?.messagesTotal,
           threadsTotal: profile?.threadsTotal
         };
       }
     } catch (nativeErr) {
-      console.warn('Native Google Sign-In failed for Gmail:', nativeErr);
+      console.warn('Native Google Sign-In skipped or failed for Gmail:', nativeErr);
     }
   }
 
-  // 1. Primary for Web: Try Firebase Auth Google Popup
-  try {
-    const provider = new GoogleAuthProvider();
-    provider.addScope('https://www.googleapis.com/auth/gmail.send');
-    provider.addScope('https://www.googleapis.com/auth/userinfo.email');
-    provider.setCustomParameters({ prompt: 'select_account' });
-
-    const result = await signInWithPopup(auth, provider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    const token = credential?.accessToken;
-    const userEmail = result.user?.email || 'user@gmail.com';
-
-    if (token) {
-      return {
-        email: userEmail,
-        accessToken: token,
-        access_token: token
-      };
-    }
-  } catch (fbErr: any) {
-    console.warn('Firebase Auth Google popup warning:', fbErr?.code || fbErr?.message || fbErr);
-  }
-
-  // 2. Secondary: Fallback to GIS (Google Identity Services)
+  // 1. Primary for Web & WebView: GIS (Google Identity Services) Token Client
+  // GIS Token Client is popup-based, does NOT trigger redirects, does NOT rely on sessionStorage,
+  // and directly yields a valid OAuth2 Access Token for Gmail API.
   await loadGisScript();
 
-  return new Promise((resolve) => {
+  const gisUser = await new Promise<GmailUser | null>((resolve) => {
     let hasResolved = false;
     const safeResolve = (user: GmailUser | null) => {
       if (!hasResolved) {
@@ -143,38 +121,12 @@ export async function requestGmailAuth(clientId?: string): Promise<GmailUser | n
       safeResolve(null);
     }, 45000);
 
-    const configClientId = (firebaseConfig as any)?.oAuthClientId || (firebaseConfig as any)?.OAuthClientId;
-    const envClientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
-    const storedSettings = ((): any => {
-      try {
-        const s = localStorage.getItem('cafe_settings') || localStorage.getItem('cafe_eldeeb_settings');
-        return s ? JSON.parse(s) : null;
-      } catch { return null; }
-    })();
-    const settingsClientId = storedSettings?.google_drive_client_id || storedSettings?.gmail_client_id;
-
-    const resolvedClientId = (clientId && clientId.includes('.apps.googleusercontent.com'))
-      ? clientId
-      : (settingsClientId && settingsClientId.includes('.apps.googleusercontent.com'))
-        ? settingsClientId
-        : (envClientId && envClientId.includes('.apps.googleusercontent.com'))
-          ? envClientId
-          : (configClientId && configClientId.includes('.apps.googleusercontent.com'))
-            ? configClientId
-            : '864337937711-gi69esgs44rn7d2li3mb6bfjhdspe2pv.apps.googleusercontent.com';
-
-    if (!resolvedClientId) {
-      console.warn('No valid Google OAuth Client ID available for GIS token client.');
-      safeResolve(null);
-      return;
-    }
-
     const google = (window as any).google;
     if (google?.accounts?.oauth2) {
       try {
         const client = google.accounts.oauth2.initTokenClient({
           client_id: resolvedClientId,
-          scope: 'https://mail.google.com/ https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile',
+          scope: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile',
           callback: async (response: any) => {
             if (response && response.access_token && !response.error) {
               const token = response.access_token;
@@ -214,6 +166,35 @@ export async function requestGmailAuth(clientId?: string): Promise<GmailUser | n
       safeResolve(null);
     }
   });
+
+  if (gisUser) {
+    return gisUser;
+  }
+
+  // 2. Secondary Fallback: Try Firebase Auth Google Popup (only if GIS was blocked)
+  try {
+    const provider = new GoogleAuthProvider();
+    provider.addScope('https://www.googleapis.com/auth/gmail.send');
+    provider.addScope('https://www.googleapis.com/auth/userinfo.email');
+    provider.setCustomParameters({ prompt: 'select_account' });
+
+    const result = await signInWithPopup(auth, provider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    const token = credential?.accessToken;
+    const userEmail = result.user?.email || 'user@gmail.com';
+
+    if (token) {
+      return {
+        email: userEmail,
+        accessToken: token,
+        access_token: token
+      };
+    }
+  } catch (fbErr: any) {
+    console.warn('Firebase Auth Google popup warning:', fbErr?.code || fbErr?.message || fbErr);
+  }
+
+  return null;
 }
 
 /**
