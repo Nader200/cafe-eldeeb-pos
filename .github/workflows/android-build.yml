@@ -59,6 +59,15 @@ jobs:
           test -f android/gradle/wrapper/gradle-wrapper.jar
           echo "Android project verified successfully."
 
+      - name: Ensure Valid Gradle Wrapper
+        working-directory: android
+        run: |
+          if ! unzip -t gradle/wrapper/gradle-wrapper.jar 2>/dev/null | grep -q "GradleWrapperMain.class"; then
+            echo "gradle-wrapper.jar is invalid. Fetching official Gradle 8.7 wrapper jar..."
+            curl -sSL -o gradle/wrapper/gradle-wrapper.jar "https://raw.githubusercontent.com/gradle/gradle/v8.7.0/gradle/wrapper/gradle-wrapper.jar"
+          fi
+          echo "Gradle wrapper verified."
+
       - name: Build Android Debug APK
         working-directory: android
         run: |
