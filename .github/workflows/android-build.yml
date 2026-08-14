@@ -31,7 +31,12 @@ jobs:
 
       - name: Configure Android SDK
         run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
           yes | sdkmanager --licenses || true
+
+      - name: Install Android SDK packages
+        run: |
           sdkmanager "platform-tools"
           sdkmanager "platforms;android-35"
           sdkmanager "build-tools;35.0.0"
@@ -48,27 +53,54 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
+      - name: Repair Gradle Wrapper
+        working-directory: android
+        run: |
+          mkdir -p gradle/wrapper
+
+          curl -fL \
+            "https://raw.githubusercontent.com/gradle/gradle/v8.7.0/gradle/wrapper/gradle-wrapper.jar" \
+            -o gradle/wrapper/gradle-wrapper.jar
+
+          if [ ! -s gradle/wrapper/gradle-wrapper.jar ]; then
+            echo "ERROR: Gradle wrapper JAR was not downloaded."
+            exit 1
+          fi
+
+          if ! unzip -t gradle/wrapper/gradle-wrapper.jar >/dev/null 2>&1; then
+            echo "ERROR: Downloaded Gradle wrapper JAR is invalid."
+            exit 1
+          fi
+
+          if ! unzip -l gradle/wrapper/gradle-wrapper.jar | grep -q "org/gradle/wrapper/GradleWrapperMain.class"; then
+            echo "ERROR: GradleWrapperMain.class is missing."
+            exit 1
+          fi
+
+          echo "Gradle wrapper JAR repaired successfully."
+
       - name: Verify Gradle Wrapper
         working-directory: android
         run: |
+          test -f gradlew
+          test -f gradle/wrapper/gradle-wrapper.jar
           chmod +x gradlew
 
-          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
-            echo "Gradle wrapper JAR missing. Downloading official Gradle 8.7 wrapper JAR..."
-            curl -fL \
-              -o gradle/wrapper/gradle-wrapper.jar \
-              https://raw.githubusercontent.com/gradle/gradle/v8.7.0/gradle/wrapper/gradle-wrapper.jar
-          fi
+          ./gradlew --version
 
-          unzip -t gradle/wrapper/gradle-wrapper.jar >/dev/null
-
-          echo "Gradle wrapper is valid."
+          echo "Android Gradle Wrapper verified successfully."
 
       - name: Build Android Debug APK
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace
+
+      - name: Verify APK
+        run: |
+          test -f android/app/build/outputs/apk/debug/app-debug.apk
+          ls -lh android/app/build/outputs/apk/debug/app-debug.apk
+          echo "APK created successfully."
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
