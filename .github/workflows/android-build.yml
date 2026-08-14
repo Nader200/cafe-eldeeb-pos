@@ -53,6 +53,176 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
+      - name: Generate valid Android launcher icons
+        run: |
+          python3 -m pip install --quiet Pillow
+
+          python3 - <<'PY'
+          import base64
+          import io
+          import os
+          from PIL import Image
+
+          source = "src/assets/images/eldeeb_logo_base64.txt"
+
+          print(f"Reading logo source: {source}")
+
+          if not os.path.isfile(source):
+              raise RuntimeError(
+                  f"Logo source file not found: {source}"
+              )
+
+          with open(source, "r", encoding="utf-8") as f:
+              data = f.read().strip()
+
+          prefix = "data:image/png;base64,"
+
+          if data.startswith(prefix):
+              data = data[len(prefix):]
+
+          try:
+              raw = base64.b64decode(data, validate=True)
+          except Exception as e:
+              raise RuntimeError(
+                  f"Base64 decoding failed: {e}"
+              )
+
+          png_header = b"\x89PNG\r\n\x1a\n"
+
+          if raw[:8] != png_header:
+              raise RuntimeError(
+                  "Decoded logo does not contain a valid PNG header."
+              )
+
+          print("Original logo PNG header: VALID")
+
+          try:
+              image = Image.open(io.BytesIO(raw)).convert("RGBA")
+              image.load()
+          except Exception as e:
+              raise RuntimeError(
+                  f"Could not open decoded PNG: {e}"
+              )
+
+          print(
+              f"Original logo size: {image.width}x{image.height}"
+          )
+
+          sizes = {
+              "mdpi": 48,
+              "hdpi": 72,
+              "xhdpi": 96,
+              "xxhdpi": 144,
+              "xxxhdpi": 192,
+          }
+
+          for density, size in sizes.items():
+
+              directory = (
+                  f"android/app/src/main/res/mipmap-{density}"
+              )
+
+              os.makedirs(directory, exist_ok=True)
+
+              # Main launcher icon
+              resized = image.resize(
+                  (size, size),
+                  Image.Resampling.LANCZOS
+              )
+
+              launcher_path = os.path.join(
+                  directory,
+                  "ic_launcher.png"
+              )
+
+              resized.save(
+                  launcher_path,
+                  format="PNG",
+                  optimize=True
+              )
+
+              # Round launcher icon
+              round_path = os.path.join(
+                  directory,
+                  "ic_launcher_round.png"
+              )
+
+              resized.save(
+                  round_path,
+                  format="PNG",
+                  optimize=True
+              )
+
+              # Adaptive foreground
+              foreground_size = round(size * 2.25)
+
+              foreground = image.resize(
+                  (foreground_size, foreground_size),
+                  Image.Resampling.LANCZOS
+              )
+
+              foreground_path = os.path.join(
+                  directory,
+                  "ic_launcher_foreground.png"
+              )
+
+              foreground.save(
+                  foreground_path,
+                  format="PNG",
+                  optimize=True
+              )
+
+              print(
+                  f"Generated {density}: "
+                  f"{launcher_path}, "
+                  f"{round_path}, "
+                  f"{foreground_path}"
+              )
+
+          print("")
+          print("Verifying generated PNG files...")
+          print("")
+
+          for density in sizes:
+
+              directory = (
+                  f"android/app/src/main/res/mipmap-{density}"
+              )
+
+              for filename in (
+                  "ic_launcher.png",
+                  "ic_launcher_round.png",
+                  "ic_launcher_foreground.png",
+              ):
+
+                  path = os.path.join(
+                      directory,
+                      filename
+                  )
+
+                  if not os.path.isfile(path):
+                      raise RuntimeError(
+                          f"Missing generated file: {path}"
+                      )
+
+                  with open(path, "rb") as f:
+                      header = f.read(8)
+
+                  if header != png_header:
+                      raise RuntimeError(
+                          f"INVALID PNG HEADER: {path}"
+                      )
+
+                  print(
+                      f"VALID PNG: {path}"
+                  )
+
+          print("")
+          print(
+              "All Android launcher PNG files "
+              "were generated and verified successfully."
+          )
+
       - name: Verify Android project
         run: |
           test -f android/gradlew
