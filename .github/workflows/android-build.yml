@@ -19,6 +19,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: Set up Java JDK
         uses: actions/setup-java@v4
@@ -53,196 +54,52 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
-      - name: Generate valid Android launcher icons
-        run: |
-          python3 -m pip install --quiet Pillow
-
-          python3 - <<'PY'
-          import base64
-          import io
-          import os
-          from PIL import Image
-
-          source = "src/assets/images/eldeeb_logo_base64.txt"
-
-          print(f"Reading logo source: {source}")
-
-          if not os.path.isfile(source):
-              raise RuntimeError(
-                  f"Logo source file not found: {source}"
-              )
-
-          with open(source, "r", encoding="utf-8") as f:
-              data = f.read().strip()
-
-          prefix = "data:image/png;base64,"
-
-          if data.startswith(prefix):
-              data = data[len(prefix):]
-
-          try:
-              raw = base64.b64decode(data, validate=True)
-          except Exception as e:
-              raise RuntimeError(
-                  f"Base64 decoding failed: {e}"
-              )
-
-          png_header = b"\x89PNG\r\n\x1a\n"
-
-          if raw[:8] != png_header:
-              raise RuntimeError(
-                  "Decoded logo does not contain a valid PNG header."
-              )
-
-          print("Original logo PNG header: VALID")
-
-          try:
-              image = Image.open(io.BytesIO(raw)).convert("RGBA")
-              image.load()
-          except Exception as e:
-              raise RuntimeError(
-                  f"Could not open decoded PNG: {e}"
-              )
-
-          print(
-              f"Original logo size: {image.width}x{image.height}"
-          )
-
-          sizes = {
-              "mdpi": 48,
-              "hdpi": 72,
-              "xhdpi": 96,
-              "xxhdpi": 144,
-              "xxxhdpi": 192,
-          }
-
-          for density, size in sizes.items():
-
-              directory = (
-                  f"android/app/src/main/res/mipmap-{density}"
-              )
-
-              os.makedirs(directory, exist_ok=True)
-
-              # Main launcher icon
-              resized = image.resize(
-                  (size, size),
-                  Image.Resampling.LANCZOS
-              )
-
-              launcher_path = os.path.join(
-                  directory,
-                  "ic_launcher.png"
-              )
-
-              resized.save(
-                  launcher_path,
-                  format="PNG",
-                  optimize=True
-              )
-
-              # Round launcher icon
-              round_path = os.path.join(
-                  directory,
-                  "ic_launcher_round.png"
-              )
-
-              resized.save(
-                  round_path,
-                  format="PNG",
-                  optimize=True
-              )
-
-              # Adaptive foreground
-              foreground_size = round(size * 2.25)
-
-              foreground = image.resize(
-                  (foreground_size, foreground_size),
-                  Image.Resampling.LANCZOS
-              )
-
-              foreground_path = os.path.join(
-                  directory,
-                  "ic_launcher_foreground.png"
-              )
-
-              foreground.save(
-                  foreground_path,
-                  format="PNG",
-                  optimize=True
-              )
-
-              print(
-                  f"Generated {density}: "
-                  f"{launcher_path}, "
-                  f"{round_path}, "
-                  f"{foreground_path}"
-              )
-
-          print("")
-          print("Verifying generated PNG files...")
-          print("")
-
-          for density in sizes:
-
-              directory = (
-                  f"android/app/src/main/res/mipmap-{density}"
-              )
-
-              for filename in (
-                  "ic_launcher.png",
-                  "ic_launcher_round.png",
-                  "ic_launcher_foreground.png",
-              ):
-
-                  path = os.path.join(
-                      directory,
-                      filename
-                  )
-
-                  if not os.path.isfile(path):
-                      raise RuntimeError(
-                          f"Missing generated file: {path}"
-                      )
-
-                  with open(path, "rb") as f:
-                      header = f.read(8)
-
-                  if header != png_header:
-                      raise RuntimeError(
-                          f"INVALID PNG HEADER: {path}"
-                      )
-
-                  print(
-                      f"VALID PNG: {path}"
-                  )
-
-          print("")
-          print(
-              "All Android launcher PNG files "
-              "were generated and verified successfully."
-          )
-
-      - name: Verify Android project
-        run: |
-          test -f android/gradlew
-          test -f android/gradle/wrapper/gradle-wrapper.jar
-          echo "Android project verified successfully."
-
-      - name: Ensure Valid Gradle Wrapper
+      - name: Prepare Gradle Wrapper
         working-directory: android
         run: |
-          if ! unzip -t gradle/wrapper/gradle-wrapper.jar 2>/dev/null | grep -q "GradleWrapperMain.class"; then
-            echo "gradle-wrapper.jar is invalid. Fetching official Gradle 8.7 wrapper jar..."
-            curl -sSL -o gradle/wrapper/gradle-wrapper.jar "https://raw.githubusercontent.com/gradle/gradle/v8.7.0/gradle/wrapper/gradle-wrapper.jar"
+          chmod +x gradlew
+
+          mkdir -p gradle/wrapper
+
+          rm -f gradle/wrapper/gradle-wrapper.jar
+
+          curl -fL \
+            "https://raw.githubusercontent.com/gradle/gradle/v8.7.0/gradle/wrapper/gradle-wrapper.jar" \
+            -o gradle/wrapper/gradle-wrapper.jar
+
+          echo "Checking Gradle Wrapper JAR..."
+
+          unzip -t gradle/wrapper/gradle-wrapper.jar
+
+          if ! unzip -l gradle/wrapper/gradle-wrapper.jar | grep -q "org/gradle/wrapper/GradleWrapperMain.class"; then
+            echo "ERROR: GradleWrapperMain.class is missing from gradle-wrapper.jar"
+            exit 1
           fi
-          echo "Gradle wrapper verified."
+
+          echo "Gradle Wrapper JAR is valid."
+
+      - name: Verify Android project
+        working-directory: android
+        run: |
+          test -f gradlew
+          test -f gradle/wrapper/gradle-wrapper.jar
+          test -f app/build.gradle
+          echo "Android project verified successfully."
+
+      - name: Verify Gradle Wrapper
+        working-directory: android
+        run: |
+          ./gradlew --version
 
       - name: Build Android Debug APK
         working-directory: android
         run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace
+          ./gradlew assembleDebug --stacktrace --no-daemon
+
+      - name: Verify APK
+        run: |
+          test -f android/app/build/outputs/apk/debug/app-debug.apk
+          ls -lh android/app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
