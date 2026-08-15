@@ -66,28 +66,67 @@ export async function requestGmailAuth(clientId?: string): Promise<GmailUser | n
           ? configClientId
           : '864337937711-gi69esgs44rn7d2li3mb6bfjhdspe2pv.apps.googleusercontent.com';
 
-  // 0. On Native Android/iOS, try CapAwesome Native Google Sign-In first
+  // ==========================================
+  // 1. Android Native Flow (Capacitor Native Platform)
+  // ==========================================
+  // On native Android, use Native Google Sign-In with Credential Manager / AuthorizationClient.
+  // Strictly avoid GIS popups, Firebase signInWithPopup, or sessionStorage which fail on Android.
   if (Capacitor.isNativePlatform()) {
+    const maskedClientId = resolvedClientId ? `...${resolvedClientId.slice(-15)}` : 'MISSING';
+    console.log('[Android Native Gmail] Starting Auth Flow:', {
+      platform: Capacitor.getPlatform(),
+      appId: 'com.eldeeb.pos',
+      clientIdSuffix: maskedClientId,
+      scopesCount: 3
+    });
+
     try {
       const scopes = [
         'https://www.googleapis.com/auth/gmail.send',
         'https://www.googleapis.com/auth/userinfo.email',
         'https://www.googleapis.com/auth/userinfo.profile'
       ];
+
       try {
         await GoogleSignIn.initialize({
           clientId: resolvedClientId,
           scopes
         });
-      } catch (initErr) {
-        // May already be initialized
+        console.log('[Android Native Gmail] GoogleSignIn.initialize succeeded.');
+      } catch (initErr: any) {
+        console.warn('[Android Native Gmail] GoogleSignIn.initialize notice:', initErr?.message || initErr);
       }
 
+      console.log('[Android Native Gmail] Calling GoogleSignIn.signIn()...');
       const result = await GoogleSignIn.signIn();
-      // Ensure accessToken is a real OAuth2 access token (not an ID Token starting with eyJ)
+      console.log('[Android Native Gmail] GoogleSignIn.signIn result received:', {
+        hasUserId: !!result?.userId,
+        hasEmail: !!result?.email,
+        hasIdToken: !!result?.idToken,
+        hasAccessToken: !!result?.accessToken,
+        accessTokenType: result?.accessToken?.startsWith('eyJ') ? 'JWT_ID_TOKEN' : 'OAUTH2_TOKEN',
+        hasServerAuthCode: !!result?.serverAuthCode
+      });
+
+      // Validate that accessToken is present and not a JWT ID token
       if (result.accessToken && !result.accessToken.startsWith('eyJ')) {
+        // Quick verification of accessToken against Google API to guarantee valid permissions
+        try {
+          const testRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+            headers: { Authorization: `Bearer ${result.accessToken}` }
+          });
+          console.log('[Android Native Gmail] Userinfo verification response status:', testRes.status);
+          if (!testRes.ok && testRes.status === 401) {
+            console.error('[Android Native Gmail] Native Gmail token verification failed with 401');
+            return null;
+          }
+        } catch (verifyErr: any) {
+          console.warn('[Android Native Gmail] Gmail verify test check notice:', verifyErr?.message || verifyErr);
+        }
+
         const profile = await fetchGmailProfile(result.accessToken);
         const userEmail = result.email || profile?.emailAddress || 'user@gmail.com';
+        console.log('[Android Native Gmail] Profile fetched successfully for user:', userEmail);
         return {
           email: userEmail,
           accessToken: result.accessToken,
@@ -95,15 +134,23 @@ export async function requestGmailAuth(clientId?: string): Promise<GmailUser | n
           messagesTotal: profile?.messagesTotal,
           threadsTotal: profile?.threadsTotal
         };
+      } else {
+        console.warn('[Android Native Gmail] Native Google Sign-In succeeded but did not return a valid Gmail OAuth2 accessToken.');
+        return null;
       }
-    } catch (nativeErr) {
-      console.warn('Native Google Sign-In skipped or failed for Gmail:', nativeErr);
+    } catch (nativeErr: any) {
+      console.error('[Android Native Gmail] Native Android Gmail Auth error:', {
+        message: nativeErr?.message || String(nativeErr),
+        code: nativeErr?.code || 'UNKNOWN'
+      });
+      return null;
     }
   }
 
-  // 1. Primary for Web & WebView: GIS (Google Identity Services) Token Client
-  // GIS Token Client is popup-based, does NOT trigger redirects, does NOT rely on sessionStorage,
-  // and directly yields a valid OAuth2 Access Token for Gmail API.
+  // ==========================================
+  // 2. Web / Browser Flow: Google Identity Services (GIS) Token Client
+  // ==========================================
+  // GIS Token Client is standard for Web/Vercel and yields an OAuth2 Access Token for Gmail.
   await loadGisScript();
 
   const gisUser = await new Promise<GmailUser | null>((resolve) => {

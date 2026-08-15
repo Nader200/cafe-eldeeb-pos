@@ -758,7 +758,7 @@
     "printer_name": "Bluetooth-Thermal-XP80",
     "pin_code": "1234",
     "pin_protection_enabled": false,
-    "updated_at": "2026-08-12T13:23:08.179Z",
+    "updated_at": "2026-08-15T13:35:52.145Z",
     "reminder_days_friendly": 7,
     "reminder_days_statement": 15,
     "reminder_days_final": 30,
@@ -798,7 +798,7 @@
     "employee_consumption_policy": "DEDUCT",
     "custom_expense_categories": [],
     "auto_update_checks_enabled": true,
-    "last_update_check_date": "2026-08-12T13:23:08.177Z",
+    "last_update_check_date": "2026-08-15T13:35:52.143Z",
     "last_installed_version": "5.0.0",
     "force_update_enabled": false
   },
@@ -2320,6 +2320,17 @@
   "cafe_partner_drawings": [],
   "cafe_update_logs": [
     {
+      "id": "upd_1786800952184_dlan",
+      "timestamp": "2026-08-15T13:35:52.184Z",
+      "action": "CHECK_FOR_UPDATES",
+      "installed_version": "5.0.0",
+      "remote_version": "4.3.0",
+      "platform": "android",
+      "status": "INFO",
+      "details": "النظام يحدث بالفعل إلى أحدث إصدار (5.0.0)",
+      "user_role": "Admin"
+    },
+    {
       "id": "upd_1786540988201_y44k",
       "timestamp": "2026-08-12T13:23:08.201Z",
       "action": "CHECK_FOR_UPDATES",
@@ -3400,17 +3411,6 @@
     {
       "id": "upd_1785583027548_ptr0",
       "timestamp": "2026-08-01T11:17:07.548Z",
-      "action": "UPDATE_DETECTED",
-      "installed_version": "4.2.5",
-      "remote_version": "4.3.0",
-      "platform": "web",
-      "status": "WARNING",
-      "details": "يتوفر تحديث جديد (4.3.0) لمنصة الويب",
-      "user_role": "Cashier"
-    },
-    {
-      "id": "upd_1785583027275_kzwe",
-      "timestamp": "2026-08-01T11:17:07.276Z",
       "action": "UPDATE_DETECTED",
       "installed_version": "4.2.5",
       "remote_version": "4.3.0",
