@@ -56,6 +56,9 @@ jobs:
       - name: Build Web Application
         run: npm run build
 
+      - name: Generate Official Cafe Eldeeb Icons
+        run: node scripts/generate-icons.cjs
+
       - name: Sync Capacitor
         run: npx cap sync android
 
