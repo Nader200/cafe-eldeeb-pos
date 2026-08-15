@@ -44,38 +44,69 @@ jobs:
       - name: Install project dependencies
         run: npm install
 
+      - name: Install ImageMagick
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
+          convert -version
+
       - name: Install Native Google Sign-In
         run: npm install @capawesome/capacitor-google-sign-in@0.1.2
 
       - name: Build Web Application
         run: npm run build
 
-      - name: Generate Official Cafe Eldeeb Icons
-        run: node scripts/generate-icons.cjs
-
       - name: Sync Capacitor
         run: npx cap sync android
 
-      - name: Verify Android project
-        run: |
-          test -f android/gradlew
-          test -f android/gradle/wrapper/gradle-wrapper.jar
-          echo "Android project verified successfully."
-
-      - name: Ensure Valid Gradle Wrapper
+      - name: Repair Gradle Wrapper
         working-directory: android
         run: |
-          if ! unzip -t gradle/wrapper/gradle-wrapper.jar 2>/dev/null | grep -q "GradleWrapperMain.class"; then
-            echo "gradle-wrapper.jar is invalid. Fetching official Gradle 8.7 wrapper jar..."
-            curl -sSL -o gradle/wrapper/gradle-wrapper.jar "https://raw.githubusercontent.com/gradle/gradle/v8.7.0/gradle/wrapper/gradle-wrapper.jar"
+          mkdir -p gradle/wrapper
+
+          curl -fL \
+            "https://raw.githubusercontent.com/gradle/gradle/v8.7.0/gradle/wrapper/gradle-wrapper.jar" \
+            -o gradle/wrapper/gradle-wrapper.jar
+
+          if [ ! -s gradle/wrapper/gradle-wrapper.jar ]; then
+            echo "ERROR: Gradle wrapper JAR was not downloaded."
+            exit 1
           fi
-          echo "Gradle wrapper verified."
+
+          if ! unzip -t gradle/wrapper/gradle-wrapper.jar >/dev/null 2>&1; then
+            echo "ERROR: Downloaded Gradle wrapper JAR is invalid."
+            exit 1
+          fi
+
+          if ! unzip -l gradle/wrapper/gradle-wrapper.jar | grep -q "org/gradle/wrapper/GradleWrapperMain.class"; then
+            echo "ERROR: GradleWrapperMain.class is missing."
+            exit 1
+          fi
+
+          echo "Gradle wrapper JAR repaired successfully."
+
+      - name: Verify Gradle Wrapper
+        working-directory: android
+        run: |
+          test -f gradlew
+          test -f gradle/wrapper/gradle-wrapper.jar
+          chmod +x gradlew
+
+          ./gradlew --version
+
+          echo "Android Gradle Wrapper verified successfully."
 
       - name: Build Android Debug APK
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace
+
+      - name: Verify APK
+        run: |
+          test -f android/app/build/outputs/apk/debug/app-debug.apk
+          ls -lh android/app/build/outputs/apk/debug/app-debug.apk
+          echo "APK created successfully."
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
