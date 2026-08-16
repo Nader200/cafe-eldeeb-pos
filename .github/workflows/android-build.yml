@@ -51,12 +51,7 @@ jobs:
         run: npm run build
 
       - name: Generate Official Cafe Eldeeb Icons
-        run: |
-          if which convert > /dev/null 2>&1; then
-            node scripts/generate-icons.cjs
-          else
-            echo "ImageMagick 'convert' tool not found on runner; official icons are already pre-generated in repository."
-          fi
+        run: node scripts/generate-icons.cjs
 
       - name: Sync Capacitor
         run: npx cap sync android
