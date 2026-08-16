@@ -5,56 +5,45 @@
 
 import firebaseConfig from '../../firebase-applet-config.json';
 import { auth } from './firebaseClient';
-import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import {
+  GoogleAuthProvider,
+  signInWithPopup
+} from 'firebase/auth';
 import { GoogleSignIn } from '@capawesome/capacitor-google-sign-in';
 import { Capacitor } from '@capacitor/core';
 
-export interface GoogleDriveUser {
+export interface GmailUser {
   email: string;
-  name: string;
-  picture?: string;
-  accessToken: string;
-  expiresAt: number;
+  messagesTotal?: number;
+  threadsTotal?: number;
+  accessToken?: string;
+  access_token?: string;
 }
 
-export interface GoogleDriveBackupFile {
-  id: string;
-  name: string;
-  createdTime: string;
-  modifiedTime?: string;
-  size: number;
-  formattedSize: string;
-  formattedDate: string;
-  description?: string;
-  appProperties?: Record<string, string>;
-  isAuto?: boolean;
-}
-
-const DRIVE_FILE_SCOPE =
-  'https://www.googleapis.com/auth/drive.file';
-
-const GOOGLE_PROFILE_SCOPE =
-  'https://www.googleapis.com/auth/userinfo.profile';
+const GMAIL_SEND_SCOPE =
+  'https://www.googleapis.com/auth/gmail.send';
 
 const GOOGLE_EMAIL_SCOPE =
   'https://www.googleapis.com/auth/userinfo.email';
 
-/*
- * IMPORTANT:
- * This is the WEB OAuth Client ID.
- *
- * For @capawesome/capacitor-google-sign-in the clientId passed to
- * initialize() must be the WEB client ID, even on Android.
- */
+const GOOGLE_PROFILE_SCOPE =
+  'https://www.googleapis.com/auth/userinfo.profile';
+
 const DEFAULT_GOOGLE_WEB_CLIENT_ID =
   '864337937711-gi69esgs44rn7d2li3mb6bfjhdspe2pv.apps.googleusercontent.com';
 
 let nativeGoogleInitialized = false;
 
 /**
- * Resolve the Google WEB OAuth Client ID.
+ * Resolve WEB OAuth client ID.
+ *
+ * IMPORTANT:
+ * @capawesome/capacitor-google-sign-in requires
+ * the WEB client ID in initialize(), including Android.
  */
-function resolveGoogleWebClientId(clientId?: string): string {
+function resolveGoogleWebClientId(
+  clientId?: string
+): string {
   const configClientId =
     (firebaseConfig as any)?.oAuthClientId ||
     (firebaseConfig as any)?.OAuthClientId;
@@ -67,16 +56,20 @@ function resolveGoogleWebClientId(clientId?: string): string {
   try {
     const raw =
       localStorage.getItem('cafe_settings') ||
-      localStorage.getItem('cafe_eldeeb_settings');
+      localStorage.getItem(
+        'cafe_eldeeb_settings'
+      );
 
-    storedSettings = raw ? JSON.parse(raw) : null;
+    storedSettings = raw
+      ? JSON.parse(raw)
+      : null;
   } catch {
     storedSettings = null;
   }
 
   const settingsClientId =
-    storedSettings?.google_drive_client_id ||
-    storedSettings?.gmail_client_id;
+    storedSettings?.gmail_client_id ||
+    storedSettings?.google_drive_client_id;
 
   const candidates = [
     clientId,
@@ -89,18 +82,22 @@ function resolveGoogleWebClientId(clientId?: string): string {
   const valid = candidates.find(
     (value) =>
       typeof value === 'string' &&
-      value.includes('.apps.googleusercontent.com')
+      value.includes(
+        '.apps.googleusercontent.com'
+      )
   );
 
-  return valid || DEFAULT_GOOGLE_WEB_CLIENT_ID;
+  return (
+    valid ||
+    DEFAULT_GOOGLE_WEB_CLIENT_ID
+  );
 }
 
 /**
  * Initialize native Google authorization.
  *
- * IMPORTANT:
- * We deliberately request OAuth scopes here.
- * Without scopes, the Capacitor plugin may return only an ID token.
+ * OAuth scopes are mandatory because they are what make
+ * result.accessToken available.
  */
 async function initializeNativeGoogle(
   clientId: string
@@ -117,7 +114,7 @@ async function initializeNativeGoogle(
     clientId,
 
     scopes: [
-      DRIVE_FILE_SCOPE,
+      GMAIL_SEND_SCOPE,
       GOOGLE_EMAIL_SCOPE,
       GOOGLE_PROFILE_SCOPE
     ]
@@ -126,12 +123,12 @@ async function initializeNativeGoogle(
   nativeGoogleInitialized = true;
 
   console.log(
-    '[Google Native] initialized with OAuth scopes successfully'
+    '[Google Native Gmail] initialized with OAuth scopes'
   );
 }
 
 /**
- * Load Google Identity Services on Web only.
+ * Load GIS on Web only.
  */
 export function loadGisScript(): Promise<void> {
   return new Promise((resolve) => {
@@ -142,18 +139,27 @@ export function loadGisScript(): Promise<void> {
       return;
     }
 
-    const existing = document.querySelector(
-      'script[src="https://accounts.google.com/gsi/client"]'
-    );
+    const existing =
+      document.querySelector(
+        'script[src="https://accounts.google.com/gsi/client"]'
+      );
 
     if (existing) {
-      existing.addEventListener('load', () => resolve());
+      existing.addEventListener(
+        'load',
+        () => resolve()
+      );
 
-      setTimeout(() => resolve(), 2000);
+      setTimeout(
+        () => resolve(),
+        2000
+      );
+
       return;
     }
 
-    const script = document.createElement('script');
+    const script =
+      document.createElement('script');
 
     script.src =
       'https://accounts.google.com/gsi/client';
@@ -162,95 +168,123 @@ export function loadGisScript(): Promise<void> {
     script.defer = true;
 
     script.onload = () => resolve();
-
     script.onerror = () => resolve();
 
-    document.head.appendChild(script);
+    document.head.appendChild(
+      script
+    );
   });
 }
 
 /**
- * Fetch Google user profile using an OAuth access token.
+ * Fetch Gmail profile.
  */
-export async function fetchGoogleProfile(
+export async function fetchGmailProfile(
   accessToken: string
-): Promise<{
-  email: string;
-  name: string;
-  picture?: string;
-} | null> {
+): Promise<any> {
   if (!accessToken?.trim()) {
     return null;
   }
 
   try {
-    const response = await fetch(
-      'https://www.googleapis.com/oauth2/v3/userinfo',
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`
+    const response =
+      await fetch(
+        'https://www.googleapis.com/oauth2/v3/userinfo',
+        {
+          headers: {
+            Authorization:
+              `Bearer ${accessToken}`
+          }
         }
+      );
+
+    if (response.ok) {
+      const data =
+        await response.json();
+
+      if (data?.email) {
+        return {
+          emailAddress:
+            data.email,
+          ...data
+        };
       }
-    );
-
-    if (!response.ok) {
-      return null;
     }
-
-    const data = await response.json();
-
-    return {
-      email: data.email || 'حساب Google',
-      name:
-        data.name ||
-        data.given_name ||
-        'مستخدم Google',
-      picture: data.picture
-    };
-  } catch {
-    return null;
+  } catch (error) {
+    console.warn(
+      '[Gmail] userinfo failed:',
+      error
+    );
   }
+
+  try {
+    const response =
+      await fetch(
+        'https://gmail.googleapis.com/v1/users/me/profile',
+        {
+          headers: {
+            Authorization:
+              `Bearer ${accessToken}`
+          }
+        }
+      );
+
+    if (response.ok) {
+      return response.json();
+    }
+  } catch (error) {
+    console.warn(
+      '[Gmail] Gmail profile failed:',
+      error
+    );
+  }
+
+  return null;
 }
 
 /**
- * Native Android Google authorization.
+ * Native Android Gmail OAuth.
  *
- * CRITICAL:
- * We accept ONLY result.accessToken.
+ * IMPORTANT:
+ * Only result.accessToken is accepted.
  *
- * result.idToken is NEVER used as an API access token.
+ * result.idToken is NEVER used as an API token.
  */
-async function requestNativeGoogleDriveAuth(
+async function requestNativeGmailAuth(
   clientId: string
-): Promise<GoogleDriveUser | null> {
+): Promise<GmailUser | null> {
   try {
-    await initializeNativeGoogle(clientId);
+    await initializeNativeGoogle(
+      clientId
+    );
 
     console.log(
-      '[Android Native GoogleDrive] Starting OAuth authorization...'
+      '[Android Native Gmail] Starting OAuth authorization...'
     );
 
     const result =
       await GoogleSignIn.signIn();
 
     console.log(
-      '[Android Native GoogleDrive] Native result:',
+      '[Android Native Gmail] Native result:',
       {
         hasEmail: !!result?.email,
         hasIdToken: !!result?.idToken,
-        hasAccessToken: !!result?.accessToken,
+        hasAccessToken:
+          !!result?.accessToken,
         hasServerAuthCode:
           !!result?.serverAuthCode
       }
     );
 
     /*
+     * ABSOLUTELY IMPORTANT:
+     *
      * NEVER:
      *
-     * const token =
-     *   result.accessToken || result.idToken;
+     * result.accessToken || result.idToken
      *
-     * ID token is NOT accepted here.
+     * ID token cannot be sent to Gmail API.
      */
 
     const accessToken =
@@ -258,7 +292,7 @@ async function requestNativeGoogleDriveAuth(
 
     if (!accessToken.trim()) {
       console.error(
-        '[Android Native GoogleDrive] Google returned NO OAuth access token.',
+        '[Android Native Gmail] No OAuth access token returned by Google.',
         {
           hasIdToken: !!result?.idToken,
           hasServerAuthCode:
@@ -270,38 +304,32 @@ async function requestNativeGoogleDriveAuth(
     }
 
     const profile =
-      await fetchGoogleProfile(accessToken);
+      await fetchGmailProfile(
+        accessToken
+      );
 
     const email =
-      profile?.email ||
       result.email ||
-      'user@google.com';
-
-    const name =
-      profile?.name ||
-      result.displayName ||
-      result.givenName ||
-      'مستخدم Google';
+      profile?.emailAddress ||
+      'user@gmail.com';
 
     console.log(
-      '[Android Native GoogleDrive] OAuth access token acquired for:',
+      '[Android Native Gmail] OAuth access token acquired for:',
       email
     );
 
     return {
-      accessToken,
-      expiresAt:
-        Date.now() + 3600 * 1000,
       email,
-      name,
-      picture:
-        profile?.picture ||
-        result.imageUrl ||
-        undefined
+      accessToken,
+      access_token: accessToken,
+      messagesTotal:
+        profile?.messagesTotal,
+      threadsTotal:
+        profile?.threadsTotal
     };
   } catch (error: any) {
     console.error(
-      '[Android Native GoogleDrive] OAuth failed:',
+      '[Android Native Gmail] OAuth failed:',
       error?.message || error
     );
 
@@ -310,19 +338,19 @@ async function requestNativeGoogleDriveAuth(
 }
 
 /**
- * Web GIS OAuth authorization.
+ * Web GIS Gmail authorization.
  */
-async function requestWebGoogleDriveAuth(
+async function requestWebGmailAuth(
   clientId: string
-): Promise<GoogleDriveUser | null> {
+): Promise<GmailUser | null> {
   await loadGisScript();
 
-  return new Promise<GoogleDriveUser | null>(
+  return new Promise<GmailUser | null>(
     (resolve) => {
       let completed = false;
 
       const finish = (
-        value: GoogleDriveUser | null
+        value: GmailUser | null
       ) => {
         if (completed) {
           return;
@@ -333,87 +361,96 @@ async function requestWebGoogleDriveAuth(
         resolve(value);
       };
 
-      const timeout = setTimeout(() => {
-        console.warn(
-          '[Web GoogleDrive] OAuth timed out'
-        );
+      const timeout =
+        setTimeout(() => {
+          console.warn(
+            '[Web Gmail] OAuth timeout'
+          );
 
-        finish(null);
-      }, 45000);
+          finish(null);
+        }, 45000);
 
-      const google = (window as any).google;
+      const google =
+        (window as any).google;
 
-      if (!google?.accounts?.oauth2) {
+      if (
+        !google?.accounts?.oauth2
+      ) {
         finish(null);
         return;
       }
 
       try {
         const client =
-          google.accounts.oauth2.initTokenClient({
-            client_id: clientId,
+          google.accounts.oauth2.initTokenClient(
+            {
+              client_id: clientId,
 
-            scope: [
-              DRIVE_FILE_SCOPE,
-              GOOGLE_EMAIL_SCOPE,
-              GOOGLE_PROFILE_SCOPE
-            ].join(' '),
+              scope: [
+                GMAIL_SEND_SCOPE,
+                GOOGLE_EMAIL_SCOPE,
+                GOOGLE_PROFILE_SCOPE
+              ].join(' '),
 
-            callback: async (
-              response: any
-            ) => {
-              if (
-                !response?.access_token ||
-                response?.error
-              ) {
-                console.warn(
-                  '[Web GoogleDrive] OAuth error:',
+              callback: async (
+                response: any
+              ) => {
+                if (
+                  !response?.access_token ||
                   response?.error
+                ) {
+                  console.warn(
+                    '[Web Gmail] OAuth error:',
+                    response?.error
+                  );
+
+                  finish(null);
+                  return;
+                }
+
+                const accessToken =
+                  response.access_token;
+
+                const profile =
+                  await fetchGmailProfile(
+                    accessToken
+                  );
+
+                finish({
+                  email:
+                    profile?.emailAddress ||
+                    'user@gmail.com',
+
+                  accessToken,
+
+                  access_token:
+                    accessToken,
+
+                  messagesTotal:
+                    profile?.messagesTotal,
+
+                  threadsTotal:
+                    profile?.threadsTotal
+                });
+              },
+
+              error_callback: (
+                error: any
+              ) => {
+                console.warn(
+                  '[Web Gmail] OAuth error:',
+                  error
                 );
 
                 finish(null);
-                return;
               }
-
-              const accessToken =
-                response.access_token;
-
-              const profile =
-                await fetchGoogleProfile(
-                  accessToken
-                );
-
-              finish({
-                accessToken,
-                expiresAt:
-                  Date.now() +
-                  (response.expires_in || 3600) *
-                    1000,
-                email:
-                  profile?.email ||
-                  'user@google.com',
-                name:
-                  profile?.name ||
-                  'مستخدم Google',
-                picture:
-                  profile?.picture
-              });
-            },
-
-            error_callback: (error: any) => {
-              console.warn(
-                '[Web GoogleDrive] OAuth error:',
-                error
-              );
-
-              finish(null);
             }
-          });
+          );
 
         client.requestAccessToken();
       } catch (error) {
         console.error(
-          '[Web GoogleDrive] OAuth exception:',
+          '[Web Gmail] OAuth exception:',
           error
         );
 
@@ -424,20 +461,24 @@ async function requestWebGoogleDriveAuth(
 }
 
 /**
- * Web Firebase authentication fallback.
+ * Firebase Google OAuth fallback.
  *
- * This is intentionally NOT used on native Android.
+ * Web only.
  */
-async function requestFirebaseGoogleDriveAuth():
-  Promise<GoogleDriveUser | null> {
+async function requestFirebaseGmailAuth():
+  Promise<GmailUser | null> {
   try {
     const provider =
       new GoogleAuthProvider();
 
-    provider.addScope(DRIVE_FILE_SCOPE);
+    provider.addScope(
+      GMAIL_SEND_SCOPE
+    );
+
     provider.addScope(
       GOOGLE_EMAIL_SCOPE
     );
+
     provider.addScope(
       GOOGLE_PROFILE_SCOPE
     );
@@ -461,38 +502,29 @@ async function requestFirebaseGoogleDriveAuth():
       credential?.accessToken;
 
     /*
-     * Firebase credential must also contain
-     * an OAuth access token.
-     *
-     * ID token is NOT used.
+     * Do not use Firebase ID token here.
      */
     if (!accessToken) {
       console.error(
-        '[Firebase GoogleDrive] No OAuth access token returned'
+        '[Firebase Gmail] No OAuth access token returned'
       );
 
       return null;
     }
 
-    const user = result.user;
-
     return {
-      accessToken,
-      expiresAt:
-        Date.now() + 3600 * 1000,
       email:
-        user.email ||
-        'user@google.com',
-      name:
-        user.displayName ||
-        'مستخدم Google',
-      picture:
-        user.photoURL ||
-        undefined
+        result.user?.email ||
+        'user@gmail.com',
+
+      accessToken,
+
+      access_token:
+        accessToken
     };
   } catch (error: any) {
     console.warn(
-      '[Firebase GoogleDrive] OAuth failed:',
+      '[Firebase Gmail] OAuth failed:',
       error?.code ||
         error?.message ||
         error
@@ -503,35 +535,40 @@ async function requestFirebaseGoogleDriveAuth():
 }
 
 /**
- * Main Google Drive authentication.
+ * Main Gmail authentication.
  */
-export async function requestGoogleDriveAuth(
+export async function requestGmailAuth(
   clientId?: string
-): Promise<GoogleDriveUser | null> {
+): Promise<GmailUser | null> {
   const resolvedClientId =
-    resolveGoogleWebClientId(clientId);
+    resolveGoogleWebClientId(
+      clientId
+    );
 
   console.log(
-    '[GoogleDrive] Client ID:',
+    '[Gmail] Client ID:',
     `...${resolvedClientId.slice(-20)}`
   );
 
   /*
-   * ANDROID / NATIVE
+   * ANDROID:
    *
-   * Do NOT fall back to GIS inside Android WebView.
+   * Native only.
+   *
+   * We deliberately do NOT fall back to
+   * GIS inside the Android WebView.
    */
   if (Capacitor.isNativePlatform()) {
-    return requestNativeGoogleDriveAuth(
+    return requestNativeGmailAuth(
       resolvedClientId
     );
   }
 
   /*
-   * WEB
+   * WEB:
    */
   const gisUser =
-    await requestWebGoogleDriveAuth(
+    await requestWebGmailAuth(
       resolvedClientId
     );
 
@@ -539,354 +576,562 @@ export async function requestGoogleDriveAuth(
     return gisUser;
   }
 
+  return requestFirebaseGmailAuth();
+}
+
+/**
+ * Create Base64URL MIME email.
+ */
+function createMimeMessage(
+  to: string,
+  subject: string,
+  htmlBody: string
+): string {
+  const utf8Subject =
+    `=?utf-8?B?${btoa(
+      unescape(
+        encodeURIComponent(
+          subject
+        )
+      )
+    )}?=`;
+
+  const messageParts = [
+    `To: ${to}`,
+    `Subject: ${utf8Subject}`,
+    'Content-Type: text/html; charset=utf-8',
+    'MIME-Version: 1.0',
+    '',
+    htmlBody
+  ];
+
+  const message =
+    messageParts.join('\r\n');
+
+  return btoa(
+    unescape(
+      encodeURIComponent(
+        message
+      )
+    )
+  )
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+/**
+ * Send email through Gmail API.
+ */
+export async function sendEmailViaGmail(
+  optsOrToken:
+    | string
+    | {
+        token?: string;
+        accessToken?: string;
+        to?: string;
+        toEmail?: string;
+        subject?: string;
+        htmlBody?: string;
+        htmlContent?: string;
+      },
+
+  toEmailParam?: string,
+  subjectParam?: string,
+  htmlContentParam?: string
+): Promise<{
+  success: boolean;
+  id?: string;
+  error?: string;
+  needReauth?: boolean;
+}> {
+  let token = '';
+  let toEmail = '';
+  let subject = '';
+  let htmlContent = '';
+
+  if (
+    typeof optsOrToken ===
+      'object' &&
+    optsOrToken !== null
+  ) {
+    token =
+      optsOrToken.accessToken ||
+      optsOrToken.token ||
+      '';
+
+    toEmail =
+      optsOrToken.toEmail ||
+      optsOrToken.to ||
+      '';
+
+    subject =
+      optsOrToken.subject ||
+      '';
+
+    htmlContent =
+      optsOrToken.htmlBody ||
+      optsOrToken.htmlContent ||
+      '';
+  } else {
+    token =
+      optsOrToken || '';
+
+    toEmail =
+      toEmailParam || '';
+
+    subject =
+      subjectParam || '';
+
+    htmlContent =
+      htmlContentParam || '';
+  }
+
+  if (
+    !token ||
+    token === 'dummy_token'
+  ) {
+    return {
+      success: false,
+      error:
+        'يرجى تسجيل الدخول أولاً بحساب Google لمنح صلاحية إرسال البريد عبر Gmail.',
+      needReauth: true
+    };
+  }
+
   /*
-   * Firebase popup fallback for Web.
+   * Native Android:
+   *
+   * Send directly to Gmail API.
+   *
+   * No /api/send-email proxy is required.
    */
-  return requestFirebaseGoogleDriveAuth();
-}
-
-/**
- * Format bytes.
- */
-export function formatBytes(
-  bytes: number
-): string {
-  if (!bytes || bytes <= 0) {
-    return '0 KB';
-  }
-
-  if (bytes < 1024 * 1024) {
-    return `${Math.round(
-      bytes / 1024
-    )} KB`;
-  }
-
-  return `${(
-    bytes /
-    (1024 * 1024)
-  ).toFixed(2)} MB`;
-}
-
-/**
- * Format date.
- */
-export function formatArabicDateTime(
-  isoString: string
-): string {
   try {
-    const date = new Date(
-      isoString
-    );
+    const raw =
+      createMimeMessage(
+        toEmail,
+        subject,
+        htmlContent
+      );
 
-    if (isNaN(date.getTime())) {
-      return isoString;
-    }
-
-    return date.toLocaleDateString(
-      'ar-EG',
-      {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      }
-    );
-  } catch {
-    return isoString;
-  }
-}
-
-/**
- * List Google Drive backups.
- */
-export async function listGoogleDriveBackups(
-  accessToken: string
-): Promise<GoogleDriveBackupFile[]> {
-  if (!accessToken?.trim()) {
-    throw new Error('UNAUTHORIZED');
-  }
-
-  const query =
-    encodeURIComponent(
-      "mimeType = 'application/json' and trashed = false"
-    );
-
-  const fields =
-    encodeURIComponent(
-      'files(id,name,createdTime,modifiedTime,size,description,appProperties)'
-    );
-
-  const url =
-    `https://www.googleapis.com/drive/v3/files` +
-    `?q=${query}` +
-    `&fields=${fields}` +
-    `&orderBy=createdTime%20desc`;
-
-  try {
     const response =
-      await fetch(url, {
-        headers: {
-          Authorization:
-            `Bearer ${accessToken}`
+      await fetch(
+        'https://gmail.googleapis.com/v1/users/me/messages/send',
+        {
+          method: 'POST',
+
+          headers: {
+            Authorization:
+              `Bearer ${token}`,
+
+            'Content-Type':
+              'application/json'
+          },
+
+          body: JSON.stringify({
+            raw
+          })
         }
-      });
-
-    if (!response.ok) {
-      if (
-        response.status === 401 ||
-        response.status === 403
-      ) {
-        throw new Error(
-          'UNAUTHORIZED'
-        );
-      }
-
-      throw new Error(
-        `Google Drive API error: ${response.status}`
       );
+
+    if (response.ok) {
+      const data =
+        await response.json();
+
+      return {
+        success: true,
+        id: data.id
+      };
     }
 
-    const data =
-      await response.json();
+    const errorJson =
+      await response
+        .json()
+        .catch(() => ({}));
 
-    return (data.files || []).map(
-      (file: any) => {
-        const size =
-          parseInt(
-            file.size || '0',
-            10
-          );
-
-        const isAuto =
-          file.name?.includes('auto') ||
-          file.appProperties?.type ===
-            'auto';
-
-        return {
-          id: file.id,
-          name: file.name,
-          createdTime:
-            file.createdTime,
-          modifiedTime:
-            file.modifiedTime,
-          size,
-          formattedSize:
-            formatBytes(size),
-          formattedDate:
-            formatArabicDateTime(
-              file.createdTime
-            ),
-          description:
-            file.description ||
-            'نسخة احتياطية لكافيه الديب POS',
-          appProperties:
-            file.appProperties || {},
-          isAuto
-        };
-      }
-    );
-  } catch (error: any) {
     console.warn(
-      '[GoogleDrive] Failed to list backups:',
-      error?.message || error
+      '[Gmail] Send failed:',
+      response.status,
+      errorJson
     );
 
-    throw error;
-  }
-}
-
-/**
- * Upload backup to Google Drive.
- */
-export async function uploadBackupToGoogleDrive(
-  accessToken: string,
-  fileName: string,
-  jsonContent: string,
-  cafeName: string = 'كافيه الديب',
-  isAuto: boolean = false
-): Promise<GoogleDriveBackupFile> {
-  if (!accessToken?.trim()) {
-    throw new Error('UNAUTHORIZED');
-  }
-
-  const metadata = {
-    name: fileName,
-    mimeType: 'application/json',
-    description:
-      `نسخة احتياطية شاملة لكافيه (${cafeName}) - ${
-        isAuto ? 'تلقائية' : 'يدوية'
-      }`,
-    appProperties: {
-      app: 'eldeeb_pos_enterprise',
-      cafe: cafeName,
-      type: isAuto
-        ? 'auto'
-        : 'manual'
-    }
-  };
-
-  const boundary =
-    '-------314159265358979323846';
-
-  const delimiter =
-    '\r\n--' +
-    boundary +
-    '\r\n';
-
-  const closeDelimiter =
-    '\r\n--' +
-    boundary +
-    '--';
-
-  const body =
-    delimiter +
-    'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
-    JSON.stringify(metadata) +
-    delimiter +
-    'Content-Type: application/json\r\n\r\n' +
-    jsonContent +
-    closeDelimiter;
-
-  const response =
-    await fetch(
-      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
-      {
-        method: 'POST',
-        headers: {
-          Authorization:
-            `Bearer ${accessToken}`,
-          'Content-Type':
-            `multipart/related; boundary=${boundary}`
-        },
-        body
-      }
-    );
-
-  if (!response.ok) {
-    if (
+    const authError =
       response.status === 401 ||
-      response.status === 403
-    ) {
-      throw new Error(
-        'UNAUTHORIZED'
-      );
-    }
+      response.status === 403;
 
-    throw new Error(
-      `Upload failed with status ${response.status}`
+    return {
+      success: false,
+
+      error: authError
+        ? 'انتهت صلاحية تصريح Google أو لم يتم منح صلاحية Gmail. يرجى إعادة الاتصال بحساب Google.'
+        : (
+            errorJson?.error
+              ?.message ||
+            `خطأ في Gmail (${response.status})`
+          ),
+
+      needReauth: authError
+    };
+  } catch (error: any) {
+    console.error(
+      '[Gmail] Send exception:',
+      error
     );
+
+    return {
+      success: false,
+
+      error:
+        'تعذر الاتصال بخادم Gmail. يرجى إعادة الاتصال بحساب Google.',
+
+      needReauth: true
+    };
   }
-
-  const uploaded =
-    await response.json();
-
-  const size =
-    new Blob([jsonContent]).size;
-
-  const now =
-    new Date().toISOString();
-
-  return {
-    id: uploaded.id,
-    name:
-      uploaded.name ||
-      fileName,
-    createdTime: now,
-    size,
-    formattedSize:
-      formatBytes(size),
-    formattedDate:
-      formatArabicDateTime(now),
-    description:
-      metadata.description,
-    isAuto
-  };
 }
 
 /**
- * Download backup.
+ * Direct Gmail compose URL.
  */
-export async function downloadBackupFromGoogleDrive(
-  accessToken: string,
-  fileId: string
-): Promise<string> {
-  if (!accessToken?.trim()) {
-    throw new Error('UNAUTHORIZED');
-  }
-
-  const response =
-    await fetch(
-      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(
-        fileId
-      )}?alt=media`,
-      {
-        headers: {
-          Authorization:
-            `Bearer ${accessToken}`
-        }
-      }
-    );
-
-  if (!response.ok) {
-    if (
-      response.status === 401 ||
-      response.status === 403
-    ) {
-      throw new Error(
-        'UNAUTHORIZED'
-      );
-    }
-
-    throw new Error(
-      `Download failed with status ${response.status}`
-    );
-  }
-
-  return response.text();
-}
-
-/**
- * Delete backup.
- */
-export async function deleteBackupFromGoogleDrive(
-  accessToken: string,
-  fileId: string
-): Promise<boolean> {
-  if (!accessToken?.trim()) {
-    throw new Error('UNAUTHORIZED');
-  }
-
-  const response =
-    await fetch(
-      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(
-        fileId
-      )}`,
-      {
-        method: 'DELETE',
-        headers: {
-          Authorization:
-            `Bearer ${accessToken}`
-        }
-      }
-    );
+export function buildGmailWebUrl(
+  toEmail: string,
+  subject: string,
+  salesOrSummary?: any,
+  expenses?: number,
+  netProfit?: number,
+  invoicesCount?: number,
+  topProducts?: string[]
+): string {
+  let bodyText = '';
 
   if (
-    response.ok ||
-    response.status === 204
+    typeof salesOrSummary ===
+    'string'
   ) {
-    return true;
+    bodyText =
+      salesOrSummary;
+  } else {
+    const sales =
+      Number(
+        salesOrSummary || 0
+      );
+
+    const exp =
+      Number(expenses || 0);
+
+    const net =
+      Number(netProfit || 0);
+
+    const invCount =
+      Number(
+        invoicesCount || 0
+      );
+
+    const tops =
+      topProducts || [];
+
+    bodyText =
+      `☕ تقرير كافيه الديب اليومي - ${new Date().toLocaleDateString('ar-EG')}
+----------------------------------
+📊 إجمالي المبيعات: ${sales.toFixed(2)} ج.م
+💸 إجمالي المصروفات: ${exp.toFixed(2)} ج.م
+💰 صافي الأرباح اليومي: ${net.toFixed(2)} ج.م
+🧾 عدد الفواتير المنفذة: ${invCount} فاتورة
+----------------------------------
+🔥 الأكثر مبيعاً اليوم:
+${
+  tops.length > 0
+    ? tops
+        .map(
+          (p) => `• ${p}`
+        )
+        .join('\n')
+    : 'لا توجد مبيعات مسجلة حتى الآن'
+}
+
+تم الاستخراج آلياً من نظام كافيه الديب POS Enterprise.`;
   }
+
+  return (
+    `https://mail.google.com/mail/?view=cm&fs=1` +
+    `&to=${encodeURIComponent(
+      toEmail
+    )}` +
+    `&su=${encodeURIComponent(
+      subject
+    )}` +
+    `&body=${encodeURIComponent(
+      bodyText
+    )}`
+  );
+}
+
+/**
+ * mailto fallback.
+ */
+export function buildMailtoUrl(
+  toEmail: string,
+  subject: string,
+  salesOrSummary?: any,
+  expenses?: number,
+  netProfit?: number,
+  invoicesCount?: number,
+  topProducts?: string[]
+): string {
+  let bodyText = '';
 
   if (
-    response.status === 401 ||
-    response.status === 403
+    typeof salesOrSummary ===
+    'string'
   ) {
-    throw new Error(
-      'UNAUTHORIZED'
-    );
+    bodyText =
+      salesOrSummary;
+  } else {
+    const sales =
+      Number(
+        salesOrSummary || 0
+      );
+
+    const exp =
+      Number(expenses || 0);
+
+    const net =
+      Number(netProfit || 0);
+
+    const invCount =
+      Number(
+        invoicesCount || 0
+      );
+
+    const tops =
+      topProducts || [];
+
+    bodyText =
+      `☕ تقرير كافيه الديب اليومي
+----------------------------------
+📊 إجمالي المبيعات: ${sales.toFixed(2)} ج.م
+💸 إجمالي المصروفات: ${exp.toFixed(2)} ج.م
+💰 صافي الأرباح: ${net.toFixed(2)} ج.م
+🧾 عدد الفواتير: ${invCount} فاتورة
+----------------------------------
+🔥 الأكثر مبيعاً:
+${
+  tops.length
+    ? tops
+        .map(
+          (p) => `- ${p}`
+        )
+        .join('\n')
+    : 'لا توجد مبيعات'
+}
+
+تم الاستخراج آلياً من نظام كافيه الديب POS Enterprise.`;
   }
 
-  return false;
+  return (
+    `mailto:${encodeURIComponent(
+      toEmail
+    )}` +
+    `?subject=${encodeURIComponent(
+      subject
+    )}` +
+    `&body=${encodeURIComponent(
+      bodyText
+    )}`
+  );
+}
+
+/**
+ * Daily report HTML.
+ */
+export function buildDailySalesReportHtml(
+  arg1: any,
+  arg2?: any,
+  arg3?: any,
+  expensesParam?: number,
+  netProfitParam?: number,
+  invoicesCountParam?: number,
+  topProductsParam?: string[]
+): string {
+  let cafeName =
+    'كافيه الديب';
+
+  let dateStr =
+    new Date().toLocaleDateString(
+      'ar-EG'
+    );
+
+  let sales = 0;
+  let expenses = 0;
+  let netProfit = 0;
+  let invoicesCount = 0;
+
+  let topProducts: string[] =
+    [];
+
+  if (
+    typeof arg1 ===
+      'object' &&
+    arg1 !== null
+  ) {
+    const metrics =
+      arg1;
+
+    const settingsData =
+      arg2 || {};
+
+    cafeName =
+      settingsData.cafe_name ||
+      'كافيه الديب';
+
+    sales =
+      metrics.totalSales ||
+      0;
+
+    expenses =
+      metrics.totalExpenses ||
+      0;
+
+    netProfit =
+      metrics.netProfit ??
+      (sales - expenses);
+
+    invoicesCount =
+      metrics.totalOrders ||
+      metrics.invoicesCount ||
+      0;
+
+    topProducts =
+      metrics.topProducts ||
+      [];
+  } else {
+    cafeName =
+      String(
+        arg1 ||
+          'كافيه الديب'
+      );
+
+    dateStr =
+      String(
+        arg2 ||
+          new Date().toLocaleDateString(
+            'ar-EG'
+          )
+      );
+
+    sales =
+      Number(arg3 || 0);
+
+    expenses =
+      Number(
+        expensesParam || 0
+      );
+
+    netProfit =
+      Number(
+        netProfitParam || 0
+      );
+
+    invoicesCount =
+      Number(
+        invoicesCountParam ||
+          0
+      );
+
+    topProducts =
+      topProductsParam || [];
+  }
+
+  return `
+<div dir="rtl" style="font-family:Arial,sans-serif;background:#0d0d0d;color:#f3f4f6;padding:24px;border-radius:16px;max-width:600px;margin:0 auto;border:1px solid #d4af37;">
+
+  <div style="text-align:center;border-bottom:2px solid #d4af37;padding-bottom:16px;margin-bottom:20px;">
+    <h1 style="color:#d4af37;margin:0;font-size:24px;">
+      ☕ ${cafeName}
+    </h1>
+
+    <p style="color:#9ca3af;margin:6px 0 0 0;font-size:14px;">
+      التقرير المالي والحسابات اليومي — ${dateStr}
+    </p>
+  </div>
+
+  <div style="background:#1a1a1a;padding:16px;border-radius:12px;margin-bottom:20px;border:1px solid #333;">
+
+    <h2 style="color:#fff;font-size:16px;margin-top:0;">
+      📊 ملخص الأرباح والمبيعات
+    </h2>
+
+    <table style="width:100%;text-align:right;font-size:14px;border-collapse:collapse;">
+
+      <tr>
+        <td style="padding:8px 0;color:#9ca3af;">
+          إجمالي المبيعات:
+        </td>
+
+        <td style="padding:8px 0;font-weight:bold;text-align:left;">
+          ${sales.toFixed(2)} ج.م
+        </td>
+      </tr>
+
+      <tr>
+        <td style="padding:8px 0;color:#9ca3af;">
+          إجمالي المصروفات:
+        </td>
+
+        <td style="padding:8px 0;font-weight:bold;text-align:left;">
+          ${expenses.toFixed(2)} ج.م
+        </td>
+      </tr>
+
+      <tr style="border-top:1px solid #333;">
+        <td style="padding:12px 0;color:#fff;font-weight:bold;">
+          صافي الأرباح اليومي:
+        </td>
+
+        <td style="padding:12px 0;font-weight:bold;font-size:18px;text-align:left;">
+          ${netProfit.toFixed(2)} ج.م
+        </td>
+      </tr>
+
+      <tr>
+        <td style="padding:8px 0;color:#9ca3af;">
+          عدد الفواتير المنفذة:
+        </td>
+
+        <td style="padding:8px 0;font-weight:bold;text-align:left;">
+          ${invoicesCount} فاتورة
+        </td>
+      </tr>
+
+    </table>
+  </div>
+
+  ${
+    topProducts.length > 0
+      ? `
+  <div style="background:#1a1a1a;padding:16px;border-radius:12px;margin-bottom:20px;border:1px solid #333;">
+
+    <h3 style="font-size:14px;margin-top:0;">
+      🔥 الأكثر مبيعاً اليوم:
+    </h3>
+
+    <ul style="margin:0;padding-right:20px;font-size:13px;">
+      ${topProducts
+        .map(
+          (p) =>
+            `<li style="margin-bottom:4px;">${p}</li>`
+        )
+        .join('')}
+    </ul>
+
+  </div>
+  `
+      : ''
+  }
+
+  <div style="text-align:center;font-size:12px;color:#6b7280;border-top:1px solid #262626;padding-top:12px;">
+    تم استخراج وإرسال هذا التقرير آلياً عبر نظام كافيه الديب POS Enterprise
+  </div>
+
+</div>
+`;
 }
