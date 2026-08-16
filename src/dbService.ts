@@ -63,6 +63,7 @@ import { playOrderReadySound } from './lib/audioService';
 import { verifyAdminSecurityPassword } from './lib/securityService';
 
 import { safeStorage } from './lib/safeStorage';
+import { Capacitor } from '@capacitor/core';
 export { safeStorage };
 
 // Shadow global localStorage safely for this file scope
@@ -195,6 +196,9 @@ let isDatabaseLoadedFromServer = false;
 export const syncToServer = (() => {
   let timeoutId: any = null;
   const syncFn = () => {
+    if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+      return;
+    }
     const data: Record<string, any> = {};
     Object.entries(KEYS).forEach(([_, key]) => {
       try {
@@ -208,7 +212,10 @@ export const syncToServer = (() => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
-    }).catch(err => console.error('Failed to sync to server database:', err));
+    }).catch(err => {
+      // Offline or network disconnect - log gracefully without crashing
+      console.warn('Server database sync notice:', err?.message || err);
+    });
   };
 
   if (typeof window !== 'undefined') {
@@ -701,6 +708,10 @@ export const dbService = {
   },
 
   loadFromServer: async (): Promise<boolean> => {
+    if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+      isDatabaseLoadedFromServer = true;
+      return true;
+    }
     try {
       const res = await fetch('/api/db');
       if (!res.ok) {
@@ -777,8 +788,8 @@ export const dbService = {
         isDatabaseLoadedFromServer = true;
         return false;
       }
-    } catch (e) {
-      console.error('Error loading data from server:', e);
+    } catch (e: any) {
+      console.warn('Server database load notice:', e?.message || e);
       isDatabaseLoadedFromServer = true;
       return false;
     }

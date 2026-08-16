@@ -54,11 +54,11 @@ if (typeof window !== 'undefined' && window.localStorage) {
   }
 }
 
-// Initialize Firestore with memoryLocalCache and auto-detect long polling for optimal connection in sandboxed environments
+// Initialize Firestore with memoryLocalCache and auto-detect long polling for optimal connection
 export const db = (() => {
   try {
     const settings = {
-      experimentalForceLongPolling: true,
+      experimentalAutoDetectLongPolling: true,
       localCache: memoryLocalCache()
     };
     return databaseId && databaseId !== '(default)'

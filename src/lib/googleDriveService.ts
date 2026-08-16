@@ -101,8 +101,9 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
   // ==========================================
   // 1. Android Native Flow (Capacitor Native Platform)
   // ==========================================
-  // On native Android, use Native Google Sign-In with Credential Manager / AuthorizationClient.
-  // Strictly avoid GIS popups, Firebase signInWithPopup, or sessionStorage which fail on Android.
+  // On native Android, attempt Native Google Sign-In with Credential Manager / AuthorizationClient.
+  let nativeAccountHint: string | undefined = undefined;
+
   if (Capacitor.isNativePlatform()) {
     const maskedClientId = resolvedClientId ? `...${resolvedClientId.slice(-15)}` : 'MISSING';
     console.log('[Android Native GoogleDrive] Starting Auth Flow:', {
@@ -140,48 +141,41 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
         hasServerAuthCode: !!result?.serverAuthCode
       });
 
-      // Validate that accessToken is present and not a JWT ID token
+      if (result?.email) {
+        nativeAccountHint = result.email;
+      }
+
+      // If a valid OAuth2 access token was returned directly by native layer
       if (result.accessToken && !result.accessToken.startsWith('eyJ')) {
-        // Quick verification of accessToken against Drive API to guarantee valid permissions
         try {
           const testRes = await fetch('https://www.googleapis.com/drive/v3/files?pageSize=1', {
             headers: { Authorization: `Bearer ${result.accessToken}` }
           });
-          console.log('[Android Native GoogleDrive] Drive API verification response status:', testRes.status);
-          if (!testRes.ok && testRes.status === 401) {
-            console.error('[Android Native GoogleDrive] Native Google Drive token verification failed with 401');
-            return null;
+          if (testRes.ok || testRes.status !== 401) {
+            const profile = await fetchGoogleProfile(result.accessToken);
+            return {
+              accessToken: result.accessToken,
+              expiresAt: Date.now() + 3600 * 1000,
+              email: profile?.email || result.email || 'user@google.com',
+              name: profile?.name || result.displayName || result.givenName || 'مستخدم Google',
+              picture: profile?.picture || result.imageUrl || undefined
+            };
           }
         } catch (verifyErr: any) {
-          console.warn('[Android Native GoogleDrive] Drive verify test check notice:', verifyErr?.message || verifyErr);
+          console.warn('[Android Native GoogleDrive] Drive verify check notice:', verifyErr?.message || verifyErr);
         }
-
-        const profile = await fetchGoogleProfile(result.accessToken);
-        console.log('[Android Native GoogleDrive] Profile fetched successfully for user:', result.email || profile?.email || 'authenticated_user');
-        return {
-          accessToken: result.accessToken,
-          expiresAt: Date.now() + 3600 * 1000,
-          email: profile?.email || result.email || 'user@google.com',
-          name: profile?.name || result.displayName || result.givenName || 'مستخدم Google',
-          picture: profile?.picture || result.imageUrl || undefined
-        };
-      } else {
-        console.warn('[Android Native GoogleDrive] Native Google Sign-In succeeded but did not return a valid Drive OAuth2 accessToken.');
-        return null;
       }
+
+      console.log('[Android Native GoogleDrive] Native layer completed account selection, proceeding to complete OAuth2 token acquisition...');
     } catch (nativeErr: any) {
-      console.error('[Android Native GoogleDrive] Native Android Google Drive Auth error:', {
-        message: nativeErr?.message || String(nativeErr),
-        code: nativeErr?.code || 'UNKNOWN'
-      });
-      return null;
+      console.warn('[Android Native GoogleDrive] Native sign-in notice, proceeding to web/GIS fallback:', nativeErr?.message || nativeErr);
     }
   }
 
   // ==========================================
-  // 2. Web / Browser Flow: Google Identity Services (GIS) Token Client
+  // 2. Google Identity Services (GIS) Token Client Flow
   // ==========================================
-  // GIS Token Client is standard for Web/Vercel and yields an OAuth2 Access Token for Drive.
+  // Standard OAuth2 Access Token Client with account hint support
   await loadGisScript();
 
   const gisUser = await new Promise<GoogleDriveUser | null>((resolve) => {
@@ -202,7 +196,7 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
     const google = (window as any).google;
     if (google?.accounts?.oauth2) {
       try {
-        const client = google.accounts.oauth2.initTokenClient({
+        const clientConfig: any = {
           client_id: resolvedClientId,
           scope: `${DRIVE_FILE_SCOPE} https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile`,
           callback: async (response: any) => {
@@ -214,7 +208,7 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
               const user: GoogleDriveUser = {
                 accessToken: token,
                 expiresAt: Date.now() + expiresIn * 1000,
-                email: profile?.email || 'user@google.com',
+                email: profile?.email || nativeAccountHint || 'user@google.com',
                 name: profile?.name || 'مستخدم Google',
                 picture: profile?.picture
               };
@@ -234,7 +228,13 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
             console.warn('GIS Auth onerror:', err);
             safeResolve(null);
           }
-        });
+        };
+
+        if (nativeAccountHint) {
+          clientConfig.hint = nativeAccountHint;
+        }
+
+        const client = google.accounts.oauth2.initTokenClient(clientConfig);
         client.requestAccessToken();
         return;
       } catch (e) {

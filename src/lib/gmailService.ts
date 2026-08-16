@@ -69,8 +69,9 @@ export async function requestGmailAuth(clientId?: string): Promise<GmailUser | n
   // ==========================================
   // 1. Android Native Flow (Capacitor Native Platform)
   // ==========================================
-  // On native Android, use Native Google Sign-In with Credential Manager / AuthorizationClient.
-  // Strictly avoid GIS popups, Firebase signInWithPopup, or sessionStorage which fail on Android.
+  // On native Android, attempt Native Google Sign-In with Credential Manager / AuthorizationClient.
+  let nativeAccountHint: string | undefined = undefined;
+
   if (Capacitor.isNativePlatform()) {
     const maskedClientId = resolvedClientId ? `...${resolvedClientId.slice(-15)}` : 'MISSING';
     console.log('[Android Native Gmail] Starting Auth Flow:', {
@@ -108,47 +109,40 @@ export async function requestGmailAuth(clientId?: string): Promise<GmailUser | n
         hasServerAuthCode: !!result?.serverAuthCode
       });
 
-      // Validate that accessToken is present and not a JWT ID token
+      if (result?.email) {
+        nativeAccountHint = result.email;
+      }
+
+      // If a valid OAuth2 access token was returned directly by native layer
       if (result.accessToken && !result.accessToken.startsWith('eyJ')) {
-        // Quick verification of accessToken against Google API to guarantee valid permissions
         try {
           const testRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
             headers: { Authorization: `Bearer ${result.accessToken}` }
           });
-          console.log('[Android Native Gmail] Userinfo verification response status:', testRes.status);
-          if (!testRes.ok && testRes.status === 401) {
-            console.error('[Android Native Gmail] Native Gmail token verification failed with 401');
-            return null;
+          if (testRes.ok || testRes.status !== 401) {
+            const profile = await fetchGmailProfile(result.accessToken);
+            const userEmail = result.email || profile?.emailAddress || 'user@gmail.com';
+            return {
+              email: userEmail,
+              accessToken: result.accessToken,
+              access_token: result.accessToken,
+              messagesTotal: profile?.messagesTotal,
+              threadsTotal: profile?.threadsTotal
+            };
           }
         } catch (verifyErr: any) {
-          console.warn('[Android Native Gmail] Gmail verify test check notice:', verifyErr?.message || verifyErr);
+          console.warn('[Android Native Gmail] Gmail verify check notice:', verifyErr?.message || verifyErr);
         }
-
-        const profile = await fetchGmailProfile(result.accessToken);
-        const userEmail = result.email || profile?.emailAddress || 'user@gmail.com';
-        console.log('[Android Native Gmail] Profile fetched successfully for user:', userEmail);
-        return {
-          email: userEmail,
-          accessToken: result.accessToken,
-          access_token: result.accessToken,
-          messagesTotal: profile?.messagesTotal,
-          threadsTotal: profile?.threadsTotal
-        };
-      } else {
-        console.warn('[Android Native Gmail] Native Google Sign-In succeeded but did not return a valid Gmail OAuth2 accessToken.');
-        return null;
       }
+
+      console.log('[Android Native Gmail] Native layer completed account selection, proceeding to complete OAuth2 token acquisition...');
     } catch (nativeErr: any) {
-      console.error('[Android Native Gmail] Native Android Gmail Auth error:', {
-        message: nativeErr?.message || String(nativeErr),
-        code: nativeErr?.code || 'UNKNOWN'
-      });
-      return null;
+      console.warn('[Android Native Gmail] Native sign-in notice, proceeding to web/GIS fallback:', nativeErr?.message || nativeErr);
     }
   }
 
   // ==========================================
-  // 2. Web / Browser Flow: Google Identity Services (GIS) Token Client
+  // 2. Google Identity Services (GIS) Token Client Flow
   // ==========================================
   // GIS Token Client is standard for Web/Vercel and yields an OAuth2 Access Token for Gmail.
   await loadGisScript();
@@ -171,14 +165,15 @@ export async function requestGmailAuth(clientId?: string): Promise<GmailUser | n
     const google = (window as any).google;
     if (google?.accounts?.oauth2) {
       try {
-        const client = google.accounts.oauth2.initTokenClient({
+        const clientConfig: any = {
           client_id: resolvedClientId,
-          scope: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile',
+          scope: GMAIL_SCOPES,
           callback: async (response: any) => {
             if (response && response.access_token && !response.error) {
               const token = response.access_token;
               const profile = await fetchGmailProfile(token);
-              const userEmail = profile?.emailAddress || 'user@gmail.com';
+              const userEmail = profile?.emailAddress || nativeAccountHint || 'user@gmail.com';
+
               const user: GmailUser = {
                 email: userEmail,
                 accessToken: token,
@@ -189,24 +184,30 @@ export async function requestGmailAuth(clientId?: string): Promise<GmailUser | n
               safeResolve(user);
             } else {
               if (response?.error) {
-                console.warn('Gmail OAuth callback error:', response.error);
+                console.warn('Google Auth callback error:', response.error);
               }
               safeResolve(null);
             }
           },
           error_callback: (err: any) => {
-            console.warn('GIS Gmail token client error:', err);
+            console.warn('GIS token client error:', err);
             safeResolve(null);
           },
           onerror: (err: any) => {
-            console.warn('GIS Gmail Auth onerror:', err);
+            console.warn('GIS Auth onerror:', err);
             safeResolve(null);
           }
-        });
+        };
+
+        if (nativeAccountHint) {
+          clientConfig.hint = nativeAccountHint;
+        }
+
+        const client = google.accounts.oauth2.initTokenClient(clientConfig);
         client.requestAccessToken();
         return;
       } catch (e) {
-        console.warn('Google Gmail Token Client init exception:', e);
+        console.warn('Google Token Client init exception:', e);
         safeResolve(null);
       }
     } else {
@@ -218,7 +219,9 @@ export async function requestGmailAuth(clientId?: string): Promise<GmailUser | n
     return gisUser;
   }
 
-  // 2. Secondary Fallback: Try Firebase Auth Google Popup (only if GIS was blocked)
+  // ==========================================
+  // 3. Web Secondary Fallback: Firebase Auth Google Popup (Web only)
+  // ==========================================
   try {
     const provider = new GoogleAuthProvider();
     provider.addScope('https://www.googleapis.com/auth/gmail.send');
