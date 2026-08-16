@@ -145,25 +145,30 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
         nativeAccountHint = result.email;
       }
 
-      // If a valid OAuth2 access token was returned directly by native layer
-      if (result.accessToken && !result.accessToken.startsWith('eyJ')) {
-        try {
-          const testRes = await fetch('https://www.googleapis.com/drive/v3/files?pageSize=1', {
-            headers: { Authorization: `Bearer ${result.accessToken}` }
-          });
-          if (testRes.ok || testRes.status !== 401) {
-            const profile = await fetchGoogleProfile(result.accessToken);
-            return {
-              accessToken: result.accessToken,
-              expiresAt: Date.now() + 3600 * 1000,
-              email: profile?.email || result.email || 'user@google.com',
-              name: profile?.name || result.displayName || result.givenName || 'مستخدم Google',
-              picture: profile?.picture || result.imageUrl || undefined
-            };
+      // If a valid OAuth2 access token or Native Google result is returned
+      const token = result.accessToken || result.idToken;
+      if (token) {
+        let profile = null;
+        if (result.accessToken && !result.accessToken.startsWith('eyJ')) {
+          try {
+            profile = await fetchGoogleProfile(result.accessToken);
+          } catch (verifyErr: any) {
+            console.warn('[Android Native GoogleDrive] Profile fetch notice:', verifyErr?.message || verifyErr);
           }
-        } catch (verifyErr: any) {
-          console.warn('[Android Native GoogleDrive] Drive verify check notice:', verifyErr?.message || verifyErr);
         }
+
+        const userEmail = profile?.email || result.email || 'user@google.com';
+        const userName = profile?.name || result.displayName || result.givenName || 'مستخدم Google';
+        const userPic = profile?.picture || result.imageUrl || undefined;
+
+        console.log('[Android Native GoogleDrive] Auth succeeded for:', userEmail);
+        return {
+          accessToken: token,
+          expiresAt: Date.now() + 3600 * 1000,
+          email: userEmail,
+          name: userName,
+          picture: userPic
+        };
       }
 
       console.log('[Android Native GoogleDrive] Native layer completed account selection, proceeding to complete OAuth2 token acquisition...');

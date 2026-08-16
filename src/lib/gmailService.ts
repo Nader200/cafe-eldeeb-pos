@@ -113,26 +113,27 @@ export async function requestGmailAuth(clientId?: string): Promise<GmailUser | n
         nativeAccountHint = result.email;
       }
 
-      // If a valid OAuth2 access token was returned directly by native layer
-      if (result.accessToken && !result.accessToken.startsWith('eyJ')) {
-        try {
-          const testRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-            headers: { Authorization: `Bearer ${result.accessToken}` }
-          });
-          if (testRes.ok || testRes.status !== 401) {
-            const profile = await fetchGmailProfile(result.accessToken);
-            const userEmail = result.email || profile?.emailAddress || 'user@gmail.com';
-            return {
-              email: userEmail,
-              accessToken: result.accessToken,
-              access_token: result.accessToken,
-              messagesTotal: profile?.messagesTotal,
-              threadsTotal: profile?.threadsTotal
-            };
+      // If a valid OAuth2 access token or Native Google result is returned
+      const token = result.accessToken || result.idToken;
+      if (token) {
+        let profile = null;
+        if (result.accessToken && !result.accessToken.startsWith('eyJ')) {
+          try {
+            profile = await fetchGmailProfile(result.accessToken);
+          } catch (verifyErr: any) {
+            console.warn('[Android Native Gmail] Profile fetch notice:', verifyErr?.message || verifyErr);
           }
-        } catch (verifyErr: any) {
-          console.warn('[Android Native Gmail] Gmail verify check notice:', verifyErr?.message || verifyErr);
         }
+
+        const userEmail = result.email || profile?.emailAddress || 'user@gmail.com';
+        console.log('[Android Native Gmail] Auth succeeded for:', userEmail);
+        return {
+          email: userEmail,
+          accessToken: token,
+          access_token: token,
+          messagesTotal: profile?.messagesTotal,
+          threadsTotal: profile?.threadsTotal
+        };
       }
 
       console.log('[Android Native Gmail] Native layer completed account selection, proceeding to complete OAuth2 token acquisition...');
