@@ -30,347 +30,675 @@ export interface GoogleDriveBackupFile {
   isAuto?: boolean;
 }
 
-const DRIVE_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const DRIVE_FILE_SCOPE =
+  'https://www.googleapis.com/auth/drive.file';
 
-// Ensure GIS script is loaded
+const GOOGLE_PROFILE_SCOPE =
+  'https://www.googleapis.com/auth/userinfo.profile';
+
+const GOOGLE_EMAIL_SCOPE =
+  'https://www.googleapis.com/auth/userinfo.email';
+
+/*
+ * IMPORTANT:
+ * This is the WEB OAuth Client ID.
+ *
+ * For @capawesome/capacitor-google-sign-in the clientId passed to
+ * initialize() must be the WEB client ID, even on Android.
+ */
+const DEFAULT_GOOGLE_WEB_CLIENT_ID =
+  '864337937711-gi69esgs44rn7d2li3mb6bfjhdspe2pv.apps.googleusercontent.com';
+
+let nativeGoogleInitialized = false;
+
+/**
+ * Resolve the Google WEB OAuth Client ID.
+ */
+function resolveGoogleWebClientId(clientId?: string): string {
+  const configClientId =
+    (firebaseConfig as any)?.oAuthClientId ||
+    (firebaseConfig as any)?.OAuthClientId;
+
+  const envClientId =
+    (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
+
+  let storedSettings: any = null;
+
+  try {
+    const raw =
+      localStorage.getItem('cafe_settings') ||
+      localStorage.getItem('cafe_eldeeb_settings');
+
+    storedSettings = raw ? JSON.parse(raw) : null;
+  } catch {
+    storedSettings = null;
+  }
+
+  const settingsClientId =
+    storedSettings?.google_drive_client_id ||
+    storedSettings?.gmail_client_id;
+
+  const candidates = [
+    clientId,
+    settingsClientId,
+    envClientId,
+    configClientId,
+    DEFAULT_GOOGLE_WEB_CLIENT_ID
+  ];
+
+  const valid = candidates.find(
+    (value) =>
+      typeof value === 'string' &&
+      value.includes('.apps.googleusercontent.com')
+  );
+
+  return valid || DEFAULT_GOOGLE_WEB_CLIENT_ID;
+}
+
+/**
+ * Initialize native Google authorization.
+ *
+ * IMPORTANT:
+ * We deliberately request OAuth scopes here.
+ * Without scopes, the Capacitor plugin may return only an ID token.
+ */
+async function initializeNativeGoogle(
+  clientId: string
+): Promise<void> {
+  if (!Capacitor.isNativePlatform()) {
+    return;
+  }
+
+  if (nativeGoogleInitialized) {
+    return;
+  }
+
+  await GoogleSignIn.initialize({
+    clientId,
+
+    scopes: [
+      DRIVE_FILE_SCOPE,
+      GOOGLE_EMAIL_SCOPE,
+      GOOGLE_PROFILE_SCOPE
+    ]
+  });
+
+  nativeGoogleInitialized = true;
+
+  console.log(
+    '[Google Native] initialized with OAuth scopes successfully'
+  );
+}
+
+/**
+ * Load Google Identity Services on Web only.
+ */
 export function loadGisScript(): Promise<void> {
   return new Promise((resolve) => {
-    if ((window as any).google?.accounts?.oauth2) {
+    if (
+      (window as any).google?.accounts?.oauth2
+    ) {
       resolve();
       return;
     }
+
+    const existing = document.querySelector(
+      'script[src="https://accounts.google.com/gsi/client"]'
+    );
+
+    if (existing) {
+      existing.addEventListener('load', () => resolve());
+
+      setTimeout(() => resolve(), 2000);
+      return;
+    }
+
     const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
+
+    script.src =
+      'https://accounts.google.com/gsi/client';
+
     script.async = true;
     script.defer = true;
+
     script.onload = () => resolve();
-    script.onerror = () => resolve(); // continue even if script block
+
+    script.onerror = () => resolve();
+
     document.head.appendChild(script);
   });
 }
 
 /**
- * Fetch Google user profile using access token
+ * Fetch Google user profile using an OAuth access token.
  */
-export async function fetchGoogleProfile(accessToken: string): Promise<{ email: string; name: string; picture?: string } | null> {
-  if (!accessToken || !accessToken.trim()) {
+export async function fetchGoogleProfile(
+  accessToken: string
+): Promise<{
+  email: string;
+  name: string;
+  picture?: string;
+} | null> {
+  if (!accessToken?.trim()) {
     return null;
   }
+
   try {
-    const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      return {
-        email: data.email || 'حساب Google',
-        name: data.name || data.given_name || 'مستخدم Google',
-        picture: data.picture
-      };
+    const response = await fetch(
+      'https://www.googleapis.com/oauth2/v3/userinfo',
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        }
+      }
+    );
+
+    if (!response.ok) {
+      return null;
     }
-  } catch (e) {
-    // Quietly ignore profile fetch failures
+
+    const data = await response.json();
+
+    return {
+      email: data.email || 'حساب Google',
+      name:
+        data.name ||
+        data.given_name ||
+        'مستخدم Google',
+      picture: data.picture
+    };
+  } catch {
+    return null;
   }
-  return null;
 }
 
 /**
- * Trigger OAuth Sign-In flow with Google Identity Services or Custom Token Prompt
+ * Native Android Google authorization.
+ *
+ * CRITICAL:
+ * We accept ONLY result.accessToken.
+ *
+ * result.idToken is NEVER used as an API access token.
  */
-export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleDriveUser | null> {
-  const configClientId = (firebaseConfig as any)?.oAuthClientId || (firebaseConfig as any)?.OAuthClientId;
-  const envClientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
-  const storedSettings = ((): any => {
-    try {
-      const s = localStorage.getItem('cafe_settings') || localStorage.getItem('cafe_eldeeb_settings');
-      return s ? JSON.parse(s) : null;
-    } catch { return null; }
-  })();
-  const settingsClientId = storedSettings?.google_drive_client_id;
+async function requestNativeGoogleDriveAuth(
+  clientId: string
+): Promise<GoogleDriveUser | null> {
+  try {
+    await initializeNativeGoogle(clientId);
 
-  const resolvedClientId = (clientId && clientId.includes('.apps.googleusercontent.com'))
-    ? clientId
-    : (settingsClientId && settingsClientId.includes('.apps.googleusercontent.com'))
-      ? settingsClientId
-      : (envClientId && envClientId.includes('.apps.googleusercontent.com'))
-        ? envClientId
-        : (configClientId && configClientId.includes('.apps.googleusercontent.com'))
-          ? configClientId
-          : '864337937711-gi69esgs44rn7d2li3mb6bfjhdspe2pv.apps.googleusercontent.com';
+    console.log(
+      '[Android Native GoogleDrive] Starting OAuth authorization...'
+    );
 
-  // ==========================================
-  // 1. Android Native Flow (Capacitor Native Platform)
-  // ==========================================
-  // On native Android, attempt Native Google Sign-In with Credential Manager / AuthorizationClient.
-  let nativeAccountHint: string | undefined = undefined;
+    const result =
+      await GoogleSignIn.signIn();
 
-  if (Capacitor.isNativePlatform()) {
-    const maskedClientId = resolvedClientId ? `...${resolvedClientId.slice(-15)}` : 'MISSING';
-    console.log('[Android Native GoogleDrive] Starting Auth Flow:', {
-      platform: Capacitor.getPlatform(),
-      appId: 'com.eldeeb.pos',
-      clientIdSuffix: maskedClientId,
-      scopesCount: 3
-    });
-
-    try {
-      const scopes = [
-        DRIVE_FILE_SCOPE,
-        'https://www.googleapis.com/auth/userinfo.email',
-        'https://www.googleapis.com/auth/userinfo.profile'
-      ];
-
-      try {
-        await GoogleSignIn.initialize({
-          clientId: resolvedClientId,
-          scopes
-        });
-        console.log('[Android Native GoogleDrive] GoogleSignIn.initialize succeeded.');
-      } catch (initErr: any) {
-        console.warn('[Android Native GoogleDrive] GoogleSignIn.initialize notice:', initErr?.message || initErr);
-      }
-
-      console.log('[Android Native GoogleDrive] Calling GoogleSignIn.signIn()...');
-      const result = await GoogleSignIn.signIn();
-      console.log('[Android Native GoogleDrive] GoogleSignIn.signIn result received:', {
-        hasUserId: !!result?.userId,
+    console.log(
+      '[Android Native GoogleDrive] Native result:',
+      {
         hasEmail: !!result?.email,
         hasIdToken: !!result?.idToken,
         hasAccessToken: !!result?.accessToken,
-        accessTokenType: result?.accessToken?.startsWith('eyJ') ? 'JWT_ID_TOKEN' : 'OAUTH2_TOKEN',
-        hasServerAuthCode: !!result?.serverAuthCode
-      });
-
-      if (result?.email) {
-        nativeAccountHint = result.email;
+        hasServerAuthCode:
+          !!result?.serverAuthCode
       }
+    );
 
-      // If a valid OAuth2 access token or Native Google result is returned
-      const token = result.accessToken || result.idToken;
-      if (token) {
-        let profile = null;
-        if (result.accessToken && !result.accessToken.startsWith('eyJ')) {
-          try {
-            profile = await fetchGoogleProfile(result.accessToken);
-          } catch (verifyErr: any) {
-            console.warn('[Android Native GoogleDrive] Profile fetch notice:', verifyErr?.message || verifyErr);
-          }
+    /*
+     * NEVER:
+     *
+     * const token =
+     *   result.accessToken || result.idToken;
+     *
+     * ID token is NOT accepted here.
+     */
+
+    const accessToken =
+      result?.accessToken || '';
+
+    if (!accessToken.trim()) {
+      console.error(
+        '[Android Native GoogleDrive] Google returned NO OAuth access token.',
+        {
+          hasIdToken: !!result?.idToken,
+          hasServerAuthCode:
+            !!result?.serverAuthCode
         }
+      );
 
-        const userEmail = profile?.email || result.email || 'user@google.com';
-        const userName = profile?.name || result.displayName || result.givenName || 'مستخدم Google';
-        const userPic = profile?.picture || result.imageUrl || undefined;
-
-        console.log('[Android Native GoogleDrive] Auth succeeded for:', userEmail);
-        return {
-          accessToken: token,
-          expiresAt: Date.now() + 3600 * 1000,
-          email: userEmail,
-          name: userName,
-          picture: userPic
-        };
-      }
-
-      console.log('[Android Native GoogleDrive] Native layer completed account selection, proceeding to complete OAuth2 token acquisition...');
-    } catch (nativeErr: any) {
-      console.warn('[Android Native GoogleDrive] Native sign-in notice, proceeding to web/GIS fallback:', nativeErr?.message || nativeErr);
+      return null;
     }
-  }
 
-  // ==========================================
-  // 2. Google Identity Services (GIS) Token Client Flow
-  // ==========================================
-  // Standard OAuth2 Access Token Client with account hint support
+    const profile =
+      await fetchGoogleProfile(accessToken);
+
+    const email =
+      profile?.email ||
+      result.email ||
+      'user@google.com';
+
+    const name =
+      profile?.name ||
+      result.displayName ||
+      result.givenName ||
+      'مستخدم Google';
+
+    console.log(
+      '[Android Native GoogleDrive] OAuth access token acquired for:',
+      email
+    );
+
+    return {
+      accessToken,
+      expiresAt:
+        Date.now() + 3600 * 1000,
+      email,
+      name,
+      picture:
+        profile?.picture ||
+        result.imageUrl ||
+        undefined
+    };
+  } catch (error: any) {
+    console.error(
+      '[Android Native GoogleDrive] OAuth failed:',
+      error?.message || error
+    );
+
+    return null;
+  }
+}
+
+/**
+ * Web GIS OAuth authorization.
+ */
+async function requestWebGoogleDriveAuth(
+  clientId: string
+): Promise<GoogleDriveUser | null> {
   await loadGisScript();
 
-  const gisUser = await new Promise<GoogleDriveUser | null>((resolve) => {
-    let hasResolved = false;
-    const safeResolve = (user: GoogleDriveUser | null) => {
-      if (!hasResolved) {
-        hasResolved = true;
-        clearTimeout(timeoutId);
-        resolve(user);
-      }
-    };
+  return new Promise<GoogleDriveUser | null>(
+    (resolve) => {
+      let completed = false;
 
-    const timeoutId = setTimeout(() => {
-      console.warn('Google Drive auth timed out or popup closed');
-      safeResolve(null);
-    }, 45000);
-
-    const google = (window as any).google;
-    if (google?.accounts?.oauth2) {
-      try {
-        const clientConfig: any = {
-          client_id: resolvedClientId,
-          scope: `${DRIVE_FILE_SCOPE} https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile`,
-          callback: async (response: any) => {
-            if (response && response.access_token && !response.error) {
-              const token = response.access_token;
-              const expiresIn = response.expires_in || 3600;
-              const profile = await fetchGoogleProfile(token);
-              
-              const user: GoogleDriveUser = {
-                accessToken: token,
-                expiresAt: Date.now() + expiresIn * 1000,
-                email: profile?.email || nativeAccountHint || 'user@google.com',
-                name: profile?.name || 'مستخدم Google',
-                picture: profile?.picture
-              };
-              safeResolve(user);
-            } else {
-              if (response?.error) {
-                console.warn('Google Auth callback error:', response.error);
-              }
-              safeResolve(null);
-            }
-          },
-          error_callback: (err: any) => {
-            console.warn('GIS token client error:', err);
-            safeResolve(null);
-          },
-          onerror: (err: any) => {
-            console.warn('GIS Auth onerror:', err);
-            safeResolve(null);
-          }
-        };
-
-        if (nativeAccountHint) {
-          clientConfig.hint = nativeAccountHint;
+      const finish = (
+        value: GoogleDriveUser | null
+      ) => {
+        if (completed) {
+          return;
         }
 
-        const client = google.accounts.oauth2.initTokenClient(clientConfig);
-        client.requestAccessToken();
+        completed = true;
+        clearTimeout(timeout);
+        resolve(value);
+      };
+
+      const timeout = setTimeout(() => {
+        console.warn(
+          '[Web GoogleDrive] OAuth timed out'
+        );
+
+        finish(null);
+      }, 45000);
+
+      const google = (window as any).google;
+
+      if (!google?.accounts?.oauth2) {
+        finish(null);
         return;
-      } catch (e) {
-        console.warn('Google Token Client init exception:', e);
-        safeResolve(null);
       }
-    } else {
-      safeResolve(null);
+
+      try {
+        const client =
+          google.accounts.oauth2.initTokenClient({
+            client_id: clientId,
+
+            scope: [
+              DRIVE_FILE_SCOPE,
+              GOOGLE_EMAIL_SCOPE,
+              GOOGLE_PROFILE_SCOPE
+            ].join(' '),
+
+            callback: async (
+              response: any
+            ) => {
+              if (
+                !response?.access_token ||
+                response?.error
+              ) {
+                console.warn(
+                  '[Web GoogleDrive] OAuth error:',
+                  response?.error
+                );
+
+                finish(null);
+                return;
+              }
+
+              const accessToken =
+                response.access_token;
+
+              const profile =
+                await fetchGoogleProfile(
+                  accessToken
+                );
+
+              finish({
+                accessToken,
+                expiresAt:
+                  Date.now() +
+                  (response.expires_in || 3600) *
+                    1000,
+                email:
+                  profile?.email ||
+                  'user@google.com',
+                name:
+                  profile?.name ||
+                  'مستخدم Google',
+                picture:
+                  profile?.picture
+              });
+            },
+
+            error_callback: (error: any) => {
+              console.warn(
+                '[Web GoogleDrive] OAuth error:',
+                error
+              );
+
+              finish(null);
+            }
+          });
+
+        client.requestAccessToken();
+      } catch (error) {
+        console.error(
+          '[Web GoogleDrive] OAuth exception:',
+          error
+        );
+
+        finish(null);
+      }
     }
-  });
+  );
+}
+
+/**
+ * Web Firebase authentication fallback.
+ *
+ * This is intentionally NOT used on native Android.
+ */
+async function requestFirebaseGoogleDriveAuth():
+  Promise<GoogleDriveUser | null> {
+  try {
+    const provider =
+      new GoogleAuthProvider();
+
+    provider.addScope(DRIVE_FILE_SCOPE);
+    provider.addScope(
+      GOOGLE_EMAIL_SCOPE
+    );
+    provider.addScope(
+      GOOGLE_PROFILE_SCOPE
+    );
+
+    provider.setCustomParameters({
+      prompt: 'select_account'
+    });
+
+    const result =
+      await signInWithPopup(
+        auth,
+        provider
+      );
+
+    const credential =
+      GoogleAuthProvider.credentialFromResult(
+        result
+      );
+
+    const accessToken =
+      credential?.accessToken;
+
+    /*
+     * Firebase credential must also contain
+     * an OAuth access token.
+     *
+     * ID token is NOT used.
+     */
+    if (!accessToken) {
+      console.error(
+        '[Firebase GoogleDrive] No OAuth access token returned'
+      );
+
+      return null;
+    }
+
+    const user = result.user;
+
+    return {
+      accessToken,
+      expiresAt:
+        Date.now() + 3600 * 1000,
+      email:
+        user.email ||
+        'user@google.com',
+      name:
+        user.displayName ||
+        'مستخدم Google',
+      picture:
+        user.photoURL ||
+        undefined
+    };
+  } catch (error: any) {
+    console.warn(
+      '[Firebase GoogleDrive] OAuth failed:',
+      error?.code ||
+        error?.message ||
+        error
+    );
+
+    return null;
+  }
+}
+
+/**
+ * Main Google Drive authentication.
+ */
+export async function requestGoogleDriveAuth(
+  clientId?: string
+): Promise<GoogleDriveUser | null> {
+  const resolvedClientId =
+    resolveGoogleWebClientId(clientId);
+
+  console.log(
+    '[GoogleDrive] Client ID:',
+    `...${resolvedClientId.slice(-20)}`
+  );
+
+  /*
+   * ANDROID / NATIVE
+   *
+   * Do NOT fall back to GIS inside Android WebView.
+   */
+  if (Capacitor.isNativePlatform()) {
+    return requestNativeGoogleDriveAuth(
+      resolvedClientId
+    );
+  }
+
+  /*
+   * WEB
+   */
+  const gisUser =
+    await requestWebGoogleDriveAuth(
+      resolvedClientId
+    );
 
   if (gisUser) {
     return gisUser;
   }
 
-  // ==========================================
-  // 3. Web Secondary Fallback: Firebase Auth Google Popup (Web only)
-  // ==========================================
-  try {
-    const provider = new GoogleAuthProvider();
-    provider.addScope(DRIVE_FILE_SCOPE);
-    provider.addScope('https://www.googleapis.com/auth/userinfo.email');
-    provider.addScope('https://www.googleapis.com/auth/userinfo.profile');
-    provider.setCustomParameters({ prompt: 'select_account' });
-
-    const result = await signInWithPopup(auth, provider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    const token = credential?.accessToken;
-    const user = result.user;
-
-    if (token) {
-      return {
-        accessToken: token,
-        expiresAt: Date.now() + 3600 * 1000,
-        email: user.email || 'user@google.com',
-        name: user.displayName || 'مستخدم Google',
-        picture: user.photoURL || undefined
-      };
-    }
-  } catch (fbErr: any) {
-    console.warn('Firebase Auth Google popup warning for Drive:', fbErr?.code || fbErr?.message || fbErr);
-  }
-
-  return null;
+  /*
+   * Firebase popup fallback for Web.
+   */
+  return requestFirebaseGoogleDriveAuth();
 }
 
 /**
- * Format bytes into human readable size (KB/MB)
+ * Format bytes.
  */
-export function formatBytes(bytes: number): string {
-  if (!bytes || bytes <= 0) return '0 KB';
+export function formatBytes(
+  bytes: number
+): string {
+  if (!bytes || bytes <= 0) {
+    return '0 KB';
+  }
+
   if (bytes < 1024 * 1024) {
-    return `${Math.round(bytes / 1024)} KB`;
+    return `${Math.round(
+      bytes / 1024
+    )} KB`;
   }
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+
+  return `${(
+    bytes /
+    (1024 * 1024)
+  ).toFixed(2)} MB`;
 }
 
 /**
- * Format ISO date string into Arabic friendly format
+ * Format date.
  */
-export function formatArabicDateTime(isoString: string): string {
+export function formatArabicDateTime(
+  isoString: string
+): string {
   try {
-    const date = new Date(isoString);
-    if (isNaN(date.getTime())) return isoString;
-    
-    return date.toLocaleDateString('ar-EG', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  } catch (e) {
+    const date = new Date(
+      isoString
+    );
+
+    if (isNaN(date.getTime())) {
+      return isoString;
+    }
+
+    return date.toLocaleDateString(
+      'ar-EG',
+      {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      }
+    );
+  } catch {
     return isoString;
   }
 }
 
 /**
- * List backup files in Google Drive
+ * List Google Drive backups.
  */
-export async function listGoogleDriveBackups(accessToken: string): Promise<GoogleDriveBackupFile[]> {
-  if (!accessToken || !accessToken.trim()) {
+export async function listGoogleDriveBackups(
+  accessToken: string
+): Promise<GoogleDriveBackupFile[]> {
+  if (!accessToken?.trim()) {
     throw new Error('UNAUTHORIZED');
   }
 
+  const query =
+    encodeURIComponent(
+      "mimeType = 'application/json' and trashed = false"
+    );
+
+  const fields =
+    encodeURIComponent(
+      'files(id,name,createdTime,modifiedTime,size,description,appProperties)'
+    );
+
+  const url =
+    `https://www.googleapis.com/drive/v3/files` +
+    `?q=${query}` +
+    `&fields=${fields}` +
+    `&orderBy=createdTime%20desc`;
+
   try {
-    const q = encodeURIComponent("mimeType = 'application/json' and trashed = false");
-    const fields = encodeURIComponent('files(id, name, createdTime, modifiedTime, size, description, appProperties)');
-    const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=${fields}&orderBy=createdTime%20desc`;
+    const response =
+      await fetch(url, {
+        headers: {
+          Authorization:
+            `Bearer ${accessToken}`
+        }
+      });
 
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
-
-    if (!res.ok) {
-      if (res.status === 401) {
-        throw new Error('UNAUTHORIZED');
+    if (!response.ok) {
+      if (
+        response.status === 401 ||
+        response.status === 403
+      ) {
+        throw new Error(
+          'UNAUTHORIZED'
+        );
       }
-      throw new Error(`Google Drive API error: ${res.status}`);
+
+      throw new Error(
+        `Google Drive API error: ${response.status}`
+      );
     }
 
-    const data = await res.json();
-    const files = data.files || [];
+    const data =
+      await response.json();
 
-    return files.map((f: any) => {
-      const sizeNum = parseInt(f.size || '0', 10);
-      const isAuto = f.name?.includes('auto') || f.appProperties?.type === 'auto';
-      return {
-        id: f.id,
-        name: f.name,
-        createdTime: f.createdTime,
-        modifiedTime: f.modifiedTime,
-        size: sizeNum,
-        formattedSize: formatBytes(sizeNum),
-        formattedDate: formatArabicDateTime(f.createdTime),
-        description: f.description || 'نسخة احتياطية لكافيه الديب POS',
-        appProperties: f.appProperties || {},
-        isAuto
-      };
-    });
-  } catch (e: any) {
-    if (e?.message !== 'UNAUTHORIZED') {
-      console.warn('Failed to list backups from Google Drive:', e?.message || e);
-    }
-    throw e;
+    return (data.files || []).map(
+      (file: any) => {
+        const size =
+          parseInt(
+            file.size || '0',
+            10
+          );
+
+        const isAuto =
+          file.name?.includes('auto') ||
+          file.appProperties?.type ===
+            'auto';
+
+        return {
+          id: file.id,
+          name: file.name,
+          createdTime:
+            file.createdTime,
+          modifiedTime:
+            file.modifiedTime,
+          size,
+          formattedSize:
+            formatBytes(size),
+          formattedDate:
+            formatArabicDateTime(
+              file.createdTime
+            ),
+          description:
+            file.description ||
+            'نسخة احتياطية لكافيه الديب POS',
+          appProperties:
+            file.appProperties || {},
+          isAuto
+        };
+      }
+    );
+  } catch (error: any) {
+    console.warn(
+      '[GoogleDrive] Failed to list backups:',
+      error?.message || error
+    );
+
+    throw error;
   }
 }
 
 /**
- * Upload a backup file to Google Drive (Multipart)
+ * Upload backup to Google Drive.
  */
 export async function uploadBackupToGoogleDrive(
   accessToken: string,
@@ -379,95 +707,186 @@ export async function uploadBackupToGoogleDrive(
   cafeName: string = 'كافيه الديب',
   isAuto: boolean = false
 ): Promise<GoogleDriveBackupFile> {
+  if (!accessToken?.trim()) {
+    throw new Error('UNAUTHORIZED');
+  }
+
   const metadata = {
     name: fileName,
     mimeType: 'application/json',
-    description: `نسخة احتياطية شاملة لكافيه (${cafeName}) - ${isAuto ? 'تلقائية' : 'يدوية'}`,
+    description:
+      `نسخة احتياطية شاملة لكافيه (${cafeName}) - ${
+        isAuto ? 'تلقائية' : 'يدوية'
+      }`,
     appProperties: {
       app: 'eldeeb_pos_enterprise',
       cafe: cafeName,
-      type: isAuto ? 'auto' : 'manual'
+      type: isAuto
+        ? 'auto'
+        : 'manual'
     }
   };
 
-  const boundary = '-------314159265358979323846';
-  const delimiter = "\r\n--" + boundary + "\r\n";
-  const close_delim = "\r\n--" + boundary + "--";
+  const boundary =
+    '-------314159265358979323846';
 
-  const multipartRequestBody =
+  const delimiter =
+    '\r\n--' +
+    boundary +
+    '\r\n';
+
+  const closeDelimiter =
+    '\r\n--' +
+    boundary +
+    '--';
+
+  const body =
     delimiter +
     'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
     JSON.stringify(metadata) +
     delimiter +
     'Content-Type: application/json\r\n\r\n' +
     jsonContent +
-    close_delim;
+    closeDelimiter;
 
-  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': `multipart/related; boundary=${boundary}`
-    },
-    body: multipartRequestBody
-  });
+  const response =
+    await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+      {
+        method: 'POST',
+        headers: {
+          Authorization:
+            `Bearer ${accessToken}`,
+          'Content-Type':
+            `multipart/related; boundary=${boundary}`
+        },
+        body
+      }
+    );
 
-  if (!res.ok) {
-    if (res.status === 401) {
-      throw new Error('UNAUTHORIZED');
+  if (!response.ok) {
+    if (
+      response.status === 401 ||
+      response.status === 403
+    ) {
+      throw new Error(
+        'UNAUTHORIZED'
+      );
     }
-    throw new Error(`Upload failed with status ${res.status}`);
+
+    throw new Error(
+      `Upload failed with status ${response.status}`
+    );
   }
 
-  const uploaded = await res.json();
-  const sizeNum = jsonContent.length;
+  const uploaded =
+    await response.json();
+
+  const size =
+    new Blob([jsonContent]).size;
+
+  const now =
+    new Date().toISOString();
 
   return {
     id: uploaded.id,
-    name: uploaded.name || fileName,
-    createdTime: new Date().toISOString(),
-    size: sizeNum,
-    formattedSize: formatBytes(sizeNum),
-    formattedDate: formatArabicDateTime(new Date().toISOString()),
-    description: metadata.description,
+    name:
+      uploaded.name ||
+      fileName,
+    createdTime: now,
+    size,
+    formattedSize:
+      formatBytes(size),
+    formattedDate:
+      formatArabicDateTime(now),
+    description:
+      metadata.description,
     isAuto
   };
 }
 
 /**
- * Download a backup file content from Google Drive
+ * Download backup.
  */
-export async function downloadBackupFromGoogleDrive(accessToken: string, fileId: string): Promise<string> {
-  const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${accessToken}` }
-  });
-
-  if (!res.ok) {
-    if (res.status === 401) {
-      throw new Error('UNAUTHORIZED');
-    }
-    throw new Error(`Download failed with status ${res.status}`);
+export async function downloadBackupFromGoogleDrive(
+  accessToken: string,
+  fileId: string
+): Promise<string> {
+  if (!accessToken?.trim()) {
+    throw new Error('UNAUTHORIZED');
   }
 
-  return await res.text();
+  const response =
+    await fetch(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(
+        fileId
+      )}?alt=media`,
+      {
+        headers: {
+          Authorization:
+            `Bearer ${accessToken}`
+        }
+      }
+    );
+
+  if (!response.ok) {
+    if (
+      response.status === 401 ||
+      response.status === 403
+    ) {
+      throw new Error(
+        'UNAUTHORIZED'
+      );
+    }
+
+    throw new Error(
+      `Download failed with status ${response.status}`
+    );
+  }
+
+  return response.text();
 }
 
 /**
- * Delete a backup file from Google Drive
+ * Delete backup.
  */
-export async function deleteBackupFromGoogleDrive(accessToken: string, fileId: string): Promise<boolean> {
-  const url = `https://www.googleapis.com/drive/v3/files/${fileId}`;
-  const res = await fetch(url, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${accessToken}` }
-  });
-
-  if (res.ok || res.status === 204) {
-    return true;
-  }
-  if (res.status === 401) {
+export async function deleteBackupFromGoogleDrive(
+  accessToken: string,
+  fileId: string
+): Promise<boolean> {
+  if (!accessToken?.trim()) {
     throw new Error('UNAUTHORIZED');
   }
+
+  const response =
+    await fetch(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(
+        fileId
+      )}`,
+      {
+        method: 'DELETE',
+        headers: {
+          Authorization:
+            `Bearer ${accessToken}`
+        }
+      }
+    );
+
+  if (
+    response.ok ||
+    response.status === 204
+  ) {
+    return true;
+  }
+
+  if (
+    response.status === 401 ||
+    response.status === 403
+  ) {
+    throw new Error(
+      'UNAUTHORIZED'
+    );
+  }
+
   return false;
 }
