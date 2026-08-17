@@ -174,12 +174,16 @@ class FirebaseSyncService {
 
           const isFromOtherDevice = docData.deviceId && docData.deviceId !== this.deviceId;
 
-          if (
-            remoteUpdatedAt >= localUpdatedAt - 120000 ||
-            isFromOtherDevice ||
+          // Pure timestamp-based conflict resolution:
+          // 1. Accept remote version if it is newer, or if local copy is missing/uninitialized.
+          // 2. If timestamps are equal, accept remote safely without data destruction.
+          const shouldAcceptRemote =
+            remoteUpdatedAt > localUpdatedAt ||
             localUpdatedAt === 0 ||
-            !localVal
-          ) {
+            !localVal ||
+            (remoteUpdatedAt === localUpdatedAt && remoteData !== null && remoteData !== undefined);
+
+          if (shouldAcceptRemote) {
             this.isProcessingRemoteChange = true;
             try {
               if (key === 'cafe_settings') {
@@ -402,7 +406,7 @@ class FirebaseSyncService {
       'cafe_ps_sessions', 'cafe_daily_raw_materials', 'cafe_raw_materials', 'cafe_raw_materials_seeded',
       'cafe_raw_materials_deleted', 'cafe_inventory_batches', 'cafe_inventory_batch_logs',
       'cafe_batch_consumptions', 'cafe_auth_users', 'cafe_auth_audit_logs', 'cafe_partners',
-      'cafe_partner_drawings', 'cafe_update_logs'
+      'cafe_partner_drawings', 'cafe_update_logs', 'cafe_shifts', 'cafe_shift_handovers'
     ];
 
     try {
@@ -447,7 +451,7 @@ class FirebaseSyncService {
       'cafe_ps_sessions', 'cafe_daily_raw_materials', 'cafe_raw_materials', 'cafe_raw_materials_seeded',
       'cafe_raw_materials_deleted', 'cafe_inventory_batches', 'cafe_inventory_batch_logs',
       'cafe_batch_consumptions', 'cafe_auth_users', 'cafe_auth_audit_logs', 'cafe_partners',
-      'cafe_partner_drawings', 'cafe_update_logs'
+      'cafe_partner_drawings', 'cafe_update_logs', 'cafe_shifts', 'cafe_shift_handovers'
     ];
 
     let pushedCount = 0;

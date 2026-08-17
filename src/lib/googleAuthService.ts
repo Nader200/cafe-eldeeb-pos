@@ -16,12 +16,6 @@ const GOOGLE_CLIENT_ID =
 export const GOOGLE_DRIVE_SCOPE =
   'https://www.googleapis.com/auth/drive.file';
 
-export const GMAIL_SEND_SCOPE =
-  'https://www.googleapis.com/auth/gmail.send';
-
-export const GMAIL_READ_SCOPE =
-  'https://www.googleapis.com/auth/gmail.readonly';
-
 export const GOOGLE_PROFILE_SCOPE =
   'https://www.googleapis.com/auth/userinfo.profile';
 

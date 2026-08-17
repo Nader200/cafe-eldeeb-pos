@@ -476,25 +476,7 @@ export default function UserManualView({ currentUser, onNavigateTab }: UserManua
       ]
     },
 
-    // 16. GMAIL INTEGRATION
-    {
-      id: 'gmail_integration',
-      title: 'تكامل Gmail والرسائل البريدية (Gmail Receipts & Reports)',
-      category: 'system_integrations',
-      icon: <Mail className="w-5 h-5 text-gold-400" />,
-      badge: 'الرسائل الإلكترونية',
-      targetRoles: ['Admin'],
-      summary: 'ربط النظام بحساب Gmail لإرسال فواتير إلكترونية للعملاء وإرسال ملخص التقفيل اليومي لبريد الأدمن.',
-      steps: [
-        {
-          title: '١. إعداد بريد الإرسال ومفتاح التطبيق',
-          description: 'من شاشة الإعدادات ➔ Gmail، أدخل البريد الإلكتروني ومفتاح App Password لإرسال الرسائل تلقائياً بدون تدخل.',
-          tip: 'إرسال تقرير التقفيل اليومي لبريد المالك فور إغلاق الوردية يضمن الإشراف المستمر أثناء السفر.'
-        }
-      ]
-    },
-
-    // 17. FIREBASE REAL-TIME SYNC
+    // 16. FIREBASE REAL-TIME SYNC
     {
       id: 'firebase_sync',
       title: 'المزامنة اللحظية السحابية Firebase (Real-time Cloud Sync)',

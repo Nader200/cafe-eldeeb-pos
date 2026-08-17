@@ -42,7 +42,6 @@ const localStorage = safeStorage;
 import { AppSettings, PaymentNumber, UpdateLog } from '../types';
 import { THEMES, normalizeThemeKey, applyThemeToDOM } from '../lib/themeEngine';
 import GoogleDriveBackupView from './GoogleDriveBackupView';
-import GmailIntegrationView from './GmailIntegrationView';
 import RoyalBrandBoard from './RoyalBrandBoard';
 import { CURRENT_APP_VERSION, CURRENT_RELEASE_DATE, detectClientPlatform, ClientPlatform, UpdateCheckResult } from '../config/version';
 import { checkForUpdates, publishRemoteVersionConfig } from '../services/updateService';
@@ -102,7 +101,7 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
   const { currentUser } = useAuth();
 
   // Tab Control
-  const [activeTab, setActiveTab] = useState<'general' | 'backup' | 'gmail' | 'brand' | 'accounting' | 'payments' | 'partners' | 'updates' | 'manual'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'backup' | 'brand' | 'accounting' | 'payments' | 'partners' | 'updates' | 'manual'>('general');
 
   // Version & Updates Management State
   const [autoUpdateEnabled, setAutoUpdateEnabled] = useState<boolean>(true);
@@ -840,18 +839,6 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
           ☁️ النسخ الاحتياطي والاستعادة (Google Drive)
         </button>
         <button
-          id="tab-settings-gmail-integration"
-          type="button"
-          onClick={() => setActiveTab('gmail')}
-          className={`flex-1 py-3 text-xs font-bold rounded-xl transition-all cursor-pointer ${
-            activeTab === 'gmail'
-              ? 'bg-gold-600 text-black font-extrabold shadow-md'
-              : 'text-gray-400 hover:text-white hover:bg-gray-900/60'
-          }`}
-        >
-          📧 البريد والتقارير (Gmail)
-        </button>
-        <button
           id="tab-settings-brand-guide"
           type="button"
           onClick={() => setActiveTab('brand')}
@@ -1477,14 +1464,6 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
 
       {activeTab === 'backup' && (
         <GoogleDriveBackupView
-          onShowSuccessAlert={onShowSuccessAlert}
-          onShowWarningAlert={onShowWarningAlert}
-          onSettingsChanged={onSettingsChanged}
-        />
-      )}
-
-      {activeTab === 'gmail' && (
-        <GmailIntegrationView
           onShowSuccessAlert={onShowSuccessAlert}
           onShowWarningAlert={onShowWarningAlert}
           onSettingsChanged={onSettingsChanged}

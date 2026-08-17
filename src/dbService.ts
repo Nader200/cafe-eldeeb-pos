@@ -720,69 +720,29 @@ export const dbService = {
       }
       const data = await res.json();
       if (data && typeof data === 'object' && Object.keys(data).length > 0) {
-        // We received data from the server! Write it to local storage.
+        // Only seed keys that do not exist locally to avoid overwriting newer local or Firestore-synced data
         Object.entries(data).forEach(([key, val]) => {
-          if (key === KEYS.INVOICES) {
-            // Merge invoices to preserve client's pending (OPEN/DRAFT) invoices
-            const localInvoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
-            const serverInvoices = val as Invoice[];
-            const mergedInvoices = [...serverInvoices];
-            
-            localInvoices.forEach(localInv => {
-              if (localInv.invoice_status === 'OPEN' || localInv.invoice_status === 'DRAFT') {
-                const serverIdx = mergedInvoices.findIndex(si => si.id === localInv.id);
-                if (serverIdx === -1) {
-                  mergedInvoices.push(localInv);
-                } else {
-                  const localTime = new Date(localInv.updated_at || 0).getTime();
-                  const serverTime = new Date(mergedInvoices[serverIdx].updated_at || 0).getTime();
-                  if (localTime > serverTime) {
-                    mergedInvoices[serverIdx] = localInv;
-                  }
-                }
-              }
-            });
-            localStorage.setItem(key, JSON.stringify(mergedInvoices));
-          } else if (key === KEYS.INVOICE_ITEMS) {
-            // Merge invoice items for the merged invoices
-            const localItems = getLocal<InvoiceItem[]>(KEYS.INVOICE_ITEMS, []);
-            const serverItems = val as InvoiceItem[];
-            const mergedItems = [...serverItems];
-            
-            localItems.forEach(localItem => {
-              const localInvoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
-              const parentInvoice = localInvoices.find(li => li.id === localItem.invoice_id);
-              if (parentInvoice && (parentInvoice.invoice_status === 'OPEN' || parentInvoice.invoice_status === 'DRAFT')) {
-                const serverItemIdx = mergedItems.findIndex(si => si.id === localItem.id);
-                if (serverItemIdx === -1) {
-                  mergedItems.push(localItem);
-                } else {
-                  const localTime = new Date(localItem.updated_at || 0).getTime();
-                  const serverTime = new Date(mergedItems[serverItemIdx].updated_at || 0).getTime();
-                  if (localTime > serverTime) {
-                    mergedItems[serverItemIdx] = localItem;
-                  }
-                }
-              }
-            });
-            localStorage.setItem(key, JSON.stringify(mergedItems));
+          const existingVal = safeStorage.getItem(key);
+          const hasLocalData = existingVal !== null && existingVal !== undefined && existingVal !== '' && existingVal !== '[]' && existingVal !== '{}';
+
+          if (!hasLocalData) {
+            // Local storage is empty for this key; seed from db.json as baseline
+            safeStorage.setItem(key, typeof val === 'string' ? val : JSON.stringify(val));
+            // Mark baseline metadata timestamp as 0 so any Firebase cloud data will supersede it cleanly
+            if (!safeStorage.getItem(`__meta_updated_${key}`)) {
+              safeStorage.setItem(`__meta_updated_${key}`, '0');
+            }
           } else if (key === KEYS.SETTINGS) {
             const localSettings = getLocal<AppSettings | null>(KEYS.SETTINGS, null);
             const serverSettings = val as AppSettings;
             if (localSettings && localSettings.is_setup_completed && (!serverSettings || !serverSettings.is_setup_completed)) {
-              localStorage.setItem(key, JSON.stringify({ ...defaultSettings, ...serverSettings, ...localSettings, is_setup_completed: true }));
+              safeStorage.setItem(key, JSON.stringify({ ...defaultSettings, ...serverSettings, ...localSettings, is_setup_completed: true }));
             } else if (localSettings && localSettings.cafe_name && (!serverSettings || !serverSettings.cafe_name)) {
-              localStorage.setItem(key, JSON.stringify({ ...defaultSettings, ...serverSettings, ...localSettings }));
-            } else {
-              localStorage.setItem(key, JSON.stringify(val));
+              safeStorage.setItem(key, JSON.stringify({ ...defaultSettings, ...serverSettings, ...localSettings }));
             }
-          } else {
-            localStorage.setItem(key, JSON.stringify(val));
           }
         });
         isDatabaseLoadedFromServer = true;
-        // Trigger a sync back to server to make sure any local pending invoices are written to server
-        syncToServer();
         return true;
       } else {
         isDatabaseLoadedFromServer = true;

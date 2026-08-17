@@ -37,12 +37,9 @@ export const safeStorage = (() => {
     useRealStorage = false;
   }
 
-  // Heavy keys or payloads > 80KB should be kept in memory to preserve localStorage quota for core POS state
-  const isHeavyKey = (key: string, valueStr?: string): boolean => {
+  // Only transient large backup blobs are kept in memory to preserve localStorage quota for core POS state
+  const isHeavyKey = (key: string): boolean => {
     if (key.startsWith('cafe_backup_content_') || key.startsWith('gdrive_file_data_')) {
-      return true;
-    }
-    if (valueStr && valueStr.length > 80000) {
       return true;
     }
     return false;
@@ -65,7 +62,7 @@ export const safeStorage = (() => {
     setItem(key: string, value: string): void {
       const valueStr = String(value);
 
-      if (isHeavyKey(key, valueStr)) {
+      if (isHeavyKey(key)) {
         memoryStorage[key] = valueStr;
         // Clean up from real storage if it was there before
         if (useRealStorage) {
@@ -77,19 +74,22 @@ export const safeStorage = (() => {
       if (useRealStorage) {
         try {
           window.localStorage.setItem(key, valueStr);
+          // Also keep in memory mirror for instant synchronous lookups
+          memoryStorage[key] = valueStr;
           return;
         } catch (e: any) {
           console.warn(`localStorage.setItem failed for key ${key} (QuotaExceeded or disabled):`, e);
-          // Clean up non-essential keys
+          // Clean up non-essential log keys if quota exceeded
           try {
             const keysToTrim = ['cafe_audit_logs', 'cafe_update_logs', 'cafe_communication_logs', 'cafe_auth_audit_logs', 'cafe_backup_logs'];
             keysToTrim.forEach(k => {
               try { window.localStorage.removeItem(k); } catch (err) {}
             });
             window.localStorage.setItem(key, valueStr);
+            memoryStorage[key] = valueStr;
             return;
           } catch (retryErr) {
-            // fallback to in-memory storage
+            // fallback to in-memory storage if storage completely full
           }
         }
       }
