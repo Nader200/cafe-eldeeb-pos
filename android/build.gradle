@@ -4,6 +4,8 @@ buildscript {
     repositories {
         google()
         mavenCentral()
+        maven { url 'https://plugins.gradle.org/m2/' }
+        maven { url 'https://maven.google.com' }
     }
     dependencies {
         classpath 'com.android.tools.build:gradle:8.5.2'
@@ -21,6 +23,8 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        maven { url 'https://plugins.gradle.org/m2/' }
+        maven { url 'https://maven.google.com' }
     }
     configurations.all {
         exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7'
