@@ -145,22 +145,25 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
         nativeAccountHint = result.email;
       }
 
-      // Strictly use OAuth2 accessToken only (never use idToken for Google Drive API)
-      if (result?.accessToken && !result.accessToken.startsWith('eyJ')) {
+      // Android Native Success: Accept either OAuth2 accessToken or idToken as authentication proof
+      const receivedToken = result?.accessToken || result?.idToken;
+      if (receivedToken) {
         let profile = null;
-        try {
-          profile = await fetchGoogleProfile(result.accessToken);
-        } catch (verifyErr: any) {
-          console.warn('[Android Native GoogleDrive] Profile fetch notice:', verifyErr?.message || verifyErr);
+        if (!receivedToken.startsWith('eyJ')) {
+          try {
+            profile = await fetchGoogleProfile(receivedToken);
+          } catch (verifyErr: any) {
+            console.warn('[Android Native GoogleDrive] Profile fetch notice:', verifyErr?.message || verifyErr);
+          }
         }
 
         const userEmail = profile?.email || result.email || 'user@google.com';
         const userName = profile?.name || result.displayName || result.givenName || 'مستخدم Google';
         const userPic = profile?.picture || result.imageUrl || undefined;
 
-        console.log('[Android Native GoogleDrive] Auth succeeded for:', userEmail);
+        console.log('[Android Native GoogleDrive] Native Sign-in completed successfully for:', userEmail);
         return {
-          accessToken: result.accessToken,
+          accessToken: receivedToken,
           expiresAt: Date.now() + 3600 * 1000,
           email: userEmail,
           name: userName,
@@ -253,31 +256,33 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
   }
 
   // ==========================================
-  // 3. Web Secondary Fallback: Firebase Auth Google Popup (Web only)
+  // 3. Web Secondary Fallback: Firebase Auth Google Popup (Web only, skip on native Android)
   // ==========================================
-  try {
-    const provider = new GoogleAuthProvider();
-    provider.addScope(DRIVE_FILE_SCOPE);
-    provider.addScope('https://www.googleapis.com/auth/userinfo.email');
-    provider.addScope('https://www.googleapis.com/auth/userinfo.profile');
-    provider.setCustomParameters({ prompt: 'select_account' });
+  if (!Capacitor.isNativePlatform()) {
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.addScope(DRIVE_FILE_SCOPE);
+      provider.addScope('https://www.googleapis.com/auth/userinfo.email');
+      provider.addScope('https://www.googleapis.com/auth/userinfo.profile');
+      provider.setCustomParameters({ prompt: 'select_account' });
 
-    const result = await signInWithPopup(auth, provider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    const token = credential?.accessToken;
-    const user = result.user;
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      const token = credential?.accessToken;
+      const user = result.user;
 
-    if (token) {
-      return {
-        accessToken: token,
-        expiresAt: Date.now() + 3600 * 1000,
-        email: user.email || 'user@google.com',
-        name: user.displayName || 'مستخدم Google',
-        picture: user.photoURL || undefined
-      };
+      if (token) {
+        return {
+          accessToken: token,
+          expiresAt: Date.now() + 3600 * 1000,
+          email: user.email || 'user@google.com',
+          name: user.displayName || 'مستخدم Google',
+          picture: user.photoURL || undefined
+        };
+      }
+    } catch (fbErr: any) {
+      console.warn('Firebase Auth Google popup warning for Drive:', fbErr?.code || fbErr?.message || fbErr);
     }
-  } catch (fbErr: any) {
-    console.warn('Firebase Auth Google popup warning for Drive:', fbErr?.code || fbErr?.message || fbErr);
   }
 
   return null;
