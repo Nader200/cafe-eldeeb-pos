@@ -132,53 +132,6 @@ async function startServer() {
     };
     sendChunk();
   });
-  app.post("/api/send-email", async (req, res) => {
-    try {
-      const { token, toEmail, subject, htmlContent } = req.body;
-      if (!toEmail) {
-        return res.status(400).json({ error: "\u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A \u0644\u0644\u0645\u0633\u062A\u0644\u0645 \u0645\u0637\u0644\u0648\u0628" });
-      }
-      console.log(`[Server Email Service] Email dispatch requested for ${toEmail}: "${subject}"`);
-      if (token) {
-        const utf8Subject = `=?utf-8?B?${Buffer.from(subject || "").toString("base64")}?=`;
-        const mimeParts = [
-          `To: ${toEmail}`,
-          `Subject: ${utf8Subject}`,
-          "Content-Type: text/html; charset=utf-8",
-          "MIME-Version: 1.0",
-          "",
-          htmlContent || ""
-        ];
-        const rawMessage = Buffer.from(mimeParts.join("\r\n")).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-        const gmailRes = await fetch("https://gmail.googleapis.com/v1/users/me/messages/send", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${token}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ raw: rawMessage })
-        });
-        if (gmailRes.ok) {
-          const data = await gmailRes.json();
-          console.log(`[Server Gmail Proxy] Email successfully sent to ${toEmail}, id: ${data.id}`);
-          return res.json({ success: true, id: data.id, message: "\u062A\u0645 \u0625\u0631\u0633\u0627\u0644 \u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A \u0628\u0646\u062C\u0627\u062D \u0639\u0628\u0631 Gmail" });
-        } else {
-          const errData = await gmailRes.json().catch(() => ({}));
-          console.warn(`[Server Gmail Proxy] Gmail API error (${gmailRes.status}):`, errData);
-          const msg = errData.error?.message || `\u062E\u0637\u0623 \u0641\u064A \u062E\u0627\u062F\u0645 \u0642\u0648\u0642\u0644 (${gmailRes.status})`;
-          const isAuthErr = gmailRes.status === 401 || gmailRes.status === 403;
-          return res.status(isAuthErr ? 401 : 400).json({
-            error: isAuthErr ? "\u0627\u0646\u062A\u0647\u062A \u0635\u0644\u0627\u062D\u064A\u0629 \u062C\u0644\u0633\u0629 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0628\u062D\u0633\u0627\u0628 \u0642\u0648\u0642\u0644. \u064A\u0631\u062C\u0649 \u0625\u0639\u0627\u062F\u0629 \u0627\u0644\u0627\u062A\u0635\u0627\u0644 \u0628\u0627\u0644\u062D\u0633\u0627\u0628." : msg,
-            needReauth: isAuthErr
-          });
-        }
-      }
-      return res.json({ success: true, message: "\u062A\u0645 \u062A\u0633\u062C\u064A\u0644 \u0648\u062A\u062C\u0647\u064A\u0632 \u0627\u0644\u062A\u0642\u0631\u064A\u0631 \u0628\u0646\u062C\u0627\u062D \u0639\u0644\u0649 \u0627\u0644\u062E\u0627\u062F\u0645" });
-    } catch (e) {
-      console.error("Failed to process email API:", e);
-      return res.status(500).json({ error: e?.message || "\u0641\u0634\u0644 \u0625\u0631\u0633\u0627\u0644 \u0627\u0644\u0628\u0631\u064A\u062F \u0645\u0646 \u0627\u0644\u062E\u0627\u062F\u0645" });
-    }
-  });
   if (process.env.NODE_ENV !== "production") {
     const vite = await (0, import_vite.createServer)({
       server: { middlewareMode: true },

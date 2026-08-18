@@ -4,7 +4,7 @@
  */
 
 import { doc, setDoc, getDoc, onSnapshot, collection, Unsubscribe } from 'firebase/firestore';
-import { db, auth, handleFirestoreError, OperationType } from './firebaseClient';
+import { db, auth, handleFirestoreError, OperationType, ensureFirebaseAuth } from './firebaseClient';
 import { safeStorage } from './safeStorage';
 
 export type SyncStatus = 'connected' | 'syncing' | 'offline' | 'error';
@@ -130,6 +130,8 @@ class FirebaseSyncService {
     if (this.unsubscribeSnapshot) {
       this.unsubscribeSnapshot();
     }
+
+    ensureFirebaseAuth().catch(() => {});
 
     this.updateCafeIdFromSettings();
     const storePath = `cafes/${this.cafeId}/sync_store`;
@@ -296,6 +298,8 @@ class FirebaseSyncService {
     const now = Date.now();
     safeStorage.setItem(`__meta_updated_${key}`, String(now));
     this.cloudTimestamps.set(key, now);
+
+    ensureFirebaseAuth().catch(() => {});
 
     if (!navigator.onLine) {
       this.status = 'offline';

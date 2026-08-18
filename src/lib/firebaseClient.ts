@@ -4,7 +4,16 @@
  */
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, setPersistence, browserLocalPersistence, indexedDBLocalPersistence } from 'firebase/auth';
+import {
+  getAuth,
+  signInWithEmailAndPassword,
+  signInAnonymously,
+  onAuthStateChanged,
+  setPersistence,
+  browserLocalPersistence,
+  indexedDBLocalPersistence,
+  User
+} from 'firebase/auth';
 import {
   initializeFirestore,
   getFirestore,
@@ -83,33 +92,59 @@ if (typeof window !== 'undefined') {
   });
 }
 
+let authPromise: Promise<User | null> | null = null;
+
+export async function ensureFirebaseAuth(): Promise<User | null> {
+  if (auth.currentUser) {
+    return auth.currentUser;
+  }
+  if (authPromise) {
+    return authPromise;
+  }
+
+  authPromise = (async () => {
+    const targetEmail = "nader.eldeeb.2015@gmail.com";
+    const experimentPassword = "password123";
+
+    try {
+      const credential = await signInWithEmailAndPassword(auth, targetEmail, experimentPassword);
+      console.log("===== FIREBASE AUTH STATUS =====");
+      console.log("Status: Logged in successfully (Email/Password)");
+      console.log("UID:", credential.user.uid);
+      console.log("Email:", credential.user.email);
+      return credential.user;
+    } catch (err: any) {
+      console.log("[Firebase Auth Note] Email sign-in fallback to Anonymous Auth:", err?.code || err?.message);
+      try {
+        const anonCred = await signInAnonymously(auth);
+        console.log("===== FIREBASE AUTH STATUS =====");
+        console.log("Status: Logged in successfully (Anonymous Auth)");
+        console.log("UID:", anonCred.user.uid);
+        return anonCred.user;
+      } catch (anonErr: any) {
+        console.warn("[Firebase Auth] Anonymous sign-in notice:", anonErr?.code || anonErr?.message);
+        return null;
+      }
+    } finally {
+      authPromise = null;
+    }
+  })();
+
+  return authPromise;
+}
+
 // Auto-login check for Firebase Authentication
 if (typeof window !== 'undefined') {
-  let attemptedLogin = false;
   onAuthStateChanged(auth, async (user) => {
     if (user) {
       console.log("===== FIREBASE AUTH STATUS =====");
       console.log("Status: Logged in successfully");
       console.log("UID:", user.uid);
-      console.log("Email:", user.email);
-    } else if (!attemptedLogin) {
-      attemptedLogin = true;
-      const targetEmail = "nader.eldeeb.2015@gmail.com";
-      const experimentPassword = "password123";
-
-      try {
-        const credential = await signInWithEmailAndPassword(auth, targetEmail, experimentPassword);
-        console.log("===== FIREBASE AUTH STATUS =====");
-        console.log("Status: Logged in successfully");
-        console.log("UID:", credential.user.uid);
-        console.log("Email:", credential.user.email);
-      } catch (err: any) {
-        if (err?.code === 'auth/operation-not-allowed') {
-          console.log("[Firebase Auth Note] Email/Password provider is not enabled in Firebase Console for project cafe-eldeeb-pos.");
-        } else {
-          console.warn("[Firebase Auth Note] Auth sign-in attempt:", err?.code || err?.message);
-        }
-      }
+      console.log("Email:", user.email || '(anonymous)');
+    } else {
+      ensureFirebaseAuth().catch((e) => {
+        console.warn('[Firebase Auth] Auto auth initialization notice:', e);
+      });
     }
   });
 }

@@ -22,7 +22,7 @@ export const GOOGLE_PROFILE_SCOPE =
 export const GOOGLE_EMAIL_SCOPE =
   'https://www.googleapis.com/auth/userinfo.email';
 
-let initialized = false;
+let lastInitializedScopesKey = '';
 
 export async function initializeGoogleAuth(
   scopes: string[] = [
@@ -30,16 +30,18 @@ export async function initializeGoogleAuth(
     GOOGLE_PROFILE_SCOPE,
   ]
 ): Promise<void> {
-  if (initialized) {
+  const scopesKey = [...scopes].sort().join(',');
+  if (lastInitializedScopesKey === scopesKey) {
     return;
   }
 
+  console.log('[Android Native GoogleAuth] Initializing GoogleSignIn with scopes:', scopes);
   await GoogleSignIn.initialize({
     clientId: GOOGLE_CLIENT_ID,
     scopes,
   });
 
-  initialized = true;
+  lastInitializedScopesKey = scopesKey;
 }
 
 export interface NativeGoogleAuthResult {

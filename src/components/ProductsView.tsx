@@ -107,7 +107,7 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
     setPBarcode(`622${Date.now().toString().slice(-4)}`);
     setPIcon('☕');
     setPSellingPrice('35');
-    setPCostPrice('12');
+    setPCostPrice('0');
     setPCurrentStock('0'); // Default opening stock to 0 actual count
     setPMinStock('5');
     setPUnit('كوب');
@@ -165,7 +165,7 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
     e.preventDefault();
 
     const sellingPriceNum = parseFloat(pSellingPrice);
-    const costPriceNum = parseFloat(pCostPrice);
+    const costPriceNum = pCostPrice.trim() === '' ? 0 : parseFloat(pCostPrice);
     const currentStockNum = parseFloat(pCurrentStock);
     const minStockNum = parseFloat(pMinStock);
     
@@ -174,7 +174,7 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
       return;
     }
     if (isNaN(costPriceNum) || costPriceNum < 0) {
-      onShowWarningAlert('يرجى إدخال سعر تكلفة صحيح (أرقام صحيحة أو عشرية، مثل: 12 أو 12.25)!');
+      onShowWarningAlert('يرجى إدخال سعر تكلفة صحيح (أرقام صحيحة أو عشرية، مثل: 12 أو 12.25) أو ترك الحقل فارغاً!');
       return;
     }
     if (isNaN(currentStockNum) || currentStockNum < 0) {
@@ -643,18 +643,18 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
               </div>
 
               <div>
-                <label className="text-xs text-gray-400 font-bold block mb-1.5">تكلفة الإنتاج / الشراء (ج.م) *</label>
+                <label className="text-xs text-gray-400 font-bold block mb-1.5">تكلفة الإنتاج / الشراء (ج.م) <span className="text-[10px] text-gray-500 font-normal">(اختياري)</span></label>
                 <input
                   id="p-cost-price"
                   type="number"
                   step="any"
-                  required
+                  placeholder="0 (اختياري)"
                   value={pCostPrice}
                   onChange={(e) => setPCostPrice(e.target.value)}
                   className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-600 font-mono text-center"
                 />
                 <span className="text-[9px] text-gray-500 block mt-1">
-                  سعر الشراء / التكلفة الفعليه للوحدة (يمكنك إدخال أي قيمة يدوياً)
+                  سعر الشراء / التكلفة الفعلية للوحدة (اختياري - افتراضياً 0)
                 </span>
               </div>
 

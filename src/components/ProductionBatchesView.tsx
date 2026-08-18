@@ -700,47 +700,47 @@ export default function ProductionBatchesView({
       </div>
 
       {/* --- MAIN TABS SWITCHER --- */}
-      <div className="flex items-center gap-2 bg-black/60 p-1.5 rounded-2xl border border-gray-800">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-black/60 p-1.5 rounded-2xl border border-gray-800">
         <button
           onClick={() => setActiveMainTab('raw_batches')}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-black cursor-pointer transition-all flex items-center justify-center gap-2 ${
+          className={`w-full py-2.5 px-3 rounded-xl text-xs font-black cursor-pointer transition-all flex items-center justify-center gap-2 ${
             activeMainTab === 'raw_batches'
               ? 'bg-gradient-to-r from-gold-600 to-gold-500 text-black shadow-lg scale-[1.01]'
               : 'text-gray-400 hover:text-white hover:bg-gray-900/40'
           }`}
         >
-          <Layers className="w-4 h-4" />
-          <span>القسم الأول: المواد الخام (Production Batches)</span>
-          <span className="text-[10px] bg-black/30 text-black/80 px-2 py-0.5 rounded-full font-mono">
+          <Layers className="w-4 h-4 shrink-0" />
+          <span className="truncate">المواد الخام (Batches)</span>
+          <span className="text-[10px] bg-black/30 text-black/80 px-2 py-0.5 rounded-full font-mono shrink-0">
             {batches.length}
           </span>
         </button>
 
         <button
           onClick={() => setActiveMainTab('ready_products')}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-black cursor-pointer transition-all flex items-center justify-center gap-2 ${
+          className={`w-full py-2.5 px-3 rounded-xl text-xs font-black cursor-pointer transition-all flex items-center justify-center gap-2 ${
             activeMainTab === 'ready_products'
               ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-lg scale-[1.01]'
               : 'text-gray-400 hover:text-white hover:bg-gray-900/40'
           }`}
         >
-          <ShoppingBag className="w-4 h-4" />
-          <span>القسم الثاني: المنتجات الجاهزة (Unit Inventory)</span>
-          <span className="text-[10px] bg-black/30 text-white px-2 py-0.5 rounded-full font-mono">
+          <ShoppingBag className="w-4 h-4 shrink-0" />
+          <span className="truncate">المنتجات الجاهزة (Unit)</span>
+          <span className="text-[10px] bg-black/30 text-white px-2 py-0.5 rounded-full font-mono shrink-0">
             {readyProductsList.length}
           </span>
         </button>
 
         <button
           onClick={() => setActiveMainTab('general_reports')}
-          className={`py-2.5 px-5 rounded-xl text-xs font-black cursor-pointer transition-all flex items-center justify-center gap-2 ${
+          className={`w-full py-2.5 px-3 rounded-xl text-xs font-black cursor-pointer transition-all flex items-center justify-center gap-2 ${
             activeMainTab === 'general_reports'
               ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-lg scale-[1.01]'
               : 'text-gray-400 hover:text-white hover:bg-gray-900/40'
           }`}
         >
-          <BarChart2 className="w-4 h-4" />
-          <span>التقارير الشاملة والأرباح</span>
+          <BarChart2 className="w-4 h-4 shrink-0" />
+          <span className="truncate">التقارير الشاملة والأرباح</span>
         </button>
       </div>
 
