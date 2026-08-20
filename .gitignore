@@ -1,16 +1,48 @@
+# Dependencies
 node_modules/
-build/
+.pnpm-store/
+.yarn/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build outputs
 dist/
-coverage/
-.DS_Store
-*.log
-.env*
+build/
+android/app/build/
+android/.gradle/
+.gradle/
+
+# Environment / secrets
+.env
+.env.*
 !.env.example
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Capacitor generated files
+android/capacitor-cordova-android-plugins/
+android/capacitor.settings.gradle
+
+# Java / Android generated files
+*.iml
+*.hprof
+
+# Keystores
 *.keystore
 *.jks
-android/app/debug.keystore
-google-services.json
-android/app/google-services.json
-android/.gradle/
-android/app/build/
 
+# IMPORTANT:
+# Keep the fixed Cafe Eldeeb Android signing keystore tracked.
+!android/app/debug.keystore
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Local backups
+*.bak
