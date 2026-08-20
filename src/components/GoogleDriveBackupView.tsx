@@ -62,6 +62,8 @@ export default function GoogleDriveBackupView({
   const [isCreatingBackup, setIsCreatingBackup] = useState<boolean>(false);
   const [isRestoring, setIsRestoring] = useState<boolean>(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [isTestingConnection, setIsTestingConnection] = useState<boolean>(false);
+  const [diagnosticStatus, setDiagnosticStatus] = useState<string | null>(null);
 
   // Restore confirmation modal states
   const [selectedBackupToRestore, setSelectedBackupToRestore] = useState<GoogleDriveBackupFile | null>(null);
@@ -273,6 +275,51 @@ export default function GoogleDriveBackupView({
     }
   };
 
+  const handleTestConnection = async () => {
+    setIsTestingConnection(true);
+    setDiagnosticStatus('جاري فحص اتصال الإنترنت واستجابة خوادم Google APIs...');
+    try {
+      const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+      if (!isOnline) {
+        const msg = '❌ الجهاز غير متصل بالإنترنت حالياً.';
+        setDiagnosticStatus(msg);
+        onShowWarningAlert(msg);
+        return;
+      }
+
+      const t0 = performance.now();
+      const pingRes = await fetch('https://www.googleapis.com/discovery/v1/apis/drive/v3/rest', { method: 'GET', mode: 'cors' });
+      const latency = Math.round(performance.now() - t0);
+
+      if (!pingRes.ok) {
+        const msg = `⚠️ استجابة خوادم Google برمز ${pingRes.status} (${latency}ms)`;
+        setDiagnosticStatus(msg);
+        onShowWarningAlert(msg);
+        return;
+      }
+
+      if (isConnected && googleUser?.accessToken) {
+        setDiagnosticStatus(`جاري فحص صلاحيات الحساب وجلب قائمة النسخ... (${latency}ms)`);
+        const list = await listGoogleDriveBackups(googleUser.accessToken);
+        setBackups(list);
+        const successMsg = `✅ الاتصال بـ Google Drive سليم تماماً (${latency}ms) - الحساب: ${googleUser.email} (عدد النسخ: ${list.length})`;
+        setDiagnosticStatus(successMsg);
+        onShowSuccessAlert(`الاتصال بـ Google Drive يعمل بكفاءة (${latency}ms)! 🚀`);
+      } else {
+        const readyMsg = `✅ خوادم Google متاحة وجاهزة (${latency}ms) - اضغط "اتصال بحساب Google" لتسجيل الدخول.`;
+        setDiagnosticStatus(readyMsg);
+        onShowSuccessAlert(`خوادم Google جاهزة وسريعة الاستجابة (${latency}ms).`);
+      }
+    } catch (e: any) {
+      console.error('Test connection error:', e);
+      const errMsg = `❌ خطأ في الاتصال: ${e?.message || e}`;
+      setDiagnosticStatus(errMsg);
+      onShowWarningAlert(errMsg);
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
+
   const handleInitiateRestore = (backup: GoogleDriveBackupFile) => {
     setSelectedBackupToRestore(backup);
     setShowRestoreModal(true);
@@ -478,28 +525,53 @@ export default function GoogleDriveBackupView({
               </div>
             )}
 
-            {isConnected ? (
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={handleSignOut}
-                className="px-3 py-1.5 bg-red-950/30 hover:bg-red-900 border border-red-900/40 text-red-400 hover:text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+                onClick={handleTestConnection}
+                disabled={isTestingConnection}
+                className="px-3 py-2 bg-luxury-bg border border-gold-500/40 hover:border-gold-500 text-gold-400 hover:text-gold-300 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
-                <LogOut className="w-3.5 h-3.5" />
-                خروج
+                <CloudLightning className={`w-3.5 h-3.5 ${isTestingConnection ? 'animate-spin' : ''}`} />
+                {isTestingConnection ? 'جاري الفحص...' : 'تجربة فحص الاتصال'}
               </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => handleSignIn()}
-                disabled={isAuthenticating}
-                className="px-4 py-2 bg-gradient-to-r from-gold-600 to-gold-500 text-black text-xs font-black rounded-xl hover:opacity-90 transition-all flex items-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
-              >
-                <LogIn className="w-4 h-4" />
-                {isAuthenticating ? 'جاري الاتصال...' : 'اتصال بحساب Google'}
-              </button>
-            )}
+
+              {isConnected ? (
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  className="px-3 py-1.5 bg-red-950/30 hover:bg-red-900 border border-red-900/40 text-red-400 hover:text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  خروج
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleSignIn()}
+                  disabled={isAuthenticating}
+                  className="px-4 py-2 bg-gradient-to-r from-gold-600 to-gold-500 text-black text-xs font-black rounded-xl hover:opacity-90 transition-all flex items-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
+                >
+                  <LogIn className="w-4 h-4" />
+                  {isAuthenticating ? 'جاري الاتصال...' : 'اتصال بحساب Google'}
+                </button>
+              )}
+            </div>
           </div>
         </div>
+
+        {diagnosticStatus && (
+          <div className="mt-3 p-3 bg-luxury-bg/80 border border-gray-800 rounded-2xl flex items-center justify-between text-xs font-mono">
+            <span className="text-gray-300">{diagnosticStatus}</span>
+            <button
+              type="button"
+              onClick={() => setDiagnosticStatus(null)}
+              className="text-gray-500 hover:text-white text-[10px] px-2 py-0.5"
+            >
+              إغلاق
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 2. Control Cards: Instant Backup & Auto Backup Configuration */}

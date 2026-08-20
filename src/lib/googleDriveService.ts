@@ -101,9 +101,7 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
   // ==========================================
   // 1. Android Native Flow (Capacitor Native Platform)
   // ==========================================
-  // On native Android, attempt Native Google Sign-In with Credential Manager / AuthorizationClient.
-  let nativeAccountHint: string | undefined = undefined;
-
+  // On native Android, use Native Google Sign-In with Credential Manager / AuthorizationClient.
   if (Capacitor.isNativePlatform()) {
     const maskedClientId = resolvedClientId ? `...${resolvedClientId.slice(-15)}` : 'MISSING';
     console.log('[Android Native GoogleDrive] Starting Auth Flow:', {
@@ -113,23 +111,23 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
       scopesCount: 3
     });
 
+    const scopes = [
+      DRIVE_FILE_SCOPE,
+      'https://www.googleapis.com/auth/userinfo.email',
+      'https://www.googleapis.com/auth/userinfo.profile'
+    ];
+
     try {
-      const scopes = [
-        DRIVE_FILE_SCOPE,
-        'https://www.googleapis.com/auth/userinfo.email',
-        'https://www.googleapis.com/auth/userinfo.profile'
-      ];
+      await GoogleSignIn.initialize({
+        clientId: resolvedClientId,
+        scopes
+      });
+      console.log('[Android Native GoogleDrive] GoogleSignIn.initialize succeeded.');
+    } catch (initErr: any) {
+      console.warn('[Android Native GoogleDrive] GoogleSignIn.initialize notice:', initErr?.message || initErr);
+    }
 
-      try {
-        await GoogleSignIn.initialize({
-          clientId: resolvedClientId,
-          scopes
-        });
-        console.log('[Android Native GoogleDrive] GoogleSignIn.initialize succeeded.');
-      } catch (initErr: any) {
-        console.warn('[Android Native GoogleDrive] GoogleSignIn.initialize notice:', initErr?.message || initErr);
-      }
-
+    try {
       console.log('[Android Native GoogleDrive] Calling GoogleSignIn.signIn()...');
       const result = await GoogleSignIn.signIn();
       console.log('[Android Native GoogleDrive] GoogleSignIn.signIn result received:', {
@@ -140,10 +138,6 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
         accessTokenType: result?.accessToken?.startsWith('eyJ') ? 'JWT_ID_TOKEN' : 'OAUTH2_TOKEN',
         hasServerAuthCode: !!result?.serverAuthCode
       });
-
-      if (result?.email) {
-        nativeAccountHint = result.email;
-      }
 
       // Android Native Success: Accept either OAuth2 accessToken or idToken as authentication proof
       const receivedToken = result?.accessToken || result?.idToken;
@@ -157,9 +151,9 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
           }
         }
 
-        const userEmail = profile?.email || result.email || 'user@google.com';
-        const userName = profile?.name || result.displayName || result.givenName || 'مستخدم Google';
-        const userPic = profile?.picture || result.imageUrl || undefined;
+        const userEmail = profile?.email || result?.email || 'user@google.com';
+        const userName = profile?.name || result?.displayName || result?.givenName || 'مستخدم Google';
+        const userPic = profile?.picture || result?.imageUrl || undefined;
 
         console.log('[Android Native GoogleDrive] Native Sign-in completed successfully for:', userEmail);
         return {
@@ -169,11 +163,22 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
           name: userName,
           picture: userPic
         };
+      } else {
+        throw new Error('لم يتم استلام رمز التحقق من حساب Google.');
       }
-
-      console.log('[Android Native GoogleDrive] Native layer completed account selection, proceeding to complete OAuth2 token acquisition...');
     } catch (nativeErr: any) {
-      console.warn('[Android Native GoogleDrive] Native sign-in notice, proceeding to web/GIS fallback:', nativeErr?.message || nativeErr);
+      console.error('[Android Native GoogleDrive] Native sign-in error:', nativeErr);
+      const rawMsg = (nativeErr?.message || String(nativeErr || '')).toLowerCase();
+      
+      if (rawMsg.includes('canceled') || rawMsg.includes('cancelled') || rawMsg.includes('sign_in_canceled')) {
+        throw new Error('تم إلغاء عملية تسجيل الدخول بحساب Google.');
+      } else if (rawMsg.includes('16') || rawMsg.includes('cannot find a matching credential') || rawMsg.includes('no credential')) {
+        throw new Error('لم يتم العثور على حساب Google نشط على الجهاز، يرجى التأكد من تسجيل حساب Google على الهاتف أولاً.');
+      } else if (rawMsg.includes('10') || rawMsg.includes('developer_error')) {
+        throw new Error('خدمات Google Play تتطلب مطابقة إعدادات التطبيق أو تحديث خدمات Google Play على الهاتف.');
+      } else {
+        throw new Error(nativeErr?.message || 'تعذر الاتصال بـ Google Sign-In على الجهاز.');
+      }
     }
   }
 
@@ -213,7 +218,7 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
               const user: GoogleDriveUser = {
                 accessToken: token,
                 expiresAt: Date.now() + expiresIn * 1000,
-                email: profile?.email || nativeAccountHint || 'user@google.com',
+                email: profile?.email || 'user@google.com',
                 name: profile?.name || 'مستخدم Google',
                 picture: profile?.picture
               };
@@ -234,10 +239,6 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
             safeResolve(null);
           }
         };
-
-        if (nativeAccountHint) {
-          clientConfig.hint = nativeAccountHint;
-        }
 
         const client = google.accounts.oauth2.initTokenClient(clientConfig);
         client.requestAccessToken();
