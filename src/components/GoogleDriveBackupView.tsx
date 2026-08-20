@@ -151,11 +151,13 @@ export default function GoogleDriveBackupView({
         return user;
       } else {
         // Show clear error message and revert loading state immediately
-        onShowWarningAlert('فشل الاتصال بحساب Google.');
+        onShowWarningAlert('تعذر إكمال تسجيل الدخول بحساب Google. يرجى التحقق من اتصال الإنترنت وحساب Google على الجهاز.');
         return null;
       }
-    } catch (err) {
-      onShowWarningAlert('فشل الاتصال بحساب Google.');
+    } catch (err: any) {
+      console.error('[GoogleDriveBackupView] handleSignIn error:', err);
+      const errMsg = err?.message || 'فشل الاتصال بحساب Google.';
+      onShowWarningAlert(`فشل الاتصال بحساب Google: ${errMsg}`);
     } finally {
       setIsAuthenticating(false);
     }
