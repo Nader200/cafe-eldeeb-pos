@@ -245,34 +245,34 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
   }
 
   // ==========================================
-  // 3. Firebase Auth Google Popup Flow (Web & Hybrid Fallback)
+  // 3. Web Only Fallback: Firebase Auth Google Popup (Excluded on Native Android WebView)
   // ==========================================
-  try {
-    const provider = new GoogleAuthProvider();
-    provider.addScope(DRIVE_FILE_SCOPE);
-    provider.addScope('https://www.googleapis.com/auth/userinfo.email');
-    provider.addScope('https://www.googleapis.com/auth/userinfo.profile');
-    provider.setCustomParameters({ prompt: 'select_account' });
+  if (!Capacitor.isNativePlatform()) {
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.addScope(DRIVE_FILE_SCOPE);
+      provider.addScope('https://www.googleapis.com/auth/userinfo.email');
+      provider.addScope('https://www.googleapis.com/auth/userinfo.profile');
+      provider.setCustomParameters({ prompt: 'select_account' });
 
-    const result = await signInWithPopup(auth, provider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    const token = credential?.accessToken;
-    const user = result.user;
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      const token = credential?.accessToken;
+      const user = result.user;
 
-    if (token) {
-      return {
-        accessToken: token,
-        expiresAt: Date.now() + 3600 * 1000,
-        email: user.email || 'user@google.com',
-        name: user.displayName || 'مستخدم Google',
-        picture: user.photoURL || undefined
-      };
+      if (token) {
+        return {
+          accessToken: token,
+          expiresAt: Date.now() + 3600 * 1000,
+          email: user.email || 'user@google.com',
+          name: user.displayName || 'مستخدم Google',
+          picture: user.photoURL || undefined
+        };
+      }
+    } catch (fbErr: any) {
+      console.warn('Firebase Auth Google popup notice:', fbErr?.code || fbErr?.message || fbErr);
     }
-  } catch (fbErr: any) {
-    console.warn('Firebase Auth Google popup warning for Drive:', fbErr?.code || fbErr?.message || fbErr);
   }
-
-  return null;
 
   return null;
 }
