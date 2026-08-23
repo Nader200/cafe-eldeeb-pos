@@ -68,6 +68,7 @@ export const db = (() => {
   try {
     const settings = {
       experimentalForceLongPolling: true,
+      experimentalAutoDetectLongPolling: true,
       localCache: memoryLocalCache()
     };
     return databaseId && databaseId !== '(default)'
@@ -98,6 +99,9 @@ export async function ensureFirebaseAuth(): Promise<User | null> {
   if (auth.currentUser) {
     return auth.currentUser;
   }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return null;
+  }
   if (authPromise) {
     return authPromise;
   }
@@ -114,6 +118,11 @@ export async function ensureFirebaseAuth(): Promise<User | null> {
       console.log("Email:", credential.user.email);
       return credential.user;
     } catch (err: any) {
+      const isNetworkErr = err?.code === 'auth/network-request-failed' || err?.message?.includes('network-request-failed');
+      if (isNetworkErr) {
+        console.warn("[Firebase Auth Note] Network request failed while authenticating. Operating in offline/local mode.");
+        return null;
+      }
       console.log("[Firebase Auth Note] Email sign-in fallback to Anonymous Auth:", err?.code || err?.message);
       try {
         const anonCred = await signInAnonymously(auth);
@@ -142,9 +151,11 @@ if (typeof window !== 'undefined') {
       console.log("UID:", user.uid);
       console.log("Email:", user.email || '(anonymous)');
     } else {
-      ensureFirebaseAuth().catch((e) => {
-        console.warn('[Firebase Auth] Auto auth initialization notice:', e);
-      });
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        ensureFirebaseAuth().catch((e) => {
+          console.warn('[Firebase Auth] Auto auth initialization notice:', e);
+        });
+      }
     }
   });
 }

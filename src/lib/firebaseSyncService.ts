@@ -260,9 +260,15 @@ class FirebaseSyncService {
         }
       },
       (error: any) => {
-        console.error('Firestore sync error:', error);
-        handleFirestoreError(error, OperationType.LIST, `cafes/${this.cafeId}/sync_store`);
-        this.status = 'error';
+        const isNetworkErr = error?.code === 'unavailable' || error?.message?.includes('offline') || error?.message?.includes('network-request-failed');
+        if (isNetworkErr) {
+          console.warn('[Firestore Sync] Network unavailable or offline, maintaining offline sync state.');
+          this.status = 'offline';
+        } else {
+          console.error('Firestore sync error:', error);
+          handleFirestoreError(error, OperationType.LIST, `cafes/${this.cafeId}/sync_store`);
+          this.status = 'error';
+        }
         this.notifyState();
       }
     );
