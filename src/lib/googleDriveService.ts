@@ -112,6 +112,7 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
     });
 
     const scopes = [
+      DRIVE_FILE_SCOPE,
       'https://www.googleapis.com/auth/userinfo.email',
       'https://www.googleapis.com/auth/userinfo.profile'
     ];
