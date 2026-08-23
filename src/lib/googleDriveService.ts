@@ -101,10 +101,12 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
   // ==========================================
   // 1. Android Native Flow (Capacitor Native Platform)
   // ==========================================
-  // On native Android, use Native Google Sign-In with Credential Manager / AuthorizationClient.
+  // On native Android, try Native Google Sign-In first. If it does not return
+  // an OAuth2 accessToken (e.g. returns only ID token) or fails, gracefully
+  // cascade to GIS / Firebase Auth without throwing so that the user is authenticated.
   if (Capacitor.isNativePlatform()) {
     const maskedClientId = resolvedClientId ? `...${resolvedClientId.slice(-15)}` : 'MISSING';
-    console.log('[Android Native GoogleDrive] Starting Auth Flow:', {
+    console.log('[Android Native GoogleDrive] Starting Native Auth Flow:', {
       platform: Capacitor.getPlatform(),
       appId: 'com.eldeeb.pos',
       clientIdSuffix: maskedClientId,
@@ -139,16 +141,13 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
         hasServerAuthCode: !!result?.serverAuthCode
       });
 
-      // Android Native Success: Accept either OAuth2 accessToken or idToken as authentication proof
-      const receivedToken = result?.accessToken || result?.idToken;
-      if (receivedToken) {
+      // Valid OAuth2 access token for Google Drive (OAuth2 tokens are not JWTs)
+      if (result?.accessToken && !result.accessToken.startsWith('eyJ')) {
         let profile = null;
-        if (!receivedToken.startsWith('eyJ')) {
-          try {
-            profile = await fetchGoogleProfile(receivedToken);
-          } catch (verifyErr: any) {
-            console.warn('[Android Native GoogleDrive] Profile fetch notice:', verifyErr?.message || verifyErr);
-          }
+        try {
+          profile = await fetchGoogleProfile(result.accessToken);
+        } catch (verifyErr: any) {
+          console.warn('[Android Native GoogleDrive] Profile fetch notice:', verifyErr?.message || verifyErr);
         }
 
         const userEmail = profile?.email || result?.email || 'user@google.com';
@@ -157,28 +156,17 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
 
         console.log('[Android Native GoogleDrive] Native Sign-in completed successfully for:', userEmail);
         return {
-          accessToken: receivedToken,
+          accessToken: result.accessToken,
           expiresAt: Date.now() + 3600 * 1000,
           email: userEmail,
           name: userName,
           picture: userPic
         };
       } else {
-        throw new Error('لم يتم استلام رمز التحقق من حساب Google.');
+        console.log('[Android Native GoogleDrive] Native sign-in did not return OAuth2 accessToken, cascading to Web/Firebase OAuth flow...');
       }
     } catch (nativeErr: any) {
-      console.error('[Android Native GoogleDrive] Native sign-in error:', nativeErr);
-      const rawMsg = (nativeErr?.message || String(nativeErr || '')).toLowerCase();
-      
-      if (rawMsg.includes('canceled') || rawMsg.includes('cancelled') || rawMsg.includes('sign_in_canceled')) {
-        throw new Error('تم إلغاء عملية تسجيل الدخول بحساب Google.');
-      } else if (rawMsg.includes('16') || rawMsg.includes('cannot find a matching credential') || rawMsg.includes('no credential')) {
-        throw new Error('لم يتم العثور على حساب Google نشط على الجهاز، يرجى التأكد من تسجيل حساب Google على الهاتف أولاً.');
-      } else if (rawMsg.includes('10') || rawMsg.includes('developer_error')) {
-        throw new Error('خدمات Google Play تتطلب مطابقة إعدادات التطبيق أو تحديث خدمات Google Play على الهاتف.');
-      } else {
-        throw new Error(nativeErr?.message || 'تعذر الاتصال بـ Google Sign-In على الجهاز.');
-      }
+      console.warn('[Android Native GoogleDrive] Native sign-in notice, falling back to Web OAuth flow:', nativeErr?.message || nativeErr);
     }
   }
 
@@ -257,34 +245,34 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
   }
 
   // ==========================================
-  // 3. Web Secondary Fallback: Firebase Auth Google Popup (Web only, skip on native Android)
+  // 3. Firebase Auth Google Popup Flow (Web & Hybrid Fallback)
   // ==========================================
-  if (!Capacitor.isNativePlatform()) {
-    try {
-      const provider = new GoogleAuthProvider();
-      provider.addScope(DRIVE_FILE_SCOPE);
-      provider.addScope('https://www.googleapis.com/auth/userinfo.email');
-      provider.addScope('https://www.googleapis.com/auth/userinfo.profile');
-      provider.setCustomParameters({ prompt: 'select_account' });
+  try {
+    const provider = new GoogleAuthProvider();
+    provider.addScope(DRIVE_FILE_SCOPE);
+    provider.addScope('https://www.googleapis.com/auth/userinfo.email');
+    provider.addScope('https://www.googleapis.com/auth/userinfo.profile');
+    provider.setCustomParameters({ prompt: 'select_account' });
 
-      const result = await signInWithPopup(auth, provider);
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      const token = credential?.accessToken;
-      const user = result.user;
+    const result = await signInWithPopup(auth, provider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    const token = credential?.accessToken;
+    const user = result.user;
 
-      if (token) {
-        return {
-          accessToken: token,
-          expiresAt: Date.now() + 3600 * 1000,
-          email: user.email || 'user@google.com',
-          name: user.displayName || 'مستخدم Google',
-          picture: user.photoURL || undefined
-        };
-      }
-    } catch (fbErr: any) {
-      console.warn('Firebase Auth Google popup warning for Drive:', fbErr?.code || fbErr?.message || fbErr);
+    if (token) {
+      return {
+        accessToken: token,
+        expiresAt: Date.now() + 3600 * 1000,
+        email: user.email || 'user@google.com',
+        name: user.displayName || 'مستخدم Google',
+        picture: user.photoURL || undefined
+      };
     }
+  } catch (fbErr: any) {
+    console.warn('Firebase Auth Google popup warning for Drive:', fbErr?.code || fbErr?.message || fbErr);
   }
+
+  return null;
 
   return null;
 }

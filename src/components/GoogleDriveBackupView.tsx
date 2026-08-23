@@ -116,13 +116,9 @@ export default function GoogleDriveBackupView({
       setBackups(list);
       localStorage.setItem('cafe_google_drive_backups_cache', JSON.stringify(list));
     } catch (err: any) {
-      if (err?.message === 'UNAUTHORIZED') {
-        handleSignOut(false);
-        loadCachedDriveList();
-      } else {
-        console.warn('Google Drive list notice:', err?.message || err);
-        loadCachedDriveList();
-      }
+      console.warn('Google Drive list notice:', err?.message || err);
+      // Keep cached backup list visible even if offline or session needs refresh
+      loadCachedDriveList();
     } finally {
       setIsLoadingBackups(false);
     }
@@ -264,8 +260,7 @@ export default function GoogleDriveBackupView({
       onShowSuccessAlert('🎉 تم إنشاء النسخة الاحتياطية ورفعها إلى Google Drive بنجاح!');
     } catch (err: any) {
       if (err?.message === 'UNAUTHORIZED') {
-        handleSignOut(false);
-        onShowWarningAlert('انتهت الجلسة، يرجى تسجيل الدخول مجدداً إلى Google Drive.');
+        onShowWarningAlert('انتهت صلاحية جلسة Google، يرجى الضغط على زر الاتصال لتجديد المصادقة.');
       } else {
         console.error('Backup creation error:', err?.message || err);
         onShowWarningAlert('حدث خطأ أثناء رفع النسخة الاحتياطية إلى Google Drive.');
@@ -373,8 +368,7 @@ export default function GoogleDriveBackupView({
       }
     } catch (err: any) {
       if (err?.message === 'UNAUTHORIZED') {
-        handleSignOut(false);
-        onShowWarningAlert('انتهت الجلسة، يرجى تسجيل الدخول مجدداً إلى Google Drive.');
+        onShowWarningAlert('انتهت صلاحية جلسة Google، يرجى الضغط على زر الاتصال لتجديد المصادقة.');
       } else {
         console.error('Restore error:', err?.message || err);
         onShowWarningAlert('حدث خطأ أثناء تنزيل واستعادة النسخة الاحتياطية من Google Drive.');
@@ -403,8 +397,7 @@ export default function GoogleDriveBackupView({
       onShowSuccessAlert('تم حذف النسخة الاحتياطية من Google Drive بنجاح.');
     } catch (err: any) {
       if (err?.message === 'UNAUTHORIZED') {
-        handleSignOut(false);
-        onShowWarningAlert('انتهت الجلسة، يرجى تسجيل الدخول مجدداً إلى Google Drive.');
+        onShowWarningAlert('انتهت صلاحية جلسة Google، يرجى الضغط على زر الاتصال لتجديد المصادقة.');
       } else {
         console.error('Delete backup error:', err?.message || err);
         onShowWarningAlert('فشل حذف النسخة من Google Drive.');
