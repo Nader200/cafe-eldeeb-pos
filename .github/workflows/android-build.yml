@@ -64,47 +64,61 @@ jobs:
 
           mkdir -p android/app
 
-          # Decode Base64 robustly handling newlines, carriage returns, spaces, or tabs without exposing secret
-          # Use python3 as the primary universal base64 decoder for robust padding & whitespace handling, with fallback to base64 -di
+          # Binary-safe Base64 decode using Python
           python3 -c "
           import os, base64, re, sys
-          data = os.environ.get('KEYSTORE_BASE64', '')
-          # Strip all non-base64 characters (whitespace, newlines, tabs, quotes)
-          cleaned = re.sub(r'[^A-Za-z0-9+/=]', '', data)
-          if not cleaned:
-              print('Error: Base64 data is empty after sanitization.', file=sys.stderr)
+
+          raw_data = os.environ.get('KEYSTORE_BASE64', '')
+          if not raw_data:
+              print('Error: Secret ANDROID_DEBUG_KEYSTORE_BASE64 is empty.', file=sys.stderr)
               sys.exit(1)
-          # Fix missing padding if needed
-          missing_padding = len(cleaned) % 4
-          if missing_padding:
-              cleaned += '=' * (4 - missing_padding)
+
+          # Strip whitespace, newlines, tabs, and potential wrapping quotes
+          cleaned = re.sub(r'[\r\n\t\s\"\']', '', raw_data)
+
+          decoded = None
           try:
               decoded = base64.b64decode(cleaned)
-              with open('android/app/debug.keystore', 'wb') as f:
-                  f.write(decoded)
-          except Exception as e:
-              print('Error: Base64 decoding failed:', e, file=sys.stderr)
+          except Exception:
+              try:
+                  decoded = base64.urlsafe_b64decode(cleaned)
+              except Exception as e:
+                  print(f'Error: Base64 decode failed: {e}', file=sys.stderr)
+                  sys.exit(1)
+
+          if not decoded or len(decoded) == 0:
+              print('Error: Decoded keystore content is empty.', file=sys.stderr)
               sys.exit(1)
-          " || {
-            echo "Python decoder failed, attempting base64 CLI..."
-            printf "%s" "$KEYSTORE_BASE64" | tr -d '\r\n \t\f\v"' | base64 -di > android/app/debug.keystore 2>/dev/null || \
-            printf "%s" "$KEYSTORE_BASE64" | tr -d '\r\n \t\f\v"' | base64 -d > android/app/debug.keystore 2>/dev/null
-          }
+
+          with open('android/app/debug.keystore', 'wb') as f:
+              f.write(decoded)
+
+          print(f'Secret is present: yes')
+          print(f'Decoded file size: {len(decoded)} bytes')
+          "
 
           if [ ! -f android/app/debug.keystore ] || [ ! -s android/app/debug.keystore ]; then
-            echo "Error: android/app/debug.keystore could not be decoded or is empty! GitHub Secret value is malformed."
+            echo "Error: android/app/debug.keystore does not exist or is 0 bytes! GitHub Secret value is malformed."
             exit 1
           fi
 
           echo "Verifying Keystore with keytool..."
-          # First try with alias androiddebugkey, if not found list all aliases in the keystore
-          FINGERPRINTS=$(keytool -list -v -keystore android/app/debug.keystore -alias androiddebugkey -storepass android -keypass android 2>&1) || \
-          FINGERPRINTS=$(keytool -list -v -keystore android/app/debug.keystore -storepass android 2>&1) || {
+          FINGERPRINTS=""
+          
+          # Try default storetype, JKS, and PKCS12 storetypes in read-only mode
+          if FINGERPRINTS=$(keytool -list -v -keystore android/app/debug.keystore -storepass android 2>&1); then
+            echo "Keystore read successfully with default format."
+          elif FINGERPRINTS=$(keytool -list -v -keystore android/app/debug.keystore -storetype JKS -storepass android 2>&1); then
+            echo "Keystore read successfully with JKS format."
+          elif FINGERPRINTS=$(keytool -list -v -keystore android/app/debug.keystore -storetype PKCS12 -storepass android 2>&1); then
+            echo "Keystore read successfully with PKCS12 format."
+          else
             echo "Error: Failed to read keystore with keytool! Output:"
             echo "$FINGERPRINTS"
+            echo "The GitHub Secret ANDROID_DEBUG_KEYSTORE_BASE64 is malformed or does not represent a valid Java keystore."
             exit 1
-          }
-          
+          fi
+
           EXPECTED_SHA1="98:37:C5:3A:58:34:A4:33:1C:14:2C:70:EC:32:0C:2A:AB:15:A4:51"
           EXPECTED_SHA256="BB:2B:85:58:0C:41:8B:89:B8:AF:86:47:D1:1B:61:23:31:A9:B5:83:94:85:01:C1:39:32:A8:5A:61:1C:75:D4"
 
@@ -117,12 +131,12 @@ jobs:
           echo "Actual SHA256:   $ACTUAL_SHA256"
 
           if [ -z "$ACTUAL_SHA1" ] || [ "$ACTUAL_SHA1" != "$EXPECTED_SHA1" ]; then
-            echo "Error: SHA-1 fingerprint mismatch! Actual: $ACTUAL_SHA1, Expected: $EXPECTED_SHA1"
+            echo "Error: SHA-1 fingerprint mismatch! Actual: '$ACTUAL_SHA1', Expected: '$EXPECTED_SHA1'"
             exit 1
           fi
 
           if [ -z "$ACTUAL_SHA256" ] || [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
-            echo "Error: SHA-256 fingerprint mismatch! Actual: $ACTUAL_SHA256, Expected: $EXPECTED_SHA256"
+            echo "Error: SHA-256 fingerprint mismatch! Actual: '$ACTUAL_SHA256', Expected: '$EXPECTED_SHA256'"
             exit 1
           fi
 
