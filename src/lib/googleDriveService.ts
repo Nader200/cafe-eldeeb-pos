@@ -178,15 +178,14 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
         };
       }
     } catch (nativeErr: any) {
-      console.warn('[Android Native GoogleDrive] Native sign-in error:', nativeErr);
+      console.warn('[Android Native GoogleDrive] Native sign-in notice:', nativeErr);
       const rawMsg = (nativeErr?.message || String(nativeErr || '')).toLowerCase();
-      if (rawMsg.includes('canceled') || rawMsg.includes('cancelled') || rawMsg.includes('sign_in_canceled') || rawMsg.includes('16')) {
-        throw new Error('تم إلغاء اختيار حساب Google أو لم يتم اختيار حساب.');
-      } else if (rawMsg.includes('10') || rawMsg.includes('developer_error')) {
-        throw new Error('يرجى التأكد من تطابق إعدادات Google وتحديث خدمات Google Play على الهاتف.');
-      } else {
-        throw new Error(nativeErr?.message || 'تعذر الاتصال بـ Google Sign-In على الجهاز.');
+      // If user explicitly tapped back/cancel on the account picker, only then bubble cancel
+      if (rawMsg.includes('sign_in_canceled') || rawMsg.includes('user_canceled')) {
+        throw new Error('تم إلغاء اختيار حساب Google.');
       }
+      // For any other internal system notice (e.g. code 16 or missing Web OAuth client sync in Play Services), proceed to GIS or fallback
+      console.log('[Android Native GoogleDrive] Falling back to Web GIS OAuth client...');
     }
   }
 

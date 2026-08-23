@@ -287,7 +287,7 @@ const defaultSettings: AppSettings = {
   custom_expense_categories: [],
   auto_update_checks_enabled: true,
   last_update_check_date: new Date().toISOString(),
-  last_installed_version: '4.4.2',
+  last_installed_version: '4.4.4',
   force_update_enabled: false,
 };
 
