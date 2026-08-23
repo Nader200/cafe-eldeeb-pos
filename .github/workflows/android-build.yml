@@ -96,9 +96,12 @@ jobs:
             exit 1
           fi
 
-          echo "Verifying Keystore Fingerprints with keytool..."
-          FINGERPRINTS=$(keytool -list -v -keystore android/app/debug.keystore -alias androiddebugkey -storepass android -keypass android 2>&1) || {
-            echo "Error: Failed to read keystore with keytool! Secret does not contain a valid Java keystore."
+          echo "Verifying Keystore with keytool..."
+          # First try with alias androiddebugkey, if not found list all aliases in the keystore
+          FINGERPRINTS=$(keytool -list -v -keystore android/app/debug.keystore -alias androiddebugkey -storepass android -keypass android 2>&1) || \
+          FINGERPRINTS=$(keytool -list -v -keystore android/app/debug.keystore -storepass android 2>&1) || {
+            echo "Error: Failed to read keystore with keytool! Output:"
+            echo "$FINGERPRINTS"
             exit 1
           }
           
