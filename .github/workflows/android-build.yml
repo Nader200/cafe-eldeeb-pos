@@ -63,34 +63,63 @@ jobs:
           fi
 
           mkdir -p android/app
-          echo "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > android/app/debug.keystore
 
-          if [ ! -f android/app/debug.keystore ]; then
-            echo "Error: android/app/debug.keystore does not exist after decoding!"
+          # Decode Base64 robustly handling newlines, carriage returns, spaces, or tabs without exposing secret
+          # Use python3 as the primary universal base64 decoder for robust padding & whitespace handling, with fallback to base64 -di
+          python3 -c "
+          import os, base64, re, sys
+          data = os.environ.get('KEYSTORE_BASE64', '')
+          # Strip all non-base64 characters (whitespace, newlines, tabs, quotes)
+          cleaned = re.sub(r'[^A-Za-z0-9+/=]', '', data)
+          if not cleaned:
+              print('Error: Base64 data is empty after sanitization.', file=sys.stderr)
+              sys.exit(1)
+          # Fix missing padding if needed
+          missing_padding = len(cleaned) % 4
+          if missing_padding:
+              cleaned += '=' * (4 - missing_padding)
+          try:
+              decoded = base64.b64decode(cleaned)
+              with open('android/app/debug.keystore', 'wb') as f:
+                  f.write(decoded)
+          except Exception as e:
+              print('Error: Base64 decoding failed:', e, file=sys.stderr)
+              sys.exit(1)
+          " || {
+            echo "Python decoder failed, attempting base64 CLI..."
+            printf "%s" "$KEYSTORE_BASE64" | tr -d '\r\n \t\f\v"' | base64 -di > android/app/debug.keystore 2>/dev/null || \
+            printf "%s" "$KEYSTORE_BASE64" | tr -d '\r\n \t\f\v"' | base64 -d > android/app/debug.keystore 2>/dev/null
+          }
+
+          if [ ! -f android/app/debug.keystore ] || [ ! -s android/app/debug.keystore ]; then
+            echo "Error: android/app/debug.keystore could not be decoded or is empty! GitHub Secret value is malformed."
             exit 1
           fi
 
           echo "Verifying Keystore Fingerprints with keytool..."
-          FINGERPRINTS=$(keytool -list -v -keystore android/app/debug.keystore -alias androiddebugkey -storepass android -keypass android 2>&1)
+          FINGERPRINTS=$(keytool -list -v -keystore android/app/debug.keystore -alias androiddebugkey -storepass android -keypass android 2>&1) || {
+            echo "Error: Failed to read keystore with keytool! Secret does not contain a valid Java keystore."
+            exit 1
+          }
           
           EXPECTED_SHA1="98:37:C5:3A:58:34:A4:33:1C:14:2C:70:EC:32:0C:2A:AB:15:A4:51"
           EXPECTED_SHA256="BB:2B:85:58:0C:41:8B:89:B8:AF:86:47:D1:1B:61:23:31:A9:B5:83:94:85:01:C1:39:32:A8:5A:61:1C:75:D4"
 
-          ACTUAL_SHA1=$(echo "$FINGERPRINTS" | grep "SHA1:" | head -n 1 | awk '{print $2}' | tr 'a-z' 'A-Z')
-          ACTUAL_SHA256=$(echo "$FINGERPRINTS" | grep "SHA256:" | head -n 1 | awk '{print $2}' | tr 'a-z' 'A-Z')
+          ACTUAL_SHA1=$(echo "$FINGERPRINTS" | grep -i "SHA1:" | head -n 1 | awk '{print $2}' | tr 'a-z' 'A-Z')
+          ACTUAL_SHA256=$(echo "$FINGERPRINTS" | grep -i "SHA256:" | head -n 1 | awk '{print $2}' | tr 'a-z' 'A-Z')
 
           echo "Expected SHA1:   $EXPECTED_SHA1"
           echo "Actual SHA1:     $ACTUAL_SHA1"
           echo "Expected SHA256: $EXPECTED_SHA256"
           echo "Actual SHA256:   $ACTUAL_SHA256"
 
-          if [ "$ACTUAL_SHA1" != "$EXPECTED_SHA1" ]; then
-            echo "Error: SHA-1 fingerprint mismatch!"
+          if [ -z "$ACTUAL_SHA1" ] || [ "$ACTUAL_SHA1" != "$EXPECTED_SHA1" ]; then
+            echo "Error: SHA-1 fingerprint mismatch! Actual: $ACTUAL_SHA1, Expected: $EXPECTED_SHA1"
             exit 1
           fi
 
-          if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
-            echo "Error: SHA-256 fingerprint mismatch!"
+          if [ -z "$ACTUAL_SHA256" ] || [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+            echo "Error: SHA-256 fingerprint mismatch! Actual: $ACTUAL_SHA256, Expected: $EXPECTED_SHA256"
             exit 1
           fi
 
