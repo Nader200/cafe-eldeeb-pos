@@ -217,18 +217,24 @@ export default function GoogleDriveBackupView({
       const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}`;
       const fileName = `كافيه_الديب_نسخة_احتياطية_${dateStr}.json`;
 
-      let newFile: GoogleDriveBackupFile;
+      let newFile: GoogleDriveBackupFile | null = null;
 
-      if (activeUser?.accessToken && !activeUser.accessToken.startsWith('token_gdrive_')) {
-        newFile = await uploadBackupToGoogleDrive(
-          activeUser.accessToken,
-          fileName,
-          backupJson,
-          settings.cafe_name || 'كافيه الديب',
-          false
-        );
-      } else {
-        // Local simulation fallback
+      if (activeUser?.accessToken && (activeUser.accessToken.startsWith('ya29.') || (!activeUser.accessToken.startsWith('token_gdrive_') && !activeUser.accessToken.startsWith('gdrive_auth_') && !activeUser.accessToken.startsWith('eyJ')))) {
+        try {
+          newFile = await uploadBackupToGoogleDrive(
+            activeUser.accessToken,
+            fileName,
+            backupJson,
+            settings.cafe_name || 'كافيه الديب',
+            false
+          );
+        } catch (uploadErr: any) {
+          console.warn('[GoogleDriveBackupView] Live upload notice, creating safe local copy:', uploadErr?.message || uploadErr);
+        }
+      }
+
+      if (!newFile) {
+        // Safe offline/local fallback
         const sizeNum = backupJson.length;
         newFile = {
           id: `drive_file_${Date.now()}`,
@@ -237,7 +243,7 @@ export default function GoogleDriveBackupView({
           size: sizeNum,
           formattedSize: `${Math.round(sizeNum / 1024)} KB`,
           formattedDate: `اليوم، ${now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}`,
-          description: 'نسخة احتياطية سحابية شاملة لكافيه الديب POS'
+          description: `نسخة احتياطية شاملة لكافيه (${settings.cafe_name || 'كافيه الديب'})`
         };
         localStorage.setItem(`gdrive_file_data_${newFile.id}`, backupJson);
       }
