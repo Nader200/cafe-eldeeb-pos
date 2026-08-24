@@ -4,6 +4,7 @@
  */
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getStorage } from 'firebase/storage';
 import {
   getAuth,
   signInWithEmailAndPassword,
@@ -83,6 +84,7 @@ export const db = (() => {
 console.log("Firestore App:", db.app.name);
 
 export const auth = getAuth(app);
+export const storage = getStorage(app);
 
 // Configure persistent auth state for browser / Capacitor WebView
 if (typeof window !== 'undefined') {

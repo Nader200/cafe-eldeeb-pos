@@ -827,7 +827,7 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
           ⚙️ الإعدادات العامة والأمان
         </button>
         <button
-          id="tab-settings-google-drive-backup"
+          id="tab-settings-cloud-backup"
           type="button"
           onClick={() => setActiveTab('backup')}
           className={`flex-1 py-3 text-xs font-bold rounded-xl transition-all cursor-pointer ${
@@ -836,7 +836,7 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
               : 'text-gray-400 hover:text-white hover:bg-gray-900/60'
           }`}
         >
-          ☁️ النسخ الاحتياطي والاستعادة (Google Drive)
+          ☁️ النسخ الاحتياطي والاستعادة السحابية (Cloud Backup)
         </button>
         <button
           id="tab-settings-brand-guide"
@@ -1386,12 +1386,12 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
               </p>
 
               <button
-                id="sync-google-drive-backup"
+                id="sync-cloud-backup"
                 onClick={() => setActiveTab('backup')}
                 className="w-full py-2.5 bg-gold-600 hover:bg-gold-500 text-black font-extrabold text-xs rounded-xl flex items-center justify-center gap-2 shadow-md cursor-pointer transition-all"
               >
                 <Cloud className="w-4 h-4" />
-                تأمين وتصفح نسخ Google Drive
+                تأمين وتصفح النسخ الاحتياطية السحابية
               </button>
 
               <button

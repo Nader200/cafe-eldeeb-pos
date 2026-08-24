@@ -49,7 +49,7 @@ import {
 import { dbService, seedDatabase } from './dbService';
 import { AppSettings, CashDrawer } from './types';
 import { safeStorage } from './lib/safeStorage';
-import { uploadBackupToGoogleDrive } from './lib/googleDriveService';
+import { uploadBackupToFirebaseStorage } from './lib/firebaseStorageBackupService';
 import { checkAndExpirePSSessions, ExpiredSessionNotification } from './lib/playstationNotifier';
 
 // Import our modular sub-views
@@ -329,8 +329,8 @@ function AppContent() {
           .catch(e => console.warn('Startup update check failed:', e));
       }
 
-      // Perform background automatic daily Google Drive backup if enabled
-      if (loadedSettings.google_drive_auto_backup_enabled && loadedSettings.google_drive_access_token) {
+      // Perform background automatic daily Firebase Storage Cloud Backup if enabled
+      if (loadedSettings.google_drive_auto_backup_enabled) {
         const lastBackupTime = loadedSettings.google_drive_last_backup_date ? new Date(loadedSettings.google_drive_last_backup_date).getTime() : 0;
         const now = Date.now();
         if (now - lastBackupTime >= 86400000) { // 24 hours
@@ -338,19 +338,19 @@ function AppContent() {
             const backupJson = dbService.exportBackupData();
             const dateStr = new Date().toISOString().substring(0, 10);
             const fileName = `كافيه_الديب_نسخة_تلقائية_${dateStr}.json`;
-            uploadBackupToGoogleDrive(
-              loadedSettings.google_drive_access_token,
-              fileName,
+            uploadBackupToFirebaseStorage(
               backupJson,
-              loadedSettings.cafe_name || 'كافيه الديب',
-              true
+              fileName,
+              'main_cafe_eldeeb',
+              loadedSettings.cafe_name || 'كافيه الديب'
             ).then(() => {
               const updated = { ...loadedSettings, google_drive_last_backup_date: new Date().toISOString() };
               dbService.saveSettings(updated);
-              console.log('Automated daily Google Drive backup completed.');
-            }).catch(e => console.warn('Auto backup background error:', e));
+              dbService.logBackup('AUTOMATIC', 'SUCCESS', fileName);
+              console.log('Automated daily Cloud Backup completed.');
+            }).catch(e => console.warn('Auto backup background notice:', e?.message || e));
           } catch (err) {
-            console.warn('Auto backup preparation error:', err);
+            console.warn('Auto backup preparation notice:', err);
           }
         }
       }
