@@ -20,7 +20,12 @@ import {
   HardDrive,
   Info,
   X,
-  FileText
+  FileText,
+  Lock,
+  Mail,
+  LogIn,
+  LogOut,
+  UserCheck
 } from 'lucide-react';
 import { dbService, safeStorage } from '../dbService';
 const localStorage = safeStorage;
@@ -33,6 +38,7 @@ import {
   FirebaseStorageBackupItem
 } from '../lib/firebaseStorageBackupService';
 import { auth, ensureFirebaseAuth } from '../lib/firebaseClient';
+import { signInWithEmailAndPassword, signOut, sendPasswordResetEmail } from 'firebase/auth';
 
 interface GoogleDriveBackupViewProps {
   onShowSuccessAlert: (msg: string) => void;
@@ -46,8 +52,9 @@ export default function GoogleDriveBackupView({
   onSettingsChanged
 }: GoogleDriveBackupViewProps) {
   const [settings, setSettings] = useState<AppSettings>(() => dbService.getSettings());
-  const [isConnected, setIsConnected] = useState<boolean>(true);
-  const [cloudAccountEmail, setCloudAccountEmail] = useState<string>('حساب كافيه الديب السحابي');
+  const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
+  const [isOwnerVerified, setIsOwnerVerified] = useState<boolean>(false);
 
   // Backups List
   const [backups, setBackups] = useState<FirebaseStorageBackupItem[]>([]);
@@ -62,8 +69,37 @@ export default function GoogleDriveBackupView({
   const [selectedBackupToRestore, setSelectedBackupToRestore] = useState<FirebaseStorageBackupItem | null>(null);
   const [showRestoreModal, setShowRestoreModal] = useState<boolean>(false);
 
+  // Owner Login Modal states
+  const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
+  const [loginEmail, setLoginEmail] = useState<string>('nader.eldeeb.2015@gmail.com');
+  const [loginPassword, setLoginPassword] = useState<string>('');
+  const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [isSendingReset, setIsSendingReset] = useState<boolean>(false);
+  const [resetSentMessage, setResetSentMessage] = useState<string | null>(null);
+
   // Local File Upload Ref
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Helper to verify if user is the authorized owner with verified email
+  const checkOwnerStatus = (user: any) => {
+    if (
+      user &&
+      !user.isAnonymous &&
+      user.email?.toLowerCase() === 'nader.eldeeb.2015@gmail.com' &&
+      user.emailVerified === true
+    ) {
+      setCurrentUserEmail(user.email);
+      setIsOwnerVerified(true);
+      setIsConnected(true);
+      return true;
+    } else {
+      setCurrentUserEmail(user?.email || null);
+      setIsOwnerVerified(false);
+      setIsConnected(false);
+      return false;
+    }
+  };
 
   // Load cloud backups on mount
   useEffect(() => {
@@ -73,16 +109,13 @@ export default function GoogleDriveBackupView({
     // Load cached list first
     loadCachedBackupList();
 
-    // Check Firebase Auth and fetch list
+    // Check Firebase Auth
     ensureFirebaseAuth()
       .then((user) => {
-        setIsConnected(true);
-        if (user?.email) {
-          setCloudAccountEmail(user.email);
-        } else if (auth.currentUser?.email) {
-          setCloudAccountEmail(auth.currentUser.email);
+        const isOwner = checkOwnerStatus(user || auth.currentUser);
+        if (isOwner) {
+          fetchBackupsFromCloud();
         }
-        fetchBackupsFromCloud();
       })
       .catch((err) => {
         console.warn('[CloudBackupView] Auth check warning:', err?.message || err);
@@ -101,7 +134,7 @@ export default function GoogleDriveBackupView({
   const fetchBackupsFromCloud = async () => {
     setIsLoadingBackups(true);
     try {
-      const list = await listBackupsFromFirebaseStorage('main_branch');
+      const list = await listBackupsFromFirebaseStorage();
       setBackups(list);
       localStorage.setItem('cafe_cloud_backups_cache', JSON.stringify(list));
       setIsConnected(true);
@@ -110,6 +143,108 @@ export default function GoogleDriveBackupView({
       loadCachedBackupList();
     } finally {
       setIsLoadingBackups(false);
+    }
+  };
+
+  const handleOwnerLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginEmail.trim() || !loginPassword.trim()) {
+      setLoginError('يرجى إدخال البريد الإلكتروني وكلمة المرور.');
+      return;
+    }
+
+    setIsLoggingIn(true);
+    setLoginError(null);
+
+    try {
+      const credential = await signInWithEmailAndPassword(auth, loginEmail.trim(), loginPassword);
+      const user = credential.user;
+
+      if (!user || user.isAnonymous) {
+        await signOut(auth);
+        setLoginError('غير مصرح للحسابات المجهولة بالوصول.');
+        return;
+      }
+
+      if (user.email?.toLowerCase() !== 'nader.eldeeb.2015@gmail.com') {
+        await signOut(auth);
+        setLoginError('هذا البريد غير مصرح له كمالك لكافيه الديب.');
+        onShowWarningAlert('هذا الحساب غير مصرح له بالوصول إلى سحابة كافيه الديب.');
+        return;
+      }
+
+      // Check email verified status
+      if (!user.emailVerified) {
+        await signOut(auth);
+        setLoginError('البريد الإلكتروني غير مؤكد (Email Not Verified). يرجى تأكيد البريد الإلكتروني أولاً في Firebase.');
+        onShowWarningAlert('يجب أن يكون البريد الإلكتروني مؤكداً (Verified) للوصول إلى النسخ السحابية.');
+        return;
+      }
+
+      checkOwnerStatus(user);
+      setShowLoginModal(false);
+      setLoginPassword('');
+      onShowSuccessAlert('🎉 تم تسجيل الدخول بحساب المالك الموثق بنجاح!');
+      fetchBackupsFromCloud();
+    } catch (err: any) {
+      console.error('[CloudBackupView] Login error:', err);
+      let msg = 'فشل تسجيل الدخول. يرجى التحقق من البريد وكلمة المرور.';
+      if (err?.code === 'auth/wrong-password' || err?.code === 'auth/invalid-credential') {
+        msg = 'كلمة المرور أو البريد الإلكتروني غير صحيح.';
+      } else if (err?.code === 'auth/user-not-found') {
+        msg = 'حساب المستخدم غير مسجل في Firebase Authentication.';
+      } else if (err?.code === 'auth/user-disabled') {
+        msg = 'تم تعطيل هذا الحساب من قبل إدارة Firebase.';
+      } else if (err?.code === 'auth/network-request-failed') {
+        msg = 'تعذر الاتصال بخوادم Firebase. يرجى التحقق من اتصال الإنترنت.';
+      } else if (err?.code === 'auth/too-many-requests') {
+        msg = 'تم حظر المحاولات مؤقتاً بسبب تكرار المحاولة. يرجى الانتظار قليلاً.';
+      } else if (err?.message) {
+        msg = `خطأ في المصادقة: ${err.message}`;
+      }
+      setLoginError(msg);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleSendPasswordReset = async () => {
+    if (!loginEmail.trim()) {
+      setLoginError('يرجى كتابة البريد الإلكتروني لإرسال رابط إعادة التعيين.');
+      return;
+    }
+    setIsSendingReset(true);
+    setResetSentMessage(null);
+    setLoginError(null);
+    try {
+      await sendPasswordResetEmail(auth, loginEmail.trim());
+      setResetSentMessage(`✅ تم إرسال رابط تعيين كلمة المرور إلى البريد: ${loginEmail.trim()}، يرجى مراجعة صندوق الوارد (أو الرسائل غير المرغوب فيها).`);
+    } catch (err: any) {
+      console.error('[CloudBackupView] Password reset error:', err);
+      let msg = 'تعذر إرسال رابط تعيين كلمة المرور.';
+      if (err?.code === 'auth/user-not-found') {
+        msg = 'هذا البريد غير مسجل في Firebase Authentication.';
+      } else if (err?.message) {
+        msg = err.message;
+      }
+      setLoginError(msg);
+    } finally {
+      setIsSendingReset(false);
+    }
+  };
+
+  const handleOwnerLogout = async () => {
+    if (confirm('هل أنت متأكد من تسجيل الخروج من سحابة كافيه الديب؟')) {
+      try {
+        await signOut(auth);
+        setIsConnected(false);
+        setIsOwnerVerified(false);
+        setCurrentUserEmail(null);
+        setBackups([]);
+        onShowSuccessAlert('تم تسجيل الخروج من السحابة بنجاح.');
+      } catch (err: any) {
+        onShowWarningAlert('حدث خطأ أثناء تسجيل الخروج.');
+      }
     }
   };
 
@@ -130,6 +265,12 @@ export default function GoogleDriveBackupView({
   };
 
   const handleCreateBackupNow = async () => {
+    if (!isOwnerVerified) {
+      setShowLoginModal(true);
+      onShowWarningAlert('يجب تسجيل الدخول بحساب المالك أولاً لرفع نسخة سحابية.');
+      return;
+    }
+
     setIsCreatingBackup(true);
     onShowSuccessAlert('جاري استخراج ونسخ بيانات الكافيه بالكامل وبدء الرفع إلى السحابة... ☁️');
 
@@ -142,7 +283,7 @@ export default function GoogleDriveBackupView({
       const newFile = await uploadBackupToFirebaseStorage(
         backupJson,
         fileName,
-        'main_branch',
+        'main_cafe_eldeeb',
         settings.cafe_name || 'كافيه الديب'
       );
 
@@ -164,7 +305,7 @@ export default function GoogleDriveBackupView({
       onShowSuccessAlert('🎉 تم إنشاء النسخة الاحتياطية ورفعها إلى السحابة بنجاح!');
     } catch (err: any) {
       console.error('[CloudBackupView] Backup creation error:', err?.message || err);
-      onShowWarningAlert('حدث خطأ أثناء رفع النسخة الاحتياطية إلى السحابة.');
+      onShowWarningAlert(err?.message || 'حدث خطأ أثناء رفع النسخة الاحتياطية إلى السحابة.');
     } finally {
       setIsCreatingBackup(false);
     }
@@ -182,9 +323,19 @@ export default function GoogleDriveBackupView({
         return;
       }
 
+      const user = await ensureFirebaseAuth();
+      const isOwner = checkOwnerStatus(user || auth.currentUser);
+
+      if (!isOwner) {
+        const msg = '❌ يجب تسجيل الدخول بحساب المالك (nader.eldeeb.2015@gmail.com) أولاً.';
+        setDiagnosticStatus(msg);
+        setShowLoginModal(true);
+        onShowWarningAlert(msg);
+        return;
+      }
+
       const t0 = performance.now();
-      await ensureFirebaseAuth();
-      const list = await listBackupsFromFirebaseStorage('main_branch');
+      const list = await listBackupsFromFirebaseStorage();
       const latency = Math.round(performance.now() - t0);
 
       setBackups(list);
@@ -220,7 +371,7 @@ export default function GoogleDriveBackupView({
         try {
           const currentData = dbService.exportBackupData();
           const safetyName = `نسخة_حماية_قبل_الاستعادة_${new Date().toISOString().substring(0, 10)}.json`;
-          await uploadBackupToFirebaseStorage(currentData, safetyName, 'main_branch', settings.cafe_name);
+          await uploadBackupToFirebaseStorage(currentData, safetyName, 'main_cafe_eldeeb', settings.cafe_name);
         } catch (sErr) {
           console.warn('Safety backup warning:', sErr);
         }
@@ -229,8 +380,7 @@ export default function GoogleDriveBackupView({
       onShowSuccessAlert(`جاري تحميل وقراءة ملف النسخة الاحتياطية "${selectedBackupToRestore.name}" من السحابة...`);
 
       const backupContent = await downloadBackupFromFirebaseStorage(
-        selectedBackupToRestore.fullPath || selectedBackupToRestore.name,
-        'main_branch'
+        selectedBackupToRestore.fullPath || selectedBackupToRestore.name
       );
 
       if (!backupContent) {
@@ -251,7 +401,7 @@ export default function GoogleDriveBackupView({
       }
     } catch (err: any) {
       console.error('[CloudBackupView] Restore error:', err?.message || err);
-      onShowWarningAlert('حدث خطأ أثناء تنزيل واستعادة النسخة الاحتياطية من السحابة.');
+      onShowWarningAlert(err?.message || 'حدث خطأ أثناء تنزيل واستعادة النسخة الاحتياطية من السحابة.');
     } finally {
       setIsRestoring(false);
     }
@@ -264,7 +414,7 @@ export default function GoogleDriveBackupView({
 
     setDeletingId(backup.name);
     try {
-      await deleteBackupFromFirebaseStorage(backup.fullPath || backup.name, 'main_branch');
+      await deleteBackupFromFirebaseStorage(backup.fullPath || backup.name);
 
       const updatedList = backups.filter(b => b.name !== backup.name);
       setBackups(updatedList);
@@ -273,7 +423,7 @@ export default function GoogleDriveBackupView({
       onShowSuccessAlert('تم حذف النسخة الاحتياطية من السحابة بنجاح.');
     } catch (err: any) {
       console.error('[CloudBackupView] Delete backup error:', err?.message || err);
-      onShowWarningAlert('فشل حذف النسخة من السحابة.');
+      onShowWarningAlert(err?.message || 'فشل حذف النسخة من السحابة.');
     } finally {
       setDeletingId(null);
     }
@@ -283,8 +433,7 @@ export default function GoogleDriveBackupView({
     try {
       onShowSuccessAlert('جاري تحضير ملف النسخة للتنزيل على جهازك...');
       const content = await downloadBackupFromFirebaseStorage(
-        backup.fullPath || backup.name,
-        'main_branch'
+        backup.fullPath || backup.name
       );
 
       const blob = new Blob([content], { type: 'application/json' });
@@ -298,9 +447,9 @@ export default function GoogleDriveBackupView({
       URL.revokeObjectURL(url);
 
       onShowSuccessAlert(`تم تنزيل ملف (${backup.name}) على جهازك بنجاح! 📥`);
-    } catch (err) {
+    } catch (err: any) {
       console.error('[CloudBackupView] Download to phone error:', err);
-      onShowWarningAlert('فشل تنزيل الملف على الهاتف.');
+      onShowWarningAlert(err?.message || 'فشل تنزيل الملف على الهاتف.');
     }
   };
 
@@ -358,30 +507,62 @@ export default function GoogleDriveBackupView({
           {/* Account Status Badge & Actions */}
           <div className="flex items-center gap-3 bg-luxury-bg border border-gray-800 p-3 rounded-2xl w-full lg:w-auto justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center font-bold text-sm">
-                <Cloud className="w-5 h-5 text-emerald-400" />
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm border ${
+                isOwnerVerified
+                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
+                  : 'bg-amber-500/20 border-amber-500/40 text-amber-400'
+              }`}>
+                <Cloud className="w-5 h-5" />
               </div>
               <div>
                 <div className="flex items-center gap-1.5">
                   <p className="text-xs font-bold text-white">سحابة كافيه الديب</p>
-                  <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-extrabold flex items-center gap-1">
-                    <CheckCircle className="w-3 h-3 text-emerald-400" />
-                    {cloudAccountEmail}
-                  </span>
+                  {isOwnerVerified ? (
+                    <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-extrabold flex items-center gap-1">
+                      <CheckCircle className="w-3 h-3 text-emerald-400" />
+                      {currentUserEmail}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3 text-amber-400" />
+                      يتطلب تسجيل دخول المالك
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleTestConnection}
-                disabled={isTestingConnection}
-                className="px-3 py-2 bg-luxury-bg border border-gold-500/40 hover:border-gold-500 text-gold-400 hover:text-gold-300 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-              >
-                <CloudLightning className={`w-3.5 h-3.5 ${isTestingConnection ? 'animate-spin' : ''}`} />
-                {isTestingConnection ? 'جاري الفحص...' : 'فحص الاتصال السحابي'}
-              </button>
+              {isOwnerVerified ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleTestConnection}
+                    disabled={isTestingConnection}
+                    className="px-3 py-2 bg-luxury-bg border border-gold-500/40 hover:border-gold-500 text-gold-400 hover:text-gold-300 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <CloudLightning className={`w-3.5 h-3.5 ${isTestingConnection ? 'animate-spin' : ''}`} />
+                    {isTestingConnection ? 'جاري الفحص...' : 'فحص الاتصال'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleOwnerLogout}
+                    className="p-2 bg-luxury-bg border border-gray-800 hover:border-red-500/40 text-gray-400 hover:text-red-400 rounded-xl transition-all cursor-pointer"
+                    title="تسجيل الخروج"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowLoginModal(true)}
+                  className="px-3 py-2 bg-gradient-to-r from-gold-600 to-gold-500 text-black text-xs font-extrabold rounded-xl shadow hover:opacity-90 transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  تسجيل دخول المالك
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -502,7 +683,7 @@ export default function GoogleDriveBackupView({
             <button
               type="button"
               onClick={fetchBackupsFromCloud}
-              disabled={isLoadingBackups}
+              disabled={isLoadingBackups || !isOwnerVerified}
               className="px-3 py-2 bg-luxury-bg border border-gray-800 hover:bg-gray-900 text-gray-300 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
             >
               <RefreshCw className={`w-3.5 h-3.5 text-gold-500 ${isLoadingBackups ? 'animate-spin' : ''}`} />
@@ -532,6 +713,22 @@ export default function GoogleDriveBackupView({
           <div className="py-12 text-center text-gray-400 text-xs flex flex-col items-center justify-center gap-3">
             <RefreshCw className="w-6 h-6 text-gold-500 animate-spin" />
             <span>جاري الاتصال بالسحابة وجلب قائمة النسخ الاحتياطية...</span>
+          </div>
+        ) : !isOwnerVerified ? (
+          <div className="py-12 text-center text-gray-400 text-xs space-y-3 bg-luxury-bg/50 border border-dashed border-gray-800 rounded-2xl p-6">
+            <Lock className="w-8 h-8 text-amber-500 mx-auto" />
+            <p className="font-bold text-white text-sm">يتطلب الوصول السحابي تسجيل دخول حساب المالك</p>
+            <p className="text-gray-400 text-xs max-w-md mx-auto">
+              لحماية بيانات الكافيه والنسخ الاحتياطية المالية، يرجى تسجيل الدخول بحساب المالك الرسمي (nader.eldeeb.2015@gmail.com).
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowLoginModal(true)}
+              className="px-4 py-2 bg-gradient-to-r from-gold-600 to-gold-500 text-black font-extrabold text-xs rounded-xl shadow transition-all cursor-pointer inline-flex items-center gap-2"
+            >
+              <LogIn className="w-4 h-4" />
+              تسجيل الدخول الآن
+            </button>
           </div>
         ) : backups.length === 0 ? (
           <div className="py-12 text-center text-gray-500 text-xs space-y-2 bg-luxury-bg/50 border border-dashed border-gray-800 rounded-2xl">
@@ -630,7 +827,128 @@ export default function GoogleDriveBackupView({
         )}
       </div>
 
-      {/* 4. Restoration Confirmation & Safety Backup Prompt Modal */}
+      {/* 4. Owner Login Modal */}
+      {showLoginModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in" dir="rtl">
+          <div className="bg-luxury-card border border-gold-600/40 rounded-3xl p-6 max-w-md w-full shadow-2xl relative space-y-5">
+            
+            <div className="flex items-center justify-between pb-3 border-b border-gray-900">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-gold-600/20 border border-gold-600/40 flex items-center justify-center text-gold-400">
+                  <UserCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white">
+                    تسجيل دخول مالك كافيه الديب
+                  </h3>
+                  <p className="text-[11px] text-gray-400">Firebase Cloud Authentication</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowLoginModal(false)}
+                className="text-gray-400 hover:text-white p-1 rounded-lg transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleOwnerLogin} className="space-y-4 text-xs">
+              
+              {loginError && (
+                <div className="p-3 bg-red-950/40 border border-red-900/50 rounded-2xl text-red-300 text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-red-400" />
+                  <span>{loginError}</span>
+                </div>
+              )}
+
+              {resetSentMessage && (
+                <div className="p-3 bg-emerald-950/40 border border-emerald-900/50 rounded-2xl text-emerald-300 text-xs flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 shrink-0 text-emerald-400" />
+                  <span>{resetSentMessage}</span>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-gray-300 font-bold mb-1.5">البريد الإلكتروني المعتمد للمالك:</label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="email"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    required
+                    dir="ltr"
+                    className="w-full pl-9 pr-3 py-2.5 bg-luxury-bg border border-gray-800 rounded-xl text-white text-xs focus:border-gold-500 focus:outline-none"
+                    placeholder="nader.eldeeb.2015@gmail.com"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-gray-300 font-bold">كلمة مرور حساب Firebase:</label>
+                  <button
+                    type="button"
+                    onClick={handleSendPasswordReset}
+                    disabled={isSendingReset}
+                    className="text-[11px] text-gold-400 hover:text-gold-300 underline cursor-pointer disabled:opacity-50"
+                  >
+                    {isSendingReset ? 'جاري الإرسال...' : 'نسيت كلمة المرور؟'}
+                  </button>
+                </div>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="password"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    required
+                    dir="ltr"
+                    className="w-full pl-9 pr-3 py-2.5 bg-luxury-bg border border-gray-800 rounded-xl text-white text-xs focus:border-gold-500 focus:outline-none"
+                    placeholder="••••••••"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 bg-gold-600/5 border border-gold-600/20 rounded-xl text-[11px] text-gold-400">
+                <span>يتم تشفير وتوثيق الاتصال مباشرة مع خوادم Firebase السحابية دون تخزين كلمات المرور.</span>
+              </div>
+
+              <div className="space-y-2 pt-2">
+                <button
+                  type="submit"
+                  disabled={isLoggingIn}
+                  className="w-full py-3 bg-gradient-to-r from-gold-600 to-gold-500 text-black font-black text-xs rounded-xl shadow-lg hover:opacity-90 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isLoggingIn ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      جاري التحقق والمصادقة...
+                    </>
+                  ) : (
+                    <>
+                      <LogIn className="w-4 h-4" />
+                      تسجيل الدخول وتفعيل السحابة
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowLoginModal(false)}
+                  className="w-full py-2 text-gray-400 hover:text-white text-xs font-bold transition-all text-center"
+                >
+                  إلغاء
+                </button>
+              </div>
+
+            </form>
+
+          </div>
+        </div>
+      )}
+
+      {/* 5. Restoration Confirmation & Safety Backup Prompt Modal */}
       {showRestoreModal && selectedBackupToRestore && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in" dir="rtl">
           <div className="bg-luxury-card border border-gold-600/30 rounded-3xl p-6 max-w-lg w-full shadow-2xl relative space-y-6">

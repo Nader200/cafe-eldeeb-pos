@@ -106,7 +106,7 @@ if (typeof window !== 'undefined') {
 let authPromise: Promise<User | null> | null = null;
 
 export async function ensureFirebaseAuth(): Promise<User | null> {
-  if (auth.currentUser) {
+  if (auth.currentUser && !auth.currentUser.isAnonymous) {
     return auth.currentUser;
   }
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -118,32 +118,21 @@ export async function ensureFirebaseAuth(): Promise<User | null> {
 
   authPromise = (async () => {
     const targetEmail = "nader.eldeeb.2015@gmail.com";
-    const experimentPassword = "password123";
+
+    // If already logged in as verified owner, return directly
+    if (auth.currentUser && !auth.currentUser.isAnonymous && auth.currentUser.email === targetEmail) {
+      return auth.currentUser;
+    }
 
     try {
-      const credential = await signInWithEmailAndPassword(auth, targetEmail, experimentPassword);
-      console.log("===== FIREBASE AUTH STATUS =====");
-      console.log("Status: Logged in successfully (Email/Password)");
-      console.log("UID:", credential.user.uid);
-      console.log("Email:", credential.user.email);
-      return credential.user;
+      // Check if user session already exists in persistence
+      if (auth.currentUser && auth.currentUser.email === targetEmail) {
+        return auth.currentUser;
+      }
+      return auth.currentUser;
     } catch (err: any) {
-      const isNetworkErr = err?.code === 'auth/network-request-failed' || err?.message?.includes('network-request-failed');
-      if (isNetworkErr) {
-        console.warn("[Firebase Auth Note] Network request failed while authenticating. Operating in offline/local mode.");
-        return null;
-      }
-      console.log("[Firebase Auth Note] Email sign-in fallback to Anonymous Auth:", err?.code || err?.message);
-      try {
-        const anonCred = await signInAnonymously(auth);
-        console.log("===== FIREBASE AUTH STATUS =====");
-        console.log("Status: Logged in successfully (Anonymous Auth)");
-        console.log("UID:", anonCred.user.uid);
-        return anonCred.user;
-      } catch (anonErr: any) {
-        console.warn("[Firebase Auth] Anonymous sign-in notice:", anonErr?.code || anonErr?.message);
-        return null;
-      }
+      console.warn("[Firebase Auth] Auth check error:", err?.message || err);
+      return null;
     } finally {
       authPromise = null;
     }
