@@ -24,8 +24,16 @@ import {
   onSnapshot,
   setDoc,
   collection,
-  getDocs
+  getDocs,
+  setLogLevel
 } from 'firebase/firestore';
+
+// Set Firestore log level to error to suppress transient connection attempt logs
+try {
+  setLogLevel('error');
+} catch {
+  // ignore if not supported
+}
 // Firebase Web App configuration for project cafe-eldeeb-pos
 export const firebaseConfig = {
   projectId: "cafe-eldeeb-pos",
