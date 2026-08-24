@@ -94,8 +94,8 @@ if (typeof window !== 'undefined') {
 
 let authPromise: Promise<User | null> | null = null;
 
-export async function ensureFirebaseAuth(): Promise<User | null> {
-  if (auth.currentUser) {
+export async function ensureFirebaseAuth(forceNonAnonymous = false): Promise<User | null> {
+  if (auth.currentUser && (!forceNonAnonymous || !auth.currentUser.isAnonymous)) {
     return auth.currentUser;
   }
   if (authPromise) {
@@ -115,16 +115,19 @@ export async function ensureFirebaseAuth(): Promise<User | null> {
       return credential.user;
     } catch (err: any) {
       console.log("[Firebase Auth Note] Email sign-in fallback to Anonymous Auth:", err?.code || err?.message);
-      try {
-        const anonCred = await signInAnonymously(auth);
-        console.log("===== FIREBASE AUTH STATUS =====");
-        console.log("Status: Logged in successfully (Anonymous Auth)");
-        console.log("UID:", anonCred.user.uid);
-        return anonCred.user;
-      } catch (anonErr: any) {
-        console.warn("[Firebase Auth] Anonymous sign-in notice:", anonErr?.code || anonErr?.message);
-        return null;
+      if (!auth.currentUser) {
+        try {
+          const anonCred = await signInAnonymously(auth);
+          console.log("===== FIREBASE AUTH STATUS =====");
+          console.log("Status: Logged in successfully (Anonymous Auth)");
+          console.log("UID:", anonCred.user.uid);
+          return anonCred.user;
+        } catch (anonErr: any) {
+          console.warn("[Firebase Auth] Anonymous sign-in notice:", anonErr?.code || anonErr?.message);
+          return null;
+        }
       }
+      return auth.currentUser;
     } finally {
       authPromise = null;
     }

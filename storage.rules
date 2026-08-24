@@ -12,8 +12,8 @@ service firebase.storage {
                           // Single-Tenant Cafe Eldeeb Owner Rule
                           (cafeId == 'main_cafe_eldeeb' && request.auth.token.email == 'nader.eldeeb.2015@gmail.com')
                           ||
-                          // Commercial Enterprise Multi-Tenant Tenant Isolation Rule (matches folder path)
-                          (cafeId != 'main_cafe_eldeeb')
+                          // Commercial Enterprise Multi-Tenant Tenant Isolation Rule (matches folder path against authenticated tenant token / claim or ID)
+                          (cafeId != 'main_cafe_eldeeb' && (request.auth.token.tenant_id == cafeId || request.auth.uid == cafeId))
                         );
     }
 

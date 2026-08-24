@@ -51,8 +51,8 @@ export function getActiveTenantCafeId(): string {
  */
 export async function verifyOwnerAuthentication(): Promise<boolean> {
   let currentUser = auth.currentUser;
-  if (!currentUser) {
-    currentUser = await ensureFirebaseAuth();
+  if (!currentUser || currentUser.isAnonymous) {
+    currentUser = await ensureFirebaseAuth(true);
   }
 
   if (!currentUser) {
