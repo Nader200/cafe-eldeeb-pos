@@ -32,13 +32,17 @@ const localStorage = safeStorage;
 import { AppSettings } from '../types';
 import {
   requestGoogleDriveAuth,
-  listGoogleDriveBackups,
-  uploadBackupToGoogleDrive,
-  downloadBackupFromGoogleDrive,
-  deleteBackupFromGoogleDrive,
   GoogleDriveUser,
   GoogleDriveBackupFile
 } from '../lib/googleDriveService';
+import {
+  testFirebaseStorageConnection,
+  uploadBackupToFirebaseStorage,
+  listBackupsFromFirebaseStorage,
+  downloadBackupFromFirebaseStorage,
+  deleteBackupFromFirebaseStorage,
+  FirebaseStorageBackupFile
+} from '../lib/firebaseStorageBackupService';
 
 interface GoogleDriveBackupViewProps {
   onShowSuccessAlert: (msg: string) => void;
@@ -104,23 +108,27 @@ export default function GoogleDriveBackupView({
     }
   };
 
-  const fetchBackupsFromDrive = async (token: string) => {
-    if (!token || !token.trim()) {
-      loadCachedDriveList();
-      return;
-    }
-
+  const fetchBackupsFromDrive = async (token?: string) => {
     setIsLoadingBackups(true);
     try {
-      const list = await listGoogleDriveBackups(token);
-      setBackups(list);
-      localStorage.setItem('cafe_google_drive_backups_cache', JSON.stringify(list));
+      const list = await listBackupsFromFirebaseStorage();
+      const mappedList: GoogleDriveBackupFile[] = list.map(item => ({
+        id: item.fullPath,
+        name: item.name,
+        createdTime: item.createdTime,
+        size: item.size,
+        formattedSize: item.formattedSize,
+        formattedDate: item.formattedDate,
+        description: item.description,
+        isAuto: item.isAuto
+      }));
+      setBackups(mappedList);
+      localStorage.setItem('cafe_google_drive_backups_cache', JSON.stringify(mappedList));
     } catch (err: any) {
       if (err?.message === 'UNAUTHORIZED') {
-        handleSignOut(false);
         loadCachedDriveList();
       } else {
-        console.warn('Google Drive list notice:', err?.message || err);
+        console.warn('Firebase Storage list notice:', err?.message || err);
         loadCachedDriveList();
       }
     } finally {
@@ -203,17 +211,8 @@ export default function GoogleDriveBackupView({
   };
 
   const handleCreateBackupNow = async () => {
-    let activeUser = googleUser;
-    if (!isConnected || !activeUser) {
-      activeUser = await handleSignIn();
-      if (!activeUser) {
-        onShowWarningAlert('يرجى تسجيل الدخول بحساب Google Drive أولاً لرفع النسخة الاحتياطية.');
-        return;
-      }
-    }
-
     setIsCreatingBackup(true);
-    onShowSuccessAlert('جاري استخراج ونسخ بيانات الكافيه بالكامل وبدء الرفع إلى Google Drive... ☁️');
+    onShowSuccessAlert('جاري استخراج ونسخ بيانات الكافيه بالكامل وبدء الرفع السحابي إلى Firebase Storage... ☁️');
 
     try {
       const backupJson = dbService.exportBackupData();
@@ -221,30 +220,23 @@ export default function GoogleDriveBackupView({
       const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}`;
       const fileName = `كافيه_الديب_نسخة_احتياطية_${dateStr}.json`;
 
-      let newFile: GoogleDriveBackupFile;
+      const fbFile = await uploadBackupToFirebaseStorage(
+        fileName,
+        backupJson,
+        settings.cafe_name || 'كافيه الديب',
+        false
+      );
 
-      if (activeUser?.accessToken && !activeUser.accessToken.startsWith('token_gdrive_')) {
-        newFile = await uploadBackupToGoogleDrive(
-          activeUser.accessToken,
-          fileName,
-          backupJson,
-          settings.cafe_name || 'كافيه الديب',
-          false
-        );
-      } else {
-        // Local simulation fallback
-        const sizeNum = backupJson.length;
-        newFile = {
-          id: `drive_file_${Date.now()}`,
-          name: fileName,
-          createdTime: new Date().toISOString(),
-          size: sizeNum,
-          formattedSize: `${Math.round(sizeNum / 1024)} KB`,
-          formattedDate: `اليوم، ${now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}`,
-          description: 'نسخة احتياطية سحابية شاملة لكافيه الديب POS'
-        };
-        localStorage.setItem(`gdrive_file_data_${newFile.id}`, backupJson);
-      }
+      const newFile: GoogleDriveBackupFile = {
+        id: fbFile.fullPath,
+        name: fbFile.name,
+        createdTime: fbFile.createdTime,
+        size: fbFile.size,
+        formattedSize: fbFile.formattedSize,
+        formattedDate: fbFile.formattedDate,
+        description: fbFile.description,
+        isAuto: fbFile.isAuto
+      };
 
       dbService.logBackup('MANUAL', 'SUCCESS', fileName);
 
@@ -261,14 +253,13 @@ export default function GoogleDriveBackupView({
       setBackups(updatedList);
       localStorage.setItem('cafe_google_drive_backups_cache', JSON.stringify(updatedList));
 
-      onShowSuccessAlert('🎉 تم إنشاء النسخة الاحتياطية ورفعها إلى Google Drive بنجاح!');
+      onShowSuccessAlert('🎉 تم إنشاء النسخة الاحتياطية ورفعها إلى Firebase Storage بنجاح!');
     } catch (err: any) {
       if (err?.message === 'UNAUTHORIZED') {
-        handleSignOut(false);
-        onShowWarningAlert('انتهت الجلسة، يرجى تسجيل الدخول مجدداً إلى Google Drive.');
+        onShowWarningAlert('غير مصرح بالرفع: يرجى التأكد من تسجيل دخول المالك بحساب غير مجهول.');
       } else {
         console.error('Backup creation error:', err?.message || err);
-        onShowWarningAlert('حدث خطأ أثناء رفع النسخة الاحتياطية إلى Google Drive.');
+        onShowWarningAlert('حدث خطأ أثناء رفع النسخة الاحتياطية إلى Firebase Storage.');
       }
     } finally {
       setIsCreatingBackup(false);
@@ -277,7 +268,7 @@ export default function GoogleDriveBackupView({
 
   const handleTestConnection = async () => {
     setIsTestingConnection(true);
-    setDiagnosticStatus('جاري فحص اتصال الإنترنت واستجابة خوادم Google APIs...');
+    setDiagnosticStatus('جاري فحص اتصال الإنترنت واستجابة خوادم Firebase Storage...');
     try {
       const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
       if (!isOnline) {
@@ -287,28 +278,13 @@ export default function GoogleDriveBackupView({
         return;
       }
 
-      const t0 = performance.now();
-      const pingRes = await fetch('https://www.googleapis.com/discovery/v1/apis/drive/v3/rest', { method: 'GET', mode: 'cors' });
-      const latency = Math.round(performance.now() - t0);
-
-      if (!pingRes.ok) {
-        const msg = `⚠️ استجابة خوادم Google برمز ${pingRes.status} (${latency}ms)`;
-        setDiagnosticStatus(msg);
-        onShowWarningAlert(msg);
-        return;
-      }
-
-      if (isConnected && googleUser?.accessToken) {
-        setDiagnosticStatus(`جاري فحص صلاحيات الحساب وجلب قائمة النسخ... (${latency}ms)`);
-        const list = await listGoogleDriveBackups(googleUser.accessToken);
-        setBackups(list);
-        const successMsg = `✅ الاتصال بـ Google Drive سليم تماماً (${latency}ms) - الحساب: ${googleUser.email} (عدد النسخ: ${list.length})`;
-        setDiagnosticStatus(successMsg);
-        onShowSuccessAlert(`الاتصال بـ Google Drive يعمل بكفاءة (${latency}ms)! 🚀`);
+      const result = await testFirebaseStorageConnection();
+      setDiagnosticStatus(result.message);
+      if (result.success) {
+        onShowSuccessAlert(result.message);
+        fetchBackupsFromDrive();
       } else {
-        const readyMsg = `✅ خوادم Google متاحة وجاهزة (${latency}ms) - اضغط "اتصال بحساب Google" لتسجيل الدخول.`;
-        setDiagnosticStatus(readyMsg);
-        onShowSuccessAlert(`خوادم Google جاهزة وسريعة الاستجابة (${latency}ms).`);
+        onShowWarningAlert(result.message);
       }
     } catch (e: any) {
       console.error('Test connection error:', e);
@@ -336,21 +312,17 @@ export default function GoogleDriveBackupView({
         try {
           const currentData = dbService.exportBackupData();
           const safetyName = `نسخة_حماية_قبل_الاستعادة_${new Date().toISOString().substring(0, 10)}.json`;
-          if (googleUser?.accessToken && !googleUser.accessToken.startsWith('token_gdrive_')) {
-            await uploadBackupToGoogleDrive(googleUser.accessToken, safetyName, currentData, settings.cafe_name, false);
-          } else {
-            localStorage.setItem(`gdrive_file_data_safety_${Date.now()}`, currentData);
-          }
+          await uploadBackupToFirebaseStorage(safetyName, currentData, settings.cafe_name, false);
         } catch (sErr) {
           console.warn('Safety backup warning:', sErr);
         }
       }
 
-      onShowSuccessAlert(`جاري تحميل وقراءة ملف النسخة الاحتياطية "${selectedBackupToRestore.name}" من Google Drive...`);
+      onShowSuccessAlert(`جاري تحميل وقراءة ملف النسخة الاحتياطية "${selectedBackupToRestore.name}" من Firebase Storage...`);
 
       let backupContent = '';
-      if (googleUser?.accessToken && !googleUser.accessToken.startsWith('token_gdrive_')) {
-        backupContent = await downloadBackupFromGoogleDrive(googleUser.accessToken, selectedBackupToRestore.id);
+      if (selectedBackupToRestore.id && selectedBackupToRestore.id.startsWith('cafes/')) {
+        backupContent = await downloadBackupFromFirebaseStorage(selectedBackupToRestore.id);
       } else {
         backupContent = localStorage.getItem(`gdrive_file_data_${selectedBackupToRestore.id}`) || dbService.exportBackupData();
       }
@@ -385,14 +357,14 @@ export default function GoogleDriveBackupView({
   };
 
   const handleDeleteBackup = async (backup: GoogleDriveBackupFile) => {
-    if (!confirm(`⚠️ هل أنت متأكد من حذف النسخة الاحتياطية "${backup.name}" نهائياً من Google Drive؟\n\nلا يمكن التراجع عن هذا الإجراء.`)) {
+    if (!confirm(`⚠️ هل أنت متأكد من حذف النسخة الاحتياطية "${backup.name}" نهائياً من Firebase Storage؟\n\nلا يمكن التراجع عن هذا الإجراء.`)) {
       return;
     }
 
     setDeletingId(backup.id);
     try {
-      if (googleUser?.accessToken && !googleUser.accessToken.startsWith('token_gdrive_')) {
-        await deleteBackupFromGoogleDrive(googleUser.accessToken, backup.id);
+      if (backup.id && backup.id.startsWith('cafes/')) {
+        await deleteBackupFromFirebaseStorage(backup.id);
       }
       localStorage.removeItem(`gdrive_file_data_${backup.id}`);
 
@@ -400,14 +372,13 @@ export default function GoogleDriveBackupView({
       setBackups(updatedList);
       localStorage.setItem('cafe_google_drive_backups_cache', JSON.stringify(updatedList));
 
-      onShowSuccessAlert('تم حذف النسخة الاحتياطية من Google Drive بنجاح.');
+      onShowSuccessAlert('تم حذف النسخة الاحتياطية من Firebase Storage بنجاح.');
     } catch (err: any) {
       if (err?.message === 'UNAUTHORIZED') {
-        handleSignOut(false);
-        onShowWarningAlert('انتهت الجلسة، يرجى تسجيل الدخول مجدداً إلى Google Drive.');
+        onShowWarningAlert('غير مصرح بالحذف: يتطلب دخول المالك.');
       } else {
         console.error('Delete backup error:', err?.message || err);
-        onShowWarningAlert('فشل حذف النسخة من Google Drive.');
+        onShowWarningAlert('فشل حذف النسخة من Firebase Storage.');
       }
     } finally {
       setDeletingId(null);
@@ -418,8 +389,8 @@ export default function GoogleDriveBackupView({
     try {
       onShowSuccessAlert('جاري تحضير ملف النسخة للتنزيل على جهازك...');
       let content = '';
-      if (googleUser?.accessToken && !googleUser.accessToken.startsWith('token_gdrive_')) {
-        content = await downloadBackupFromGoogleDrive(googleUser.accessToken, backup.id);
+      if (backup.id && backup.id.startsWith('cafes/')) {
+        content = await downloadBackupFromFirebaseStorage(backup.id);
       } else {
         content = localStorage.getItem(`gdrive_file_data_${backup.id}`) || dbService.exportBackupData();
       }

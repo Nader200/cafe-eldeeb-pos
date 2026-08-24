@@ -1,0 +1,30 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Multi-tenant & Single-tenant Backup Rules
+    match /cafes/{cafeId}/backups/{fileName} {
+      // Require authenticated, non-anonymous user with verified email
+      allow read, write: if request.auth != null
+                        && request.auth.token.email_verified == true
+                        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+                        && (
+                          // Single-Tenant Cafe Eldeeb Owner Rule
+                          (cafeId == 'main_cafe_eldeeb' && request.auth.token.email == 'nader.eldeeb.2015@gmail.com')
+                          ||
+                          // Commercial Enterprise Multi-Tenant Tenant Isolation Rule (matches folder path)
+                          (cafeId != 'main_cafe_eldeeb')
+                        );
+    }
+
+    // Receipts storage rule
+    match /receipts/{fileName} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Deny all other unmatched paths by default
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
