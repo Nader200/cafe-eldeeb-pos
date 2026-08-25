@@ -338,8 +338,6 @@ function AppContent() {
               fileName,
               loadedSettings.cafe_name || 'كافيه الديب',
               true
-              'main_cafe_eldeeb',
-              loadedSettings.cafe_name || 'كافيه الديب'
             ).then(() => {
               const updated = { ...loadedSettings, google_drive_last_backup_date: new Date().toISOString() };
               dbService.saveSettings(updated);

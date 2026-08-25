@@ -96,7 +96,6 @@ jobs:
           echo "Verifying Keystore with keytool..."
           FINGERPRINTS=""
 
-          
           # Try default storetype, JKS, and PKCS12 storetypes in read-only mode
           if FINGERPRINTS=$(keytool -list -v -keystore android/app/debug.keystore -storepass android 2>&1); then
             echo "Keystore read successfully with default format."

@@ -283,8 +283,8 @@ export default function GoogleDriveBackupView({
       const newFile = await uploadBackupToFirebaseStorage(
         backupJson,
         fileName,
-        'main_cafe_eldeeb',
-        settings.cafe_name || 'كافيه الديب'
+        settings.cafe_name || 'كافيه الديب',
+        false
       );
 
       dbService.logBackup('MANUAL', 'SUCCESS', fileName);
@@ -372,7 +372,6 @@ export default function GoogleDriveBackupView({
           const currentData = dbService.exportBackupData();
           const safetyName = `نسخة_حماية_قبل_الاستعادة_${new Date().toISOString().substring(0, 10)}.json`;
           await uploadBackupToFirebaseStorage(currentData, safetyName, settings.cafe_name, false);
-          await uploadBackupToFirebaseStorage(currentData, safetyName, 'main_cafe_eldeeb', settings.cafe_name);
         } catch (sErr) {
           console.warn('Safety backup warning:', sErr);
         }
@@ -833,7 +832,6 @@ export default function GoogleDriveBackupView({
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in" dir="rtl">
           <div className="bg-luxury-card border border-gold-600/40 rounded-3xl p-6 max-w-md w-full shadow-2xl relative space-y-5">
 
-            
             <div className="flex items-center justify-between pb-3 border-b border-gray-900">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-gold-600/20 border border-gold-600/40 flex items-center justify-center text-gold-400">
@@ -856,7 +854,6 @@ export default function GoogleDriveBackupView({
 
             <form onSubmit={handleOwnerLogin} className="space-y-4 text-xs">
 
-              
               {loginError && (
                 <div className="p-3 bg-red-950/40 border border-red-900/50 rounded-2xl text-red-300 text-xs flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 shrink-0 text-red-400" />
