@@ -1,39 +1,51 @@
 rules_version = '2';
 
-// Craft rules based on data models and app architecture
-// Single-Tenant Owner-Only Storage Rules for Cafe Eldeeb
+// Cloud Storage Security Rules for Cafe Eldeeb POS
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // Helper functions for authentication and owner verification
-    function isAuthenticated() {
-      return request.auth != null;
+    // Helper: Verify non-anonymous authenticated user with verified email
+    function isVerifiedUser() {
+      return request.auth != null &&
+             request.auth.token.firebase.sign_in_provider != 'anonymous' &&
+             request.auth.token.email != null &&
+             request.auth.token.email_verified == true;
     }
 
-    function isNonAnonymous() {
-      return request.auth.token.firebase.sign_in_provider != 'anonymous' && request.auth.token.email != null;
-    }
-
+    // Helper: Verify exact primary owner (Single-Tenant)
     function isVerifiedOwner() {
-      return isAuthenticated()
-        && isNonAnonymous()
-        && request.auth.token.email.lower() == 'nader.eldeeb.2015@gmail.com'
-        && request.auth.token.email_verified == true;
+      return isVerifiedUser() &&
+             request.auth.token.email.lower() == 'nader.eldeeb.2015@gmail.com';
     }
 
+    // Helper: Verify matching tenant identity (Multi-Tenant)
+    function isTenantOwner(cafeId) {
+      return isVerifiedUser() &&
+             ((request.auth.token.tenant_id != null && request.auth.token.tenant_id == cafeId) ||
+              request.auth.uid == cafeId);
+    }
+
+    // Helper: Validate backup file upload metadata
     function isValidBackupUpload() {
-      return request.resource.contentType.matches('application/json.*')
-        && request.resource.size <= 50 * 1024 * 1024; // 50MB max limit
+      return request.resource.contentType.matches('application/json.*') &&
+             request.resource.size <= 50 * 1024 * 1024; // 50MB max limit
     }
 
-    // Secured Cloud Backup path for Cafe Eldeeb
+    // 1. Single-Tenant Primary Cafe Backups
     match /cafes/main_cafe_eldeeb/backups/{fileName} {
-      allow read: if isVerifiedOwner();
-      allow delete: if isVerifiedOwner();
-      allow create, update: if isVerifiedOwner() && isValidBackupUpload();
+      allow read, delete: if isVerifiedOwner();
+      allow create: if isVerifiedOwner() && isValidBackupUpload();
+      allow update: if false; // Backups are immutable
     }
 
-    // Default deny rule for all other storage paths
+    // 2. Multi-Tenant Isolated Cafe Backups (where cafeId != 'main_cafe_eldeeb')
+    match /cafes/{cafeId}/backups/{fileName} {
+      allow read, delete: if cafeId != 'main_cafe_eldeeb' && isTenantOwner(cafeId);
+      allow create: if cafeId != 'main_cafe_eldeeb' && isTenantOwner(cafeId) && isValidBackupUpload();
+      allow update: if false; // Backups are immutable
+    }
+
+    // 3. Fallback deny for all other storage paths
     match /{allPaths=**} {
       allow read, write: if false;
     }
