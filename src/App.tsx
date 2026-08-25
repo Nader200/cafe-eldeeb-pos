@@ -3,11 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { applyThemeToDOM, THEMES, normalizeThemeKey } from './lib/themeEngine';
 import ThemeAnimatedBackground from './components/ThemeAnimatedBackground';
@@ -329,7 +324,7 @@ function AppContent() {
           .catch(e => console.warn('Startup update check failed:', e));
       }
 
-      // Perform background automatic daily Firebase Storage backup if enabled
+      // Perform background automatic daily Firebase Storage Cloud Backup if enabled
       if (loadedSettings.google_drive_auto_backup_enabled) {
         const lastBackupTime = loadedSettings.google_drive_last_backup_date ? new Date(loadedSettings.google_drive_last_backup_date).getTime() : 0;
         const now = Date.now();
@@ -339,17 +334,18 @@ function AppContent() {
             const dateStr = new Date().toISOString().substring(0, 10);
             const fileName = `كافيه_الديب_نسخة_تلقائية_${dateStr}.json`;
             uploadBackupToFirebaseStorage(
-              fileName,
               backupJson,
+              fileName,
               loadedSettings.cafe_name || 'كافيه الديب',
               true
             ).then(() => {
               const updated = { ...loadedSettings, google_drive_last_backup_date: new Date().toISOString() };
               dbService.saveSettings(updated);
-              console.log('Automated daily Firebase Storage backup completed.');
-            }).catch(e => console.warn('Auto backup background error:', e));
+              dbService.logBackup('AUTOMATIC', 'SUCCESS', fileName);
+              console.log('Automated daily Cloud Backup completed.');
+            }).catch(e => console.warn('Auto backup background notice:', e?.message || e));
           } catch (err) {
-            console.warn('Auto backup preparation error:', err);
+            console.warn('Auto backup preparation notice:', err);
           }
         }
       }
@@ -1239,7 +1235,7 @@ function AppContent() {
                 (activeTab === 'settings' || activeTab === 'products') ? 'text-[#D4AF37]' : 'text-gray-400 hover:text-white'
               }`}
             >
-              {hasPermission('settings') ? <User className="w-5 h-5" /> : <Coffee className="w-5 h-5" />}
+              {hasPermission('settings') ? <User className="w-5 h-5" /> : <Coffee className="w-5 h-5 text-[#D4AF37]" />}
               <span className="text-[10px] font-black tracking-tighter">{hasPermission('settings') ? 'الإعدادات' : 'المنيو'}</span>
             </button>
           )}
@@ -1470,4 +1466,3 @@ function AppContent() {
     </div>
   );
 }
-

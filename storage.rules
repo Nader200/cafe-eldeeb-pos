@@ -1,28 +1,60 @@
 rules_version = '2';
+
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // Multi-tenant & Single-tenant Backup Rules
+    // Helper functions for authentication and owner verification
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isNonAnonymous() {
+      return request.auth.token.firebase.sign_in_provider != 'anonymous' && request.auth.token.email != null;
+    }
+
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    function isVerifiedOwner() {
+      return isAuthenticated()
+        && isNonAnonymous()
+        && isEmailVerified()
+        && request.auth.token.email.lower() == 'nader.eldeeb.2015@gmail.com';
+    }
+
+    function isVerifiedTenantUser(cafeId) {
+      return isAuthenticated()
+        && isNonAnonymous()
+        && isEmailVerified()
+        && (request.auth.token.tenant_id == cafeId || request.auth.uid == cafeId);
+    }
+
+    function isValidBackupUpload() {
+      return request.resource.contentType.matches('application/json.*')
+        && request.resource.size <= 50 * 1024 * 1024; // 50MB max limit
+    }
+
+    // Secured Multi-tenant & Single-tenant Cloud Backup Rules
     match /cafes/{cafeId}/backups/{fileName} {
-      // Require authenticated, non-anonymous user with verified email
-      allow read, write: if request.auth != null
-                        && request.auth.token.email_verified == true
-                        && request.auth.token.firebase.sign_in_provider != 'anonymous'
-                        && (
-                          // Single-Tenant Cafe Eldeeb Owner Rule
-                          (cafeId == 'main_cafe_eldeeb' && request.auth.token.email == 'nader.eldeeb.2015@gmail.com')
-                          ||
-                          // Commercial Enterprise Multi-Tenant Tenant Isolation Rule (matches folder path against authenticated tenant token / claim or ID)
-                          (cafeId != 'main_cafe_eldeeb' && (request.auth.token.tenant_id == cafeId || request.auth.uid == cafeId))
-                        );
+      // Single-Tenant Cafe Eldeeb Owner Path
+      allow read, delete: if cafeId == 'main_cafe_eldeeb' && isVerifiedOwner();
+      allow create: if cafeId == 'main_cafe_eldeeb' && isVerifiedOwner() && isValidBackupUpload();
+
+      // Commercial Enterprise Multi-Tenant Path
+      allow read, delete: if cafeId != 'main_cafe_eldeeb' && isVerifiedTenantUser(cafeId);
+      allow create: if cafeId != 'main_cafe_eldeeb' && isVerifiedTenantUser(cafeId) && isValidBackupUpload();
+
+      // Immutable backups: prevent updating existing backups
+      allow update: if false;
     }
 
     // Receipts storage rule
     match /receipts/{fileName} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isAuthenticated();
     }
 
-    // Deny all other unmatched paths by default
+    // Default deny rule for all other unmatched storage paths
     match /{allPaths=**} {
       allow read, write: if false;
     }

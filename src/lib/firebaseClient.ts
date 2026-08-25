@@ -4,6 +4,7 @@
  */
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getStorage } from 'firebase/storage';
 import {
   getAuth,
   signInWithEmailAndPassword,
@@ -23,8 +24,16 @@ import {
   onSnapshot,
   setDoc,
   collection,
-  getDocs
+  getDocs,
+  setLogLevel
 } from 'firebase/firestore';
+
+// Set Firestore log level to error to suppress transient connection attempt logs
+try {
+  setLogLevel('error');
+} catch {
+  // ignore if not supported
+}
 // Firebase Web App configuration for project cafe-eldeeb-pos
 export const firebaseConfig = {
   projectId: "cafe-eldeeb-pos",
@@ -68,6 +77,7 @@ export const db = (() => {
   try {
     const settings = {
       experimentalForceLongPolling: true,
+      experimentalAutoDetectLongPolling: true,
       localCache: memoryLocalCache()
     };
     return databaseId && databaseId !== '(default)'
@@ -82,6 +92,7 @@ export const db = (() => {
 console.log("Firestore App:", db.app.name);
 
 export const auth = getAuth(app);
+export const storage = getStorage(app);
 
 // Configure persistent auth state for browser / Capacitor WebView
 if (typeof window !== 'undefined') {
@@ -98,6 +109,9 @@ export async function ensureFirebaseAuth(forceNonAnonymous = false): Promise<Use
   if (auth.currentUser && (!forceNonAnonymous || !auth.currentUser.isAnonymous)) {
     return auth.currentUser;
   }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return null;
+  }
   if (authPromise) {
     return authPromise;
   }
@@ -105,6 +119,10 @@ export async function ensureFirebaseAuth(forceNonAnonymous = false): Promise<Use
   authPromise = (async () => {
     const targetEmail = "nader.eldeeb.2015@gmail.com";
     const experimentPassword = "password123";
+
+    if (auth.currentUser && !auth.currentUser.isAnonymous && auth.currentUser.email === targetEmail) {
+      return auth.currentUser;
+    }
 
     try {
       const credential = await signInWithEmailAndPassword(auth, targetEmail, experimentPassword);
@@ -114,8 +132,8 @@ export async function ensureFirebaseAuth(forceNonAnonymous = false): Promise<Use
       console.log("Email:", credential.user.email);
       return credential.user;
     } catch (err: any) {
-      console.log("[Firebase Auth Note] Email sign-in fallback to Anonymous Auth:", err?.code || err?.message);
-      if (!auth.currentUser) {
+      console.log("[Firebase Auth Note] Email sign-in fallback check:", err?.code || err?.message);
+      if (!auth.currentUser && !forceNonAnonymous) {
         try {
           const anonCred = await signInAnonymously(auth);
           console.log("===== FIREBASE AUTH STATUS =====");
@@ -145,9 +163,11 @@ if (typeof window !== 'undefined') {
       console.log("UID:", user.uid);
       console.log("Email:", user.email || '(anonymous)');
     } else {
-      ensureFirebaseAuth().catch((e) => {
-        console.warn('[Firebase Auth] Auto auth initialization notice:', e);
-      });
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        ensureFirebaseAuth().catch((e) => {
+          console.warn('[Firebase Auth] Auto auth initialization notice:', e);
+        });
+      }
     }
   });
 }

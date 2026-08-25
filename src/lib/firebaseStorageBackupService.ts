@@ -6,7 +6,17 @@
  * Provides multi-tenant cloud backup, listing, downloading, restoring, and deletion.
  */
 
-import { getStorage, ref, uploadString, listAll, getMetadata, getDownloadURL, deleteObject } from 'firebase/storage';
+import {
+  getStorage,
+  ref,
+  uploadString,
+  listAll,
+  getMetadata,
+  getDownloadURL,
+  getBytes,
+  deleteObject,
+  FullMetadata
+} from 'firebase/storage';
 import { app, auth, ensureFirebaseAuth } from './firebaseClient';
 
 export interface FirebaseStorageBackupFile {
@@ -22,7 +32,10 @@ export interface FirebaseStorageBackupFile {
   isAuto?: boolean;
 }
 
-const DEFAULT_CAFE_ID = 'main_cafe_eldeeb';
+export type FirebaseStorageBackupItem = FirebaseStorageBackupFile;
+
+export const DEFAULT_CAFE_ID = 'main_cafe_eldeeb';
+export const CAFE_STORAGE_ID = DEFAULT_CAFE_ID;
 const OWNER_EMAIL = 'nader.eldeeb.2015@gmail.com';
 
 /**
@@ -57,15 +70,60 @@ export async function verifyOwnerAuthentication(): Promise<boolean> {
 
   if (!currentUser) {
     console.warn('[FirebaseStorageBackup] Authentication failed: No user session.');
-    return false;
+    throw new Error('يجب تسجيل الدخول إلى Firebase للوصول إلى النسخ الاحتياطية السحابية.');
   }
 
   if (currentUser.isAnonymous) {
     console.warn('[FirebaseStorageBackup] Anonymous access denied for Cloud Backup.');
-    return false;
+    throw new Error('غير مصرح للحسابات المجهولة (Anonymous) بالوصول إلى النسخ السحابية. يتطلب تسجيل دخول حساب المالك الموثق.');
   }
 
   return true;
+}
+
+/**
+ * Sanitizes backup JSON content prior to uploading to Firebase Storage.
+ * Strips legacy Google OAuth access tokens, refresh tokens, and sensitive credentials.
+ */
+export function sanitizeBackupPayload(rawJson: string): string {
+  try {
+    const parsed = JSON.parse(rawJson);
+    if (parsed && typeof parsed === 'object') {
+      if (parsed.database && typeof parsed.database === 'object') {
+        const settings = parsed.database.cafe_settings;
+        if (settings && typeof settings === 'object') {
+          if (Array.isArray(settings)) {
+            parsed.database.cafe_settings = settings.map((s: any) => {
+              if (s && typeof s === 'object') {
+                const {
+                  google_drive_access_token,
+                  google_drive_refresh_token,
+                  oauth_token,
+                  ...rest
+                } = s;
+                return rest;
+              }
+              return s;
+            });
+          } else {
+            const {
+              google_drive_access_token,
+              google_drive_refresh_token,
+              oauth_token,
+              ...rest
+            } = settings;
+            parsed.database.cafe_settings = rest;
+          }
+        }
+      }
+      delete (parsed as any).google_drive_access_token;
+      delete (parsed as any).google_drive_refresh_token;
+      delete (parsed as any).oauth_token;
+    }
+    return JSON.stringify(parsed);
+  } catch {
+    return rawJson;
+  }
 }
 
 /**
@@ -106,20 +164,11 @@ export async function testFirebaseStorageConnection(tenantId?: string): Promise<
   const targetTenantId = tenantId || getActiveTenantCafeId();
   const t0 = performance.now();
 
-  const isAuthed = await verifyOwnerAuthentication();
-  if (!isAuthed) {
-    return {
-      success: false,
-      message: '❌ يتطلب فحص الاتصال السحابي تسجيل دخول حساب مالك مفعّل (غير مجهول).',
-      latency: Math.round(performance.now() - t0)
-    };
-  }
-
   try {
+    await verifyOwnerAuthentication();
     const storage = getStorage(app);
     const backupFolderRef = ref(storage, `cafes/${targetTenantId}/backups`);
 
-    // Perform a lightweight listAll check on the tenant backup folder
     const listRes = await listAll(backupFolderRef);
     const latency = Math.round(performance.now() - t0);
 
@@ -140,7 +189,6 @@ export async function testFirebaseStorageConnection(tenantId?: string): Promise<
     } else if (errCode === 'storage/unauthorized') {
       userMsg = `❌ غير مصرح بالحصول على النسخ الاحتياطية (Storage Rules Denied).`;
     } else if (errCode === 'storage/object-not-found') {
-      // Path not existing is technically fine for initial connection
       return {
         success: true,
         message: `✅ اتصال Firebase Storage يعمل (${latency}ms) - المجلد آمن وجاهز.`,
@@ -160,22 +208,27 @@ export async function testFirebaseStorageConnection(tenantId?: string): Promise<
  * Upload a backup file to Firebase Storage under tenant isolation path
  */
 export async function uploadBackupToFirebaseStorage(
-  fileName: string,
-  jsonContent: string,
+  rawBackupJson: string,
+  fileName?: string,
   cafeName: string = 'كافيه الديب',
   isAuto: boolean = false,
   tenantId?: string
 ): Promise<FirebaseStorageBackupFile> {
-  const isAuthed = await verifyOwnerAuthentication();
-  if (!isAuthed) {
-    throw new Error('UNAUTHORIZED');
-  }
+  await verifyOwnerAuthentication();
 
   const targetTenantId = tenantId || getActiveTenantCafeId();
-  const storage = getStorage(app);
-  const fileRef = ref(storage, `cafes/${targetTenantId}/backups/${fileName}`);
+  const sanitizedJson = sanitizeBackupPayload(rawBackupJson);
+  const now = new Date();
 
-  await uploadString(fileRef, jsonContent, 'raw', {
+  const finalFileName = fileName || (() => {
+    const dStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(now.getSeconds()).padStart(2, '0')}`;
+    return `backup_${targetTenantId}_${dStr}.json`;
+  })();
+
+  const storage = getStorage(app);
+  const fileRef = ref(storage, `cafes/${targetTenantId}/backups/${finalFileName}`);
+
+  await uploadString(fileRef, sanitizedJson, 'raw', {
     contentType: 'application/json',
     customMetadata: {
       cafeName,
@@ -185,15 +238,15 @@ export async function uploadBackupToFirebaseStorage(
   });
 
   const meta = await getMetadata(fileRef);
-  const sizeNum = meta.size || jsonContent.length;
+  const sizeNum = meta.size || sanitizedJson.length;
 
   return {
     id: meta.fullPath,
-    name: fileName,
-    createdTime: meta.timeCreated || new Date().toISOString(),
+    name: finalFileName,
+    createdTime: meta.timeCreated || now.toISOString(),
     size: sizeNum,
     formattedSize: formatBytes(sizeNum),
-    formattedDate: formatArabicDateTime(meta.timeCreated || new Date().toISOString()),
+    formattedDate: formatArabicDateTime(meta.timeCreated || now.toISOString()),
     description: `نسخة احتياطية شاملة لكافيه (${cafeName}) - ${isAuto ? 'تلقائية' : 'يدوية'}`,
     fullPath: meta.fullPath,
     isAuto
@@ -204,10 +257,7 @@ export async function uploadBackupToFirebaseStorage(
  * List all backup files in Firebase Storage for target tenant
  */
 export async function listBackupsFromFirebaseStorage(tenantId?: string): Promise<FirebaseStorageBackupFile[]> {
-  const isAuthed = await verifyOwnerAuthentication();
-  if (!isAuthed) {
-    throw new Error('UNAUTHORIZED');
-  }
+  await verifyOwnerAuthentication();
 
   const targetTenantId = tenantId || getActiveTenantCafeId();
   const storage = getStorage(app);
@@ -255,34 +305,52 @@ export async function listBackupsFromFirebaseStorage(tenantId?: string): Promise
 /**
  * Download backup file content from Firebase Storage
  */
-export async function downloadBackupFromFirebaseStorage(fullPath: string): Promise<string> {
-  const isAuthed = await verifyOwnerAuthentication();
-  if (!isAuthed) {
-    throw new Error('UNAUTHORIZED');
-  }
+export async function downloadBackupFromFirebaseStorage(fullPathOrName: string, tenantId?: string): Promise<string> {
+  await verifyOwnerAuthentication();
+
+  const targetTenantId = tenantId || getActiveTenantCafeId();
+  const pureFileName = fullPathOrName.includes('/')
+    ? fullPathOrName.split('/').pop() || fullPathOrName
+    : fullPathOrName;
+
+  const targetPath = fullPathOrName.startsWith('cafes/')
+    ? fullPathOrName
+    : `cafes/${targetTenantId}/backups/${pureFileName}`;
 
   const storage = getStorage(app);
-  const fileRef = ref(storage, fullPath);
-  const downloadUrl = await getDownloadURL(fileRef);
+  const fileRef = ref(storage, targetPath);
 
-  const res = await fetch(downloadUrl);
-  if (!res.ok) {
-    throw new Error(`Download failed with status ${res.status}`);
+  try {
+    const buffer = await getBytes(fileRef);
+    const decoder = new TextDecoder('utf-8');
+    return decoder.decode(buffer);
+  } catch {
+    const downloadUrl = await getDownloadURL(fileRef);
+    const res = await fetch(downloadUrl);
+    if (!res.ok) {
+      throw new Error(`Download failed with status ${res.status}`);
+    }
+    return await res.text();
   }
-  return await res.text();
 }
 
 /**
  * Delete a backup file from Firebase Storage
  */
-export async function deleteBackupFromFirebaseStorage(fullPath: string): Promise<boolean> {
-  const isAuthed = await verifyOwnerAuthentication();
-  if (!isAuthed) {
-    throw new Error('UNAUTHORIZED');
-  }
+export async function deleteBackupFromFirebaseStorage(fullPathOrName: string, tenantId?: string): Promise<boolean> {
+  await verifyOwnerAuthentication();
+
+  const targetTenantId = tenantId || getActiveTenantCafeId();
+  const pureFileName = fullPathOrName.includes('/')
+    ? fullPathOrName.split('/').pop() || fullPathOrName
+    : fullPathOrName;
+
+  const targetPath = fullPathOrName.startsWith('cafes/')
+    ? fullPathOrName
+    : `cafes/${targetTenantId}/backups/${pureFileName}`;
 
   const storage = getStorage(app);
-  const fileRef = ref(storage, fullPath);
+  const fileRef = ref(storage, targetPath);
   await deleteObject(fileRef);
   return true;
 }
