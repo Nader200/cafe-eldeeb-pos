@@ -1,7 +1,5 @@
 rules_version = '2';
 
-// Craft rules based on data models and app architecture
-// Single-Tenant Owner-Only Storage Rules for Cafe Eldeeb
 service firebase.storage {
   match /b/{bucket}/o {
 
@@ -14,11 +12,22 @@ service firebase.storage {
       return request.auth.token.firebase.sign_in_provider != 'anonymous' && request.auth.token.email != null;
     }
 
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
     function isVerifiedOwner() {
       return isAuthenticated()
         && isNonAnonymous()
-        && request.auth.token.email.lower() == 'nader.eldeeb.2015@gmail.com'
-        && request.auth.token.email_verified == true;
+        && isEmailVerified()
+        && request.auth.token.email.lower() == 'nader.eldeeb.2015@gmail.com';
+    }
+
+    function isVerifiedTenantUser(cafeId) {
+      return isAuthenticated()
+        && isNonAnonymous()
+        && isEmailVerified()
+        && (request.auth.token.tenant_id == cafeId || request.auth.uid == cafeId);
     }
 
     function isValidBackupUpload() {
@@ -26,14 +35,26 @@ service firebase.storage {
         && request.resource.size <= 50 * 1024 * 1024; // 50MB max limit
     }
 
-    // Secured Cloud Backup path for Cafe Eldeeb
-    match /cafes/main_cafe_eldeeb/backups/{fileName} {
-      allow read: if isVerifiedOwner();
-      allow delete: if isVerifiedOwner();
-      allow create, update: if isVerifiedOwner() && isValidBackupUpload();
+    // Secured Multi-tenant & Single-tenant Cloud Backup Rules
+    match /cafes/{cafeId}/backups/{fileName} {
+      // Single-Tenant Cafe Eldeeb Owner Path
+      allow read, delete: if cafeId == 'main_cafe_eldeeb' && isVerifiedOwner();
+      allow create: if cafeId == 'main_cafe_eldeeb' && isVerifiedOwner() && isValidBackupUpload();
+
+      // Commercial Enterprise Multi-Tenant Path
+      allow read, delete: if cafeId != 'main_cafe_eldeeb' && isVerifiedTenantUser(cafeId);
+      allow create: if cafeId != 'main_cafe_eldeeb' && isVerifiedTenantUser(cafeId) && isValidBackupUpload();
+
+      // Immutable backups: prevent updating existing backups
+      allow update: if false;
     }
 
-    // Default deny rule for all other storage paths
+    // Receipts storage rule
+    match /receipts/{fileName} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Default deny rule for all other unmatched storage paths
     match /{allPaths=**} {
       allow read, write: if false;
     }

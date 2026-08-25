@@ -3,11 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { applyThemeToDOM, THEMES, normalizeThemeKey } from './lib/themeEngine';
 import ThemeAnimatedBackground from './components/ThemeAnimatedBackground';
@@ -341,8 +336,8 @@ function AppContent() {
             uploadBackupToFirebaseStorage(
               backupJson,
               fileName,
-              'main_cafe_eldeeb',
-              loadedSettings.cafe_name || 'كافيه الديب'
+              loadedSettings.cafe_name || 'كافيه الديب',
+              true
             ).then(() => {
               const updated = { ...loadedSettings, google_drive_last_backup_date: new Date().toISOString() };
               dbService.saveSettings(updated);
@@ -1240,7 +1235,7 @@ function AppContent() {
                 (activeTab === 'settings' || activeTab === 'products') ? 'text-[#D4AF37]' : 'text-gray-400 hover:text-white'
               }`}
             >
-              {hasPermission('settings') ? <User className="w-5 h-5" /> : <Coffee className="w-5 h-5" />}
+              {hasPermission('settings') ? <User className="w-5 h-5" /> : <Coffee className="w-5 h-5 text-[#D4AF37]" />}
               <span className="text-[10px] font-black tracking-tighter">{hasPermission('settings') ? 'الإعدادات' : 'المنيو'}</span>
             </button>
           )}
@@ -1471,4 +1466,3 @@ function AppContent() {
     </div>
   );
 }
-
