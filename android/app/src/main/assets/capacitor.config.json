@@ -2,5 +2,15 @@
 	"appId": "com.eldeeb.pos",
 	"appName": "Cafe Eldeeb POS Enterprise",
 	"webDir": "dist",
-	"bundledWebRuntime": false
+	"bundledWebRuntime": false,
+	"plugins": {
+		"GoogleSignIn": {
+			"scopes": [
+				"https://www.googleapis.com/auth/drive.file",
+				"https://www.googleapis.com/auth/userinfo.email",
+				"https://www.googleapis.com/auth/userinfo.profile"
+			],
+			"serverClientId": "834307898677-6sh4d2s80ucmvk7u8k4c2f647ij418v2.apps.googleusercontent.com"
+		}
+	}
 }

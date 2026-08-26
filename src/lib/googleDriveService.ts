@@ -164,7 +164,9 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
         const userEmail = result?.email || 'user@google.com';
         const userName = result?.displayName || result?.givenName || 'مستخدم Google';
         const userPic = result?.imageUrl || undefined;
-        const validToken = result?.accessToken || result?.idToken || `gdrive_auth_${result?.userId || Date.now()}`;
+        const validToken = (result?.accessToken && !result.accessToken.startsWith('eyJ'))
+          ? result.accessToken
+          : (result?.idToken || `gdrive_auth_${result?.userId || Date.now()}`);
 
         console.log('[Android Native GoogleDrive] User authenticated with Google ID credentials:', userEmail);
         return {
@@ -178,10 +180,10 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
     } catch (nativeErr: any) {
       console.warn('[Android Native GoogleDrive] Native sign-in notice:', nativeErr);
       const rawMsg = (nativeErr?.message || String(nativeErr || '')).toLowerCase();
-      if (rawMsg.includes('sign_in_canceled') || rawMsg.includes('user_canceled')) {
+      if (rawMsg.includes('sign_in_canceled') || rawMsg.includes('user_canceled') || rawMsg.includes('12501')) {
         throw new Error('تم إلغاء اختيار حساب Google.');
       }
-      console.log('[Android Native GoogleDrive] Falling back to Web GIS / Firebase OAuth client...');
+      console.log('[Android Native GoogleDrive] Falling back to Web GIS OAuth client...');
     }
   }
 
