@@ -4,8 +4,6 @@
  */
 
 import firebaseConfig from '../../firebase-applet-config.json';
-import { auth } from './firebaseClient';
-import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { GoogleSignIn } from '@capawesome/capacitor-google-sign-in';
 import { Capacitor } from '@capacitor/core';
 
@@ -188,122 +186,76 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
   }
 
   // ==========================================
-  // 2. Primary Web/Browser Flow: Firebase Auth Google Popup
+  // 2. Google Identity Services (GIS) Token Client Flow (Primary Standard for Web & Preview)
   // ==========================================
-  try {
-    const provider = new GoogleAuthProvider();
-    provider.addScope(DRIVE_FILE_SCOPE);
-    provider.addScope('https://www.googleapis.com/auth/userinfo.email');
-    provider.addScope('https://www.googleapis.com/auth/userinfo.profile');
-    provider.setCustomParameters({ prompt: 'select_account' });
+  await loadGisScript();
 
-    console.log('[Web GoogleDrive] Initiating Firebase Google Auth Popup...');
-    const result = await signInWithPopup(auth, provider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    const token = credential?.accessToken;
-    const user = result.user;
+  const gisUser = await new Promise<GoogleDriveUser | null>((resolve) => {
+    let hasResolved = false;
+    const safeResolve = (user: GoogleDriveUser | null) => {
+      if (!hasResolved) {
+        hasResolved = true;
+        clearTimeout(timeoutId);
+        resolve(user);
+      }
+    };
 
-    if (token) {
-      console.log('[Web GoogleDrive] Firebase popup auth succeeded for:', user.email);
-      return {
-        accessToken: token,
-        expiresAt: Date.now() + 3600 * 1000,
-        email: user.email || 'user@google.com',
-        name: user.displayName || 'مستخدم Google',
-        picture: user.photoURL || undefined
-      };
-    }
-  } catch (fbErr: any) {
-    const fbCode = fbErr?.code || '';
-    console.warn('[Web GoogleDrive] Firebase Auth notice:', fbCode, fbErr?.message);
+    const timeoutId = setTimeout(() => {
+      console.warn('GIS Token request timed out or popup closed');
+      safeResolve(null);
+    }, 45000);
 
-    if (fbCode === 'auth/popup-closed-by-user') {
-      throw new Error('تم إغلاق نافذة تسجيل الدخول قبل استكمال المصادقة.');
-    }
-    if (fbCode === 'auth/cancelled-popup-request') {
-      throw new Error('تم إلغاء طلب تسجيل الدخول.');
-    }
-    // Continue to GIS fallback if popup was blocked or other issue
-  }
-
-  // ==========================================
-  // 3. Fallback Web Flow: Google Identity Services (GIS) Token Client
-  // ==========================================
-  try {
-    await loadGisScript();
-
-    const gisUser = await new Promise<GoogleDriveUser | null>((resolve) => {
-      let hasResolved = false;
-      const safeResolve = (user: GoogleDriveUser | null) => {
-        if (!hasResolved) {
-          hasResolved = true;
-          clearTimeout(timeoutId);
-          resolve(user);
-        }
-      };
-
-      const timeoutId = setTimeout(() => {
-        console.warn('GIS Token request timed out');
-        safeResolve(null);
-      }, 30000);
-
-      const google = (window as any).google;
-      if (google?.accounts?.oauth2) {
-        try {
-          const clientConfig: any = {
-            client_id: resolvedClientId,
-            scope: `${DRIVE_FILE_SCOPE} https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile`,
-            callback: async (response: any) => {
-              if (response && response.access_token && !response.error) {
-                const token = response.access_token;
-                const expiresIn = response.expires_in || 3600;
-                const profile = await fetchGoogleProfile(token);
-                
-                const user: GoogleDriveUser = {
-                  accessToken: token,
-                  expiresAt: Date.now() + expiresIn * 1000,
-                  email: profile?.email || 'user@google.com',
-                  name: profile?.name || 'مستخدم Google',
-                  picture: profile?.picture
-                };
-                safeResolve(user);
-              } else {
-                if (response?.error) {
-                  console.warn('Google Auth callback error:', response.error);
-                }
-                safeResolve(null);
+    const google = (window as any).google;
+    if (google?.accounts?.oauth2) {
+      try {
+        const clientConfig: any = {
+          client_id: resolvedClientId,
+          scope: `${DRIVE_FILE_SCOPE} https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile`,
+          callback: async (response: any) => {
+            if (response && response.access_token && !response.error) {
+              const token = response.access_token;
+              const expiresIn = response.expires_in || 3600;
+              const profile = await fetchGoogleProfile(token);
+              
+              const user: GoogleDriveUser = {
+                accessToken: token,
+                expiresAt: Date.now() + expiresIn * 1000,
+                email: profile?.email || 'user@google.com',
+                name: profile?.name || 'مستخدم Google',
+                picture: profile?.picture
+              };
+              safeResolve(user);
+            } else {
+              if (response?.error) {
+                console.warn('Google Auth callback error:', response.error);
               }
-            },
-            error_callback: (err: any) => {
-              console.warn('GIS token client error:', err);
-              safeResolve(null);
-            },
-            onerror: (err: any) => {
-              console.warn('GIS Auth onerror:', err);
               safeResolve(null);
             }
-          };
+          },
+          error_callback: (err: any) => {
+            console.warn('GIS token client error:', err);
+            safeResolve(null);
+          },
+          onerror: (err: any) => {
+            console.warn('GIS Auth onerror:', err);
+            safeResolve(null);
+          }
+        };
 
-          const client = google.accounts.oauth2.initTokenClient(clientConfig);
-          client.requestAccessToken({ prompt: 'select_account' });
-          return;
-        } catch (e) {
-          console.warn('Google Token Client init exception:', e);
-          safeResolve(null);
-        }
-      } else {
+        const client = google.accounts.oauth2.initTokenClient(clientConfig);
+        client.requestAccessToken({ prompt: '' });
+        return;
+      } catch (e) {
+        console.warn('Google Token Client init exception:', e);
         safeResolve(null);
       }
-    });
-
-    if (gisUser) {
-      return gisUser;
+    } else {
+      console.warn('Google Identity Services SDK (window.google.accounts.oauth2) not loaded.');
+      safeResolve(null);
     }
-  } catch (gisErr: any) {
-    console.warn('GIS Auth fallback notice:', gisErr?.message || gisErr);
-  }
+  });
 
-  return null;
+  return gisUser;
 }
 
 /**
