@@ -34,18 +34,20 @@ try {
 } catch {
   // ignore if not supported
 }
-// Firebase Web App configuration for project cafe-eldeeb-pos
+import firebaseAppletConfig from '../../firebase-applet-config.json';
+
+// Firebase Web App configuration from project setup
 export const firebaseConfig = {
-  projectId: "cafe-eldeeb-pos",
-  appId: "1:864337937711:web:6ac0c52e98515f602a4dda",
-  apiKey: "AIzaSyA-rOKaAUEmfuNsObbduYLQcDLY2s8WAes",
-  authDomain: "cafe-eldeeb-pos.firebaseapp.com",
-  storageBucket: "cafe-eldeeb-pos.firebasestorage.app",
-  messagingSenderId: "864337937711",
-  measurementId: "G-6JK5ZJFMH0"
+  projectId: firebaseAppletConfig.projectId || "gen-lang-client-0294038432",
+  appId: firebaseAppletConfig.appId || "1:834307898677:web:0f1e42504326b0a403607c",
+  apiKey: firebaseAppletConfig.apiKey || "AIzaSyAhkBuGbcAx5s4rrmKxPCK27PyCbNiX2ec",
+  authDomain: firebaseAppletConfig.authDomain || "gen-lang-client-0294038432.firebaseapp.com",
+  storageBucket: firebaseAppletConfig.storageBucket || "gen-lang-client-0294038432.firebasestorage.app",
+  messagingSenderId: firebaseAppletConfig.messagingSenderId || "834307898677",
+  measurementId: firebaseAppletConfig.measurementId || ""
 };
 
-// Initialize Firebase App exclusively with cafe-eldeeb-pos project
+// Initialize Firebase App
 export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
 console.log("===== FIREBASE PROJECT CONFIG =====");

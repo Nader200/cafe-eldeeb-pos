@@ -180,117 +180,127 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
     } catch (nativeErr: any) {
       console.warn('[Android Native GoogleDrive] Native sign-in notice:', nativeErr);
       const rawMsg = (nativeErr?.message || String(nativeErr || '')).toLowerCase();
-      // If user explicitly tapped back/cancel on the account picker, only then bubble cancel
       if (rawMsg.includes('sign_in_canceled') || rawMsg.includes('user_canceled')) {
         throw new Error('تم إلغاء اختيار حساب Google.');
       }
-      // For any other internal system notice (e.g. code 16 or missing Web OAuth client sync in Play Services), proceed to GIS or fallback
-      console.log('[Android Native GoogleDrive] Falling back to Web GIS OAuth client...');
+      console.log('[Android Native GoogleDrive] Falling back to Web GIS / Firebase OAuth client...');
     }
   }
 
   // ==========================================
-  // 2. Google Identity Services (GIS) Token Client Flow
+  // 2. Primary Web/Browser Flow: Firebase Auth Google Popup
   // ==========================================
-  // Standard OAuth2 Access Token Client with account hint support
-  await loadGisScript();
+  try {
+    const provider = new GoogleAuthProvider();
+    provider.addScope(DRIVE_FILE_SCOPE);
+    provider.addScope('https://www.googleapis.com/auth/userinfo.email');
+    provider.addScope('https://www.googleapis.com/auth/userinfo.profile');
+    provider.setCustomParameters({ prompt: 'select_account' });
 
-  const gisUser = await new Promise<GoogleDriveUser | null>((resolve) => {
-    let hasResolved = false;
-    const safeResolve = (user: GoogleDriveUser | null) => {
-      if (!hasResolved) {
-        hasResolved = true;
-        clearTimeout(timeoutId);
-        resolve(user);
-      }
-    };
+    console.log('[Web GoogleDrive] Initiating Firebase Google Auth Popup...');
+    const result = await signInWithPopup(auth, provider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    const token = credential?.accessToken;
+    const user = result.user;
 
-    const timeoutId = setTimeout(() => {
-      console.warn('Google Drive auth timed out or popup closed');
-      safeResolve(null);
-    }, 45000);
+    if (token) {
+      console.log('[Web GoogleDrive] Firebase popup auth succeeded for:', user.email);
+      return {
+        accessToken: token,
+        expiresAt: Date.now() + 3600 * 1000,
+        email: user.email || 'user@google.com',
+        name: user.displayName || 'مستخدم Google',
+        picture: user.photoURL || undefined
+      };
+    }
+  } catch (fbErr: any) {
+    const fbCode = fbErr?.code || '';
+    console.warn('[Web GoogleDrive] Firebase Auth notice:', fbCode, fbErr?.message);
 
-    const google = (window as any).google;
-    if (google?.accounts?.oauth2) {
-      try {
-        const clientConfig: any = {
-          client_id: resolvedClientId,
-          scope: `${DRIVE_FILE_SCOPE} https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile`,
-          callback: async (response: any) => {
-            if (response && response.access_token && !response.error) {
-              const token = response.access_token;
-              const expiresIn = response.expires_in || 3600;
-              const profile = await fetchGoogleProfile(token);
-              
-              const user: GoogleDriveUser = {
-                accessToken: token,
-                expiresAt: Date.now() + expiresIn * 1000,
-                email: profile?.email || 'user@google.com',
-                name: profile?.name || 'مستخدم Google',
-                picture: profile?.picture
-              };
-              safeResolve(user);
-            } else {
-              if (response?.error) {
-                console.warn('Google Auth callback error:', response.error);
+    if (fbCode === 'auth/popup-closed-by-user') {
+      throw new Error('تم إغلاق نافذة تسجيل الدخول قبل استكمال المصادقة.');
+    }
+    if (fbCode === 'auth/cancelled-popup-request') {
+      throw new Error('تم إلغاء طلب تسجيل الدخول.');
+    }
+    // Continue to GIS fallback if popup was blocked or other issue
+  }
+
+  // ==========================================
+  // 3. Fallback Web Flow: Google Identity Services (GIS) Token Client
+  // ==========================================
+  try {
+    await loadGisScript();
+
+    const gisUser = await new Promise<GoogleDriveUser | null>((resolve) => {
+      let hasResolved = false;
+      const safeResolve = (user: GoogleDriveUser | null) => {
+        if (!hasResolved) {
+          hasResolved = true;
+          clearTimeout(timeoutId);
+          resolve(user);
+        }
+      };
+
+      const timeoutId = setTimeout(() => {
+        console.warn('GIS Token request timed out');
+        safeResolve(null);
+      }, 30000);
+
+      const google = (window as any).google;
+      if (google?.accounts?.oauth2) {
+        try {
+          const clientConfig: any = {
+            client_id: resolvedClientId,
+            scope: `${DRIVE_FILE_SCOPE} https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile`,
+            callback: async (response: any) => {
+              if (response && response.access_token && !response.error) {
+                const token = response.access_token;
+                const expiresIn = response.expires_in || 3600;
+                const profile = await fetchGoogleProfile(token);
+                
+                const user: GoogleDriveUser = {
+                  accessToken: token,
+                  expiresAt: Date.now() + expiresIn * 1000,
+                  email: profile?.email || 'user@google.com',
+                  name: profile?.name || 'مستخدم Google',
+                  picture: profile?.picture
+                };
+                safeResolve(user);
+              } else {
+                if (response?.error) {
+                  console.warn('Google Auth callback error:', response.error);
+                }
+                safeResolve(null);
               }
+            },
+            error_callback: (err: any) => {
+              console.warn('GIS token client error:', err);
+              safeResolve(null);
+            },
+            onerror: (err: any) => {
+              console.warn('GIS Auth onerror:', err);
               safeResolve(null);
             }
-          },
-          error_callback: (err: any) => {
-            console.warn('GIS token client error:', err);
-            safeResolve(null);
-          },
-          onerror: (err: any) => {
-            console.warn('GIS Auth onerror:', err);
-            safeResolve(null);
-          }
-        };
+          };
 
-        const client = google.accounts.oauth2.initTokenClient(clientConfig);
-        client.requestAccessToken();
-        return;
-      } catch (e) {
-        console.warn('Google Token Client init exception:', e);
+          const client = google.accounts.oauth2.initTokenClient(clientConfig);
+          client.requestAccessToken({ prompt: 'select_account' });
+          return;
+        } catch (e) {
+          console.warn('Google Token Client init exception:', e);
+          safeResolve(null);
+        }
+      } else {
         safeResolve(null);
       }
-    } else {
-      safeResolve(null);
+    });
+
+    if (gisUser) {
+      return gisUser;
     }
-  });
-
-  if (gisUser) {
-    return gisUser;
-  }
-
-  // ==========================================
-  // 3. Web Only Fallback: Firebase Auth Google Popup (Excluded on Native Android WebView)
-  // ==========================================
-  if (!Capacitor.isNativePlatform()) {
-    try {
-      const provider = new GoogleAuthProvider();
-      provider.addScope(DRIVE_FILE_SCOPE);
-      provider.addScope('https://www.googleapis.com/auth/userinfo.email');
-      provider.addScope('https://www.googleapis.com/auth/userinfo.profile');
-      provider.setCustomParameters({ prompt: 'select_account' });
-
-      const result = await signInWithPopup(auth, provider);
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      const token = credential?.accessToken;
-      const user = result.user;
-
-      if (token) {
-        return {
-          accessToken: token,
-          expiresAt: Date.now() + 3600 * 1000,
-          email: user.email || 'user@google.com',
-          name: user.displayName || 'مستخدم Google',
-          picture: user.photoURL || undefined
-        };
-      }
-    } catch (fbErr: any) {
-      console.warn('Firebase Auth Google popup notice:', fbErr?.code || fbErr?.message || fbErr);
-    }
+  } catch (gisErr: any) {
+    console.warn('GIS Auth fallback notice:', gisErr?.message || gisErr);
   }
 
   return null;
