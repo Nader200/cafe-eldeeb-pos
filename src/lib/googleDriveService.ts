@@ -88,15 +88,15 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
   })();
   const settingsClientId = storedSettings?.google_drive_client_id;
 
-  const resolvedClientId = (clientId && clientId.includes('.apps.googleusercontent.com'))
-    ? clientId
-    : (settingsClientId && settingsClientId.includes('.apps.googleusercontent.com'))
-      ? settingsClientId
+  const resolvedClientId = (configClientId && configClientId.includes('.apps.googleusercontent.com'))
+    ? configClientId
+    : (clientId && clientId.includes('.apps.googleusercontent.com'))
+      ? clientId
       : (envClientId && envClientId.includes('.apps.googleusercontent.com'))
         ? envClientId
-        : (configClientId && configClientId.includes('.apps.googleusercontent.com'))
-          ? configClientId
-          : '864337937711-gi69esgs44rn7d2li3mb6bfjhdspe2pv.apps.googleusercontent.com';
+        : (settingsClientId && settingsClientId.includes('.apps.googleusercontent.com'))
+          ? settingsClientId
+          : '834307898677-6sh4d2s80ucmvk7u8k4c2f647ij418v2.apps.googleusercontent.com';
 
   // ==========================================
   // 1. Android Native Flow (Capacitor Native Platform)

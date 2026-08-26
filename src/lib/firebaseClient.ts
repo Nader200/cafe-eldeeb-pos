@@ -94,6 +94,14 @@ console.log("Firestore App:", db.app.name);
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 
+// Configure reasonable retry timeout to prevent long hanging requests on connection or permission issues
+try {
+  storage.maxOperationRetryTime = 10000; // 10 seconds timeout for operations
+  storage.maxUploadRetryTime = 30000; // 30 seconds for uploads
+} catch {
+  // Ignore if configuration not supported by SDK version
+}
+
 // Configure persistent auth state for browser / Capacitor WebView
 if (typeof window !== 'undefined') {
   setPersistence(auth, indexedDBLocalPersistence).catch(() => {

@@ -1,11 +1,11 @@
 {
-  "projectId": "cafe-eldeeb-pos",
-  "appId": "1:864337937711:web:6ac0c52e98515f602a4dda",
-  "apiKey": "AIzaSyA-rOKaAUEmfuNsObbduYLQcDLY2s8WAes",
-  "authDomain": "cafe-eldeeb-pos.firebaseapp.com",
-  "storageBucket": "cafe-eldeeb-pos.firebasestorage.app",
-  "messagingSenderId": "864337937711",
-  "measurementId": "G-6JK5ZJFMH0",
-  "oAuthClientId": "864337937711-gi69esgs44rn7d2li3mb6bfjhdspe2pv.apps.googleusercontent.com",
+  "projectId": "gen-lang-client-0294038432",
+  "appId": "1:834307898677:web:0f1e42504326b0a403607c",
+  "apiKey": "AIzaSyAhkBuGbcAx5s4rrmKxPCK27PyCbNiX2ec",
+  "authDomain": "gen-lang-client-0294038432.firebaseapp.com",
+  "storageBucket": "gen-lang-client-0294038432.firebasestorage.app",
+  "messagingSenderId": "834307898677",
+  "measurementId": "",
+  "oAuthClientId": "834307898677-6sh4d2s80ucmvk7u8k4c2f647ij418v2.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

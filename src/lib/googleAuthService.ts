@@ -9,9 +9,11 @@
 
 import { Capacitor } from '@capacitor/core';
 import { GoogleSignIn } from '@capawesome/capacitor-google-sign-in';
+import firebaseConfig from '../../firebase-applet-config.json';
 
 const GOOGLE_CLIENT_ID =
-  '864337937711-gi69esgs44rn7d2li3mb6bfjhdspe2pv.apps.googleusercontent.com';
+  (firebaseConfig as any)?.oAuthClientId ||
+  '834307898677-6sh4d2s80ucmvk7u8k4c2f647ij418v2.apps.googleusercontent.com';
 
 export const GOOGLE_DRIVE_SCOPE =
   'https://www.googleapis.com/auth/drive.file';

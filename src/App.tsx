@@ -49,7 +49,7 @@ import {
 import { dbService, seedDatabase } from './dbService';
 import { AppSettings, CashDrawer } from './types';
 import { safeStorage } from './lib/safeStorage';
-import { uploadBackupToFirebaseStorage } from './lib/firebaseStorageBackupService';
+import { uploadUnifiedCloudBackup } from './lib/cloudBackupUnifiedService';
 import { checkAndExpirePSSessions, ExpiredSessionNotification } from './lib/playstationNotifier';
 
 // Import our modular sub-views
@@ -329,7 +329,7 @@ function AppContent() {
           .catch(e => console.warn('Startup update check failed:', e));
       }
 
-      // Perform background automatic daily Firebase Storage Cloud Backup if enabled
+      // Perform background automatic daily Cloud Backup (Google Drive / Cloud) if enabled
       if (loadedSettings.google_drive_auto_backup_enabled) {
         const lastBackupTime = loadedSettings.google_drive_last_backup_date ? new Date(loadedSettings.google_drive_last_backup_date).getTime() : 0;
         const now = Date.now();
@@ -338,11 +338,12 @@ function AppContent() {
             const backupJson = dbService.exportBackupData();
             const dateStr = new Date().toISOString().substring(0, 10);
             const fileName = `كافيه_الديب_نسخة_تلقائية_${dateStr}.json`;
-            uploadBackupToFirebaseStorage(
+            uploadUnifiedCloudBackup(
               backupJson,
               fileName,
-              'main_cafe_eldeeb',
-              loadedSettings.cafe_name || 'كافيه الديب'
+              loadedSettings.cafe_name || 'كافيه الديب',
+              undefined,
+              true
             ).then(() => {
               const updated = { ...loadedSettings, google_drive_last_backup_date: new Date().toISOString() };
               dbService.saveSettings(updated);
