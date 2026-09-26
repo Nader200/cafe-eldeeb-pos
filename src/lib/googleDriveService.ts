@@ -159,31 +159,15 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
         };
       }
 
-      // 2. If authenticated via Google ID token on Android (user verified)
-      if (result?.email || result?.idToken || result?.userId) {
-        const userEmail = result?.email || 'user@google.com';
-        const userName = result?.displayName || result?.givenName || 'مستخدم Google';
-        const userPic = result?.imageUrl || undefined;
-        const validToken = (result?.accessToken && !result.accessToken.startsWith('eyJ'))
-          ? result.accessToken
-          : (result?.idToken || `gdrive_auth_${result?.userId || Date.now()}`);
-
-        console.log('[Android Native GoogleDrive] User authenticated with Google ID credentials:', userEmail);
-        return {
-          accessToken: validToken,
-          expiresAt: Date.now() + 30 * 24 * 3600 * 1000, // 30 days
-          email: userEmail,
-          name: userName,
-          picture: userPic
-        };
-      }
+      // If no valid OAuth2 access token was returned
+      throw new Error('لم يتم استلام تصريح Google Drive (OAuth Access Token). يرجى منح صلاحية الوصول لحفظ الملفات عند تسجيل الدخول.');
     } catch (nativeErr: any) {
       console.warn('[Android Native GoogleDrive] Native sign-in notice:', nativeErr);
       const rawMsg = (nativeErr?.message || String(nativeErr || '')).toLowerCase();
       if (rawMsg.includes('sign_in_canceled') || rawMsg.includes('user_canceled') || rawMsg.includes('12501')) {
         throw new Error('تم إلغاء اختيار حساب Google.');
       }
-      console.log('[Android Native GoogleDrive] Falling back to Web GIS OAuth client...');
+      throw new Error(nativeErr?.message || 'فشل تسجيل الدخول بحساب Google على الجهاز.');
     }
   }
 
