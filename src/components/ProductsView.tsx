@@ -108,7 +108,7 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
     setPIcon('☕');
     setPSellingPrice('35');
     setPCostPrice('0');
-    setPCurrentStock('0'); // Default opening stock to 0 actual count
+    setPCurrentStock(''); // Optional opening stock (defaults to 0 if left blank)
     setPMinStock('5');
     setPUnit('كوب');
     setPNotes('');
@@ -166,8 +166,8 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
 
     const sellingPriceNum = parseFloat(pSellingPrice);
     const costPriceNum = pCostPrice.trim() === '' ? 0 : parseFloat(pCostPrice);
-    const currentStockNum = parseFloat(pCurrentStock);
-    const minStockNum = parseFloat(pMinStock);
+    const currentStockNum = pCurrentStock.trim() === '' ? 0 : parseFloat(pCurrentStock);
+    const minStockNum = pMinStock.trim() === '' ? 0 : parseFloat(pMinStock);
     
     if (isNaN(sellingPriceNum) || sellingPriceNum < 0) {
       onShowWarningAlert('يرجى إدخال سعر بيع صحيح ومقبول (أرقام صحيحة أو عشرية، مثل: 35 أو 35.50)!');
@@ -672,32 +672,30 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
               </div>
 
               <div>
-                <label className="text-xs text-gray-400 font-bold block mb-1.5">رصيد المخزون الافتتاحي المتاح *</label>
+                <label className="text-xs text-gray-400 font-bold block mb-1.5">رصيد المخزون الافتتاحي المتاح (اختياري)</label>
                 <input
                   id="p-current-stock"
                   type="number"
                   step="any"
-                  required
                   value={pCurrentStock}
                   onChange={(e) => setPCurrentStock(e.target.value)}
-                  placeholder="أدخل رصيد المخزون المتوفر فعلياً"
+                  placeholder="0 (اختياري - افتراضياً صفر)"
                   className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-600 font-mono text-center"
                 />
                 <span className="text-[9px] text-gray-500 block mt-1">
-                  أدخل رصيد المخزون الفعلي المتوفر للسلعة يدوياً
+                  اختياري: اتركه فارغاً ليكون 0 تلقائياً، أو أدخل الرصيد الفعلي
                 </span>
               </div>
 
               <div>
-                <label className="text-xs text-gray-400 font-bold block mb-1.5">الحد الأدنى للتنبيه بالمخزون *</label>
+                <label className="text-xs text-gray-400 font-bold block mb-1.5">الحد الأدنى للتنبيه بالمخزون (اختياري)</label>
                 <input
                   id="p-min-stock"
                   type="number"
                   step="any"
-                  required
                   value={pMinStock}
                   onChange={(e) => setPMinStock(e.target.value)}
-                  placeholder="الحد الأدنى"
+                  placeholder="5 (افتراضي)"
                   className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-600 font-mono text-center"
                 />
               </div>
