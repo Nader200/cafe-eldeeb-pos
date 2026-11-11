@@ -6,6 +6,8 @@
 import firebaseConfig from '../../firebase-applet-config.json';
 import { GoogleSignIn } from '@capawesome/capacitor-google-sign-in';
 import { Capacitor } from '@capacitor/core';
+import { auth } from './firebaseClient';
+import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 
 export interface GoogleDriveUser {
   email: string;
@@ -73,28 +75,58 @@ export async function fetchGoogleProfile(accessToken: string): Promise<{ email: 
 }
 
 /**
+ * Fallback Web sign-in using Firebase Auth GoogleAuthProvider popup
+ */
+export async function signInWithFirebaseGooglePopup(): Promise<GoogleDriveUser | null> {
+  try {
+    const provider = new GoogleAuthProvider();
+    provider.addScope(DRIVE_FILE_SCOPE);
+    provider.addScope('https://www.googleapis.com/auth/userinfo.email');
+    provider.addScope('https://www.googleapis.com/auth/userinfo.profile');
+    provider.setCustomParameters({ prompt: 'select_account' });
+
+    const result = await signInWithPopup(auth, provider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    const accessToken = credential?.accessToken;
+
+    if (!accessToken) {
+      throw new Error('لم يتم استلام تصريح Google Drive Access Token من تسجيل الدخول.');
+    }
+
+    const email = result.user.email || 'user@google.com';
+    const name = result.user.displayName || 'مستخدم Google';
+    const picture = result.user.photoURL || undefined;
+
+    return {
+      accessToken,
+      expiresAt: Date.now() + 3600 * 1000,
+      email,
+      name,
+      picture
+    };
+  } catch (err: any) {
+    console.warn('[Firebase Google Popup] Sign-in notice:', err);
+    throw err;
+  }
+}
+
+/**
  * Trigger OAuth Sign-In flow with Google Identity Services or Custom Token Prompt
  */
 export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleDriveUser | null> {
-  const configClientId = (firebaseConfig as any)?.oAuthClientId || (firebaseConfig as any)?.OAuthClientId;
-  const envClientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
   const storedSettings = ((): any => {
     try {
       const s = localStorage.getItem('cafe_settings') || localStorage.getItem('cafe_eldeeb_settings');
       return s ? JSON.parse(s) : null;
     } catch { return null; }
   })();
-  const settingsClientId = storedSettings?.google_drive_client_id;
 
-  const resolvedClientId = (configClientId && configClientId.includes('.apps.googleusercontent.com'))
-    ? configClientId
-    : (clientId && clientId.includes('.apps.googleusercontent.com'))
-      ? clientId
-      : (envClientId && envClientId.includes('.apps.googleusercontent.com'))
-        ? envClientId
-        : (settingsClientId && settingsClientId.includes('.apps.googleusercontent.com'))
-          ? settingsClientId
-          : '834307898677-6sh4d2s80ucmvk7u8k4c2f647ij418v2.apps.googleusercontent.com';
+  const passedClientId = (clientId && clientId.includes('.apps.googleusercontent.com')) ? clientId.trim() : null;
+  const settingsClientId = (storedSettings?.google_drive_client_id && storedSettings.google_drive_client_id.includes('.apps.googleusercontent.com')) ? storedSettings.google_drive_client_id.trim() : null;
+  const envClientId = ((import.meta as any).env?.VITE_GOOGLE_CLIENT_ID && (import.meta as any).env.VITE_GOOGLE_CLIENT_ID.includes('.apps.googleusercontent.com')) ? (import.meta as any).env.VITE_GOOGLE_CLIENT_ID.trim() : null;
+  const configClientId = ((firebaseConfig as any)?.oAuthClientId && (firebaseConfig as any).oAuthClientId.includes('.apps.googleusercontent.com')) ? (firebaseConfig as any).oAuthClientId : null;
+
+  const resolvedClientId = passedClientId || settingsClientId || envClientId || configClientId || '834307898677-6sh4d2s80ucmvk7u8k4c2f647ij418v2.apps.googleusercontent.com';
 
   // ==========================================
   // 1. Android Native Flow (Capacitor Native Platform)
@@ -176,29 +208,33 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
   // ==========================================
   await loadGisScript();
 
-  const gisUser = await new Promise<GoogleDriveUser | null>((resolve) => {
-    let hasResolved = false;
-    const safeResolve = (user: GoogleDriveUser | null) => {
-      if (!hasResolved) {
-        hasResolved = true;
-        clearTimeout(timeoutId);
-        resolve(user);
-      }
-    };
+  const gisUser = await new Promise<GoogleDriveUser>((resolve, reject) => {
+    let hasFinished = false;
 
     const timeoutId = setTimeout(() => {
-      console.warn('GIS Token request timed out or popup closed');
-      safeResolve(null);
+      if (!hasFinished) {
+        hasFinished = true;
+        reject(new Error('انتهت مهلة انتظار تسجيل الدخول أو تم إغلاق النافذة المنبثقة.'));
+      }
     }, 45000);
 
     const google = (window as any).google;
-    if (google?.accounts?.oauth2) {
-      try {
-        const clientConfig: any = {
-          client_id: resolvedClientId,
-          scope: `${DRIVE_FILE_SCOPE} https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile`,
-          callback: async (response: any) => {
-            if (response && response.access_token && !response.error) {
+    if (!google?.accounts?.oauth2) {
+      clearTimeout(timeoutId);
+      reject(new Error('تعذر تحميل مكتبة مصادقة Google Identity Services. تأكد من اتصال الإنترنت.'));
+      return;
+    }
+
+    try {
+      const clientConfig: any = {
+        client_id: resolvedClientId,
+        scope: `${DRIVE_FILE_SCOPE} https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile`,
+        callback: async (response: any) => {
+          if (hasFinished) return;
+          if (response && response.access_token && !response.error) {
+            hasFinished = true;
+            clearTimeout(timeoutId);
+            try {
               const token = response.access_token;
               const expiresIn = response.expires_in || 3600;
               const profile = await fetchGoogleProfile(token);
@@ -210,34 +246,69 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
                 name: profile?.name || 'مستخدم Google',
                 picture: profile?.picture
               };
-              safeResolve(user);
-            } else {
-              if (response?.error) {
-                console.warn('Google Auth callback error:', response.error);
-              }
-              safeResolve(null);
+              resolve(user);
+            } catch (pErr) {
+              resolve({
+                accessToken: response.access_token,
+                expiresAt: Date.now() + 3600 * 1000,
+                email: 'user@google.com',
+                name: 'مستخدم Google'
+              });
             }
-          },
-          error_callback: (err: any) => {
-            console.warn('GIS token client error:', err);
-            safeResolve(null);
-          },
-          onerror: (err: any) => {
-            console.warn('GIS Auth onerror:', err);
-            safeResolve(null);
+          } else {
+            hasFinished = true;
+            clearTimeout(timeoutId);
+            const errDetails = response?.error || 'فشل الحصول على تصريح Google Drive';
+            const errStr = String(errDetails).toLowerCase();
+            if (errStr.includes('origin_mismatch') || errStr.includes('idpiframe_initialization_failed')) {
+              reject(new Error(`ORIGIN_MISMATCH: ${window.location.origin}`));
+            } else if (errStr.includes('access_denied') || errStr.includes('user_cancel')) {
+              reject(new Error('تم إلغاء منح الإذن للوصول إلى Google Drive.'));
+            } else {
+              reject(new Error(`خطأ من Google: ${errDetails}`));
+            }
           }
-        };
+        },
+        error_callback: (err: any) => {
+          if (hasFinished) return;
+          hasFinished = true;
+          clearTimeout(timeoutId);
+          console.warn('GIS token client error_callback:', err);
+          const errType = String(err?.type || '');
+          const errMsg = String(err?.message || err?.error || JSON.stringify(err)).toLowerCase();
 
-        const client = google.accounts.oauth2.initTokenClient(clientConfig);
-        client.requestAccessToken({ prompt: '' });
-        return;
-      } catch (e) {
-        console.warn('Google Token Client init exception:', e);
-        safeResolve(null);
+          if (errType === 'popup_failed_to_open') {
+            reject(new Error('تم حظر النافذة المنبثقة من قِبل المتصفح. يرجى السماح بالنوافذ المنبثقة (Popups) وإعادة المحاولة.'));
+          } else if (errType === 'popup_closed') {
+            reject(new Error('تم إغلاق نافذة تسجيل الدخول من قِبل المستخدم.'));
+          } else if (errMsg.includes('origin_mismatch') || errMsg.includes('idpiframe_initialization_failed')) {
+            reject(new Error(`ORIGIN_MISMATCH: ${window.location.origin}`));
+          } else {
+            reject(new Error(err?.message || 'تعذر إتمام المصادقة مع Google Drive.'));
+          }
+        },
+        onerror: (err: any) => {
+          if (hasFinished) return;
+          hasFinished = true;
+          clearTimeout(timeoutId);
+          console.warn('GIS Auth onerror:', err);
+          reject(new Error('حدث خطأ أثناء فتح نافذة مصادقة Google.'));
+        }
+      };
+
+      const client = google.accounts.oauth2.initTokenClient(clientConfig);
+      client.requestAccessToken({ prompt: '' });
+    } catch (e: any) {
+      if (!hasFinished) {
+        hasFinished = true;
+        clearTimeout(timeoutId);
+        const eMsg = String(e?.message || e).toLowerCase();
+        if (eMsg.includes('origin_mismatch')) {
+          reject(new Error(`ORIGIN_MISMATCH: ${window.location.origin}`));
+        } else {
+          reject(e);
+        }
       }
-    } else {
-      console.warn('Google Identity Services SDK (window.google.accounts.oauth2) not loaded.');
-      safeResolve(null);
     }
   });
 

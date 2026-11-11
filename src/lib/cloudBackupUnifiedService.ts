@@ -79,7 +79,7 @@ export function saveGoogleDriveUser(user: GoogleDriveUser | null): void {
 export async function authenticateGoogleDrive(forcePrompt: boolean = false): Promise<GoogleDriveUser> {
   const user = await requestGoogleDriveAuth();
   if (!user || !user.accessToken) {
-    throw new Error('تعذر إتمام المصادقة مع Google Drive.');
+    throw new Error('لم يتم استلام تصريح Google Drive. يرجى إعادة المحاولة.');
   }
   saveGoogleDriveUser(user);
   return user;

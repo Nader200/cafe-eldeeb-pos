@@ -34,6 +34,7 @@ import {
   GoogleDriveUser,
   GoogleDriveBackupFile,
   requestGoogleDriveAuth,
+  signInWithFirebaseGooglePopup,
   listGoogleDriveBackups,
   uploadBackupToGoogleDrive,
   downloadBackupFromGoogleDrive,
@@ -69,6 +70,12 @@ export default function GoogleDriveBackupView({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isTestingConnection, setIsTestingConnection] = useState<boolean>(false);
   const [diagnosticStatus, setDiagnosticStatus] = useState<string | null>(null);
+
+  // Origin mismatch diagnostics and custom client ID
+  const [originMismatchError, setOriginMismatchError] = useState<string | null>(null);
+  const [copiedOrigin, setCopiedOrigin] = useState<boolean>(false);
+  const [showCustomClientConfig, setShowCustomClientConfig] = useState<boolean>(false);
+  const [customClientIdInput, setCustomClientIdInput] = useState<string>(() => settings.google_drive_client_id || '');
 
   // Restore confirmation modal states
   const [selectedBackupToRestore, setSelectedBackupToRestore] = useState<GoogleDriveBackupFile | null>(null);
@@ -134,17 +141,73 @@ export default function GoogleDriveBackupView({
 
   const handleConnectGoogleDrive = async () => {
     setIsConnectingDrive(true);
+    setOriginMismatchError(null);
     setDiagnosticStatus('جاري فتح نافذة المصادقة وربط حساب Google Drive...');
     try {
       const user = await authenticateGoogleDrive(true);
       setGoogleUser(user);
       setIsConnected(true);
+      setOriginMismatchError(null);
       onShowSuccessAlert(`🎉 تم ربط حساب Google Drive بنجاح (${user.email})!`);
       setDiagnosticStatus(`✅ متصل بحساب: ${user.email}`);
       await fetchBackupsFromDrive(user);
     } catch (err: any) {
       console.error('[GoogleDriveBackupView] Connect error:', err);
       const msg = err?.message || 'فشل الاتصال بـ Google Drive.';
+      if (
+        msg.includes('ORIGIN_MISMATCH') ||
+        msg.includes('origin_mismatch') ||
+        msg.includes('unauthorized-domain') ||
+        msg.includes('400')
+      ) {
+        setOriginMismatchError(typeof window !== 'undefined' ? window.location.origin : 'https://cafe-eldeeb-pos.vercel.app');
+      }
+      setDiagnosticStatus(`❌ خطأ: ${msg}`);
+      onShowWarningAlert(msg.includes('ORIGIN_MISMATCH') ? 'تنبيه: يتطلب تفعيل نطاق الموقع في إعدادات Google Cloud (انظر الإرشادات بالأسفل).' : msg);
+    } finally {
+      setIsConnectingDrive(false);
+    }
+  };
+
+  const handleSaveCustomClientId = () => {
+    const trimmed = customClientIdInput.trim();
+    const updatedSettings: AppSettings = {
+      ...settings,
+      google_drive_client_id: trimmed || undefined,
+      updated_at: new Date().toISOString()
+    };
+    dbService.saveSettings(updatedSettings);
+    setSettings(updatedSettings);
+    if (onSettingsChanged) onSettingsChanged();
+    onShowSuccessAlert(trimmed ? 'تم حفظ معرّف العميل Google Client ID بنجاح! سيتم استخدامه في محاولات الربط التالية.' : 'تمت استعادة معرّف العميل الافتراضي.');
+  };
+
+  const handleConnectWithFirebasePopup = async () => {
+    setIsConnectingDrive(true);
+    setOriginMismatchError(null);
+    setDiagnosticStatus('جاري فتح نافذة مصادقة Firebase Google...');
+    try {
+      const user = await signInWithFirebaseGooglePopup();
+      if (!user || !user.accessToken) {
+        throw new Error('لم يتم استلام تصريح Google Drive.');
+      }
+      saveGoogleDriveUser(user);
+      setGoogleUser(user);
+      setIsConnected(true);
+      setOriginMismatchError(null);
+      onShowSuccessAlert(`🎉 تم ربط حساب Google Drive بنجاح عبر Firebase (${user.email})!`);
+      setDiagnosticStatus(`✅ متصل بحساب: ${user.email}`);
+      await fetchBackupsFromDrive(user);
+    } catch (err: any) {
+      console.error('[GoogleDriveBackupView] Firebase popup connect error:', err);
+      const msg = err?.message || 'فشل الاتصال بـ Google Drive عبر Firebase.';
+      if (
+        msg.includes('ORIGIN_MISMATCH') ||
+        msg.includes('unauthorized-domain') ||
+        msg.includes('400')
+      ) {
+        setOriginMismatchError(typeof window !== 'undefined' ? window.location.origin : 'https://cafe-eldeeb-pos.vercel.app');
+      }
       setDiagnosticStatus(`❌ خطأ: ${msg}`);
       onShowWarningAlert(msg);
     } finally {
@@ -511,15 +574,27 @@ export default function GoogleDriveBackupView({
                   </button>
                 </>
               ) : (
-                <button
-                  type="button"
-                  onClick={handleConnectGoogleDrive}
-                  disabled={isConnectingDrive}
-                  className="px-3 py-2 bg-gradient-to-r from-gold-600 to-gold-500 text-black text-xs font-extrabold rounded-xl shadow hover:opacity-90 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                >
-                  <LogIn className={`w-3.5 h-3.5 ${isConnectingDrive ? 'animate-spin' : ''}`} />
-                  {isConnectingDrive ? 'جاري الربط...' : 'ربط حساب Google Drive'}
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleConnectGoogleDrive}
+                    disabled={isConnectingDrive}
+                    className="px-3 py-2 bg-gradient-to-r from-gold-600 to-gold-500 text-black text-xs font-extrabold rounded-xl shadow hover:opacity-90 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <LogIn className={`w-3.5 h-3.5 ${isConnectingDrive ? 'animate-spin' : ''}`} />
+                    {isConnectingDrive ? 'جاري الربط...' : 'ربط حساب Google Drive'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConnectWithFirebasePopup}
+                    disabled={isConnectingDrive}
+                    className="px-3 py-2 bg-luxury-bg border border-gold-600/30 hover:border-gold-500 text-gold-400 hover:text-gold-300 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    title="طريقة بديلة عبر نافذة Firebase المنبثقة"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5 text-gold-500" />
+                    <span>نافذة بديلة (Firebase)</span>
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -537,6 +612,115 @@ export default function GoogleDriveBackupView({
             </button>
           </div>
         )}
+
+        {originMismatchError && (
+          <div className="mt-4 p-5 bg-gradient-to-r from-amber-950/40 via-yellow-950/20 to-amber-950/40 border border-amber-500/40 rounded-3xl shadow-xl animate-fade-in text-right" dir="rtl">
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div className="flex items-center gap-2.5 text-amber-400 font-extrabold text-sm">
+                <AlertTriangle className="w-5 h-5 shrink-0 text-amber-400" />
+                <span>تنبيه هام: يلزم تفعيل نطاق الموقع على Google Cloud (origin_mismatch)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOriginMismatchError(null)}
+                className="text-gray-400 hover:text-white text-xs p-1 rounded-lg hover:bg-white/10"
+                title="إغلاق التنبيه"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-gray-300 text-xs leading-relaxed mb-4">
+              لأنك تقوم بتشغيل التطبيق عبر Vercel على النطاق أدناه، تفرض خوادم Google سياسة أمان تتطلب إضافة هذا الرابط ضمن قائمة <strong className="text-amber-300">Authorized JavaScript origins</strong> في إعدادات Google Cloud Console لمعرّف العميل حتى يتم منح إذن الوصول بنجاح:
+            </p>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-4 bg-luxury-bg/90 p-3 rounded-2xl border border-amber-500/30">
+              <span className="font-mono text-xs text-amber-300 font-bold flex-1 truncate px-2 select-all" dir="ltr">
+                {originMismatchError}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(originMismatchError);
+                  setCopiedOrigin(true);
+                  setTimeout(() => setCopiedOrigin(false), 3000);
+                }}
+                className="px-4 py-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:opacity-90 text-black font-extrabold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow shrink-0"
+              >
+                {copiedOrigin ? (
+                  <>
+                    <CheckCircle className="w-4 h-4 text-emerald-950" />
+                    <span>تم النسخ بنجاح!</span>
+                  </>
+                ) : (
+                  <>
+                    <FileText className="w-4 h-4" />
+                    <span>نسخ رابط الموقع لإضافته في Google Cloud</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="bg-luxury-bg/60 p-4 rounded-2xl border border-gray-800 text-xs text-gray-300 space-y-2">
+              <p className="font-bold text-white text-xs mb-2">📌 خطوات الحل السريعة (تستغرق دقيقة واحدة):</p>
+              <ol className="list-decimal list-inside space-y-1.5 text-gray-300 text-[11px] leading-relaxed">
+                <li>
+                  توجه إلى صفحة <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" className="text-gold-400 underline font-bold hover:text-gold-300">Google Cloud Console - Credentials</a>.
+                </li>
+                <li>
+                  في قسم <strong>OAuth 2.0 Client IDs</strong>، اضغط على معرّف العميل (Web client) المستخدم.
+                </li>
+                <li>
+                  تحت قسم <strong>Authorized JavaScript origins (الأصول المعتمدة لـ JavaScript)</strong>، اضغط <strong>+ ADD URI</strong> وألصق الرابط المنسوخ: <code className="bg-black/60 px-1.5 py-0.5 rounded text-amber-300" dir="ltr">{originMismatchError}</code>.
+                </li>
+                <li>
+                  اضغط زر <strong>Save (حفظ)</strong> أسفل الصفحة، ثم انتظر دقيقة واحدة واضغط مجدداً على زر <strong>ربط حساب Google Drive</strong> أعلاه.
+                </li>
+              </ol>
+            </div>
+          </div>
+        )}
+
+        {/* Custom Client ID Toggle / Accordion */}
+        <div className="mt-3 pt-3 border-t border-gray-900/60 flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={() => setShowCustomClientConfig(!showCustomClientConfig)}
+            className="text-[11px] text-gray-400 hover:text-gold-400 flex items-center gap-1.5 transition-colors cursor-pointer self-start"
+          >
+            <Lock className="w-3.5 h-3.5 text-gold-500" />
+            <span>{showCustomClientConfig ? 'إخفاء إعدادات معرّف العميل المتقدمة' : 'إعدادات متقدمة: تخصيص Google Client ID (اختياري)'}</span>
+          </button>
+
+          {showCustomClientConfig && (
+            <div className="p-4 bg-luxury-bg/60 border border-gray-800 rounded-2xl space-y-3 animate-fade-in text-right" dir="rtl">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-white">معرّف العميل المخصص (Google OAuth Client ID):</span>
+                <span className="text-[10px] text-gray-400">ينتهي بـ .apps.googleusercontent.com</span>
+              </div>
+              <p className="text-[11px] text-gray-400 leading-relaxed">
+                إذا قمت بإنشاء مشروعك الخاص على Google Cloud Console وترغب بربط التطبيق به بدلاً من المعرف الافتراضي، أدخل معرّف العميل هنا:
+              </p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  value={customClientIdInput}
+                  onChange={(e) => setCustomClientIdInput(e.target.value)}
+                  placeholder="مثال: 123456789-xxxx.apps.googleusercontent.com"
+                  className="flex-1 px-3 py-2 bg-black/60 border border-gray-800 focus:border-gold-500 rounded-xl text-xs font-mono text-gray-200 outline-none"
+                  dir="ltr"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveCustomClientId}
+                  className="px-4 py-2 bg-gold-600/20 hover:bg-gold-600/30 text-gold-400 border border-gold-600/40 text-xs font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap"
+                >
+                  حفظ المعرّف
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 2. Control Cards: Instant Backup & Auto Backup Configuration */}
