@@ -1,26 +1,40 @@
 {
-  "name": "Cafe Eldeeb POS",
+  "id": "/",
+  "name": "كافيه الديب • Cafe Eldeeb POS",
   "short_name": "Cafe Eldeeb",
   "description": "نظام مبيعات وإدارة متكامل وفاخر للمقاهي والمطاعم الراقية",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "dir": "rtl",
+  "lang": "ar",
+  "background_color": "#000000",
+  "theme_color": "#000000",
   "icons": [
     {
       "src": "/icon-192.png",
       "type": "image/png",
       "sizes": "192x192",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
       "src": "/icon-512.png",
       "type": "image/png",
       "sizes": "512x512",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/pwa-maskable-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
     }
-  ],
-  "start_url": "/",
-  "background_color": "#000000",
-  "theme_color": "#000000",
-  "display": "standalone",
-  "orientation": "any",
-  "dir": "rtl",
-  "lang": "ar"
+  ]
 }
