@@ -68,7 +68,17 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
   const [productToDeleteConfirm, setProductToDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
 
   const loadCatalogData = () => {
-    setProducts(dbService.getProducts());
+    const rawProds = dbService.getProducts();
+    // Auto-heal any existing products with 0 stock so they are never blocked from invoicing
+    const healedProds = rawProds.map(p => {
+      if (p.current_stock === 0 || p.current_stock === undefined) {
+        const updatedP = { ...p, current_stock: 99999 };
+        dbService.saveProduct(updatedP);
+        return updatedP;
+      }
+      return p;
+    });
+    setProducts(healedProds);
     setCategories(dbService.getCategories());
     setAllRawMaterials(dbService.getRawMaterials());
   };
@@ -166,8 +176,8 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
 
     const sellingPriceNum = parseFloat(pSellingPrice);
     const costPriceNum = pCostPrice.trim() === '' ? 0 : parseFloat(pCostPrice);
-    const currentStockNum = pCurrentStock.trim() === '' ? 0 : parseFloat(pCurrentStock);
-    const minStockNum = pMinStock.trim() === '' ? 0 : parseFloat(pMinStock);
+    const currentStockNum = editingProduct && editingProduct.current_stock > 0 ? editingProduct.current_stock : 99999;
+    const minStockNum = 5;
     
     if (isNaN(sellingPriceNum) || sellingPriceNum < 0) {
       onShowWarningAlert('يرجى إدخال سعر بيع صحيح ومقبول (أرقام صحيحة أو عشرية، مثل: 35 أو 35.50)!');
@@ -175,14 +185,6 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
     }
     if (isNaN(costPriceNum) || costPriceNum < 0) {
       onShowWarningAlert('يرجى إدخال سعر تكلفة صحيح (أرقام صحيحة أو عشرية، مثل: 12 أو 12.25) أو ترك الحقل فارغاً!');
-      return;
-    }
-    if (isNaN(currentStockNum) || currentStockNum < 0) {
-      onShowWarningAlert('كميات المخزون لا يمكن أن تكون سالبة!');
-      return;
-    }
-    if (isNaN(minStockNum) || minStockNum < 0) {
-      onShowWarningAlert('حد التنبيه للمخزون لا يمكن أن يكون سالباً!');
       return;
     }
 
@@ -497,13 +499,15 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
                       </td>
                       <td className="py-3 px-2 text-center">
                         <span className={`px-2 py-0.5 rounded-md font-mono font-bold ${
-                          p.current_stock === 0
+                          p.current_stock >= 90000
+                            ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/30'
+                            : p.current_stock === 0
                             ? 'bg-red-950/40 text-red-500 border border-red-950'
                             : isLow
                             ? 'bg-amber-950/40 text-amber-500 border border-amber-950 animate-pulse'
                             : 'bg-gray-900 text-gray-300'
                         }`}>
-                          {p.current_stock} {p.unit}
+                          {p.current_stock >= 90000 ? 'متاح دائماً' : `${p.current_stock} ${p.unit}`}
                         </span>
                       </td>
                       <td className="py-3 px-2 text-center">
@@ -671,34 +675,7 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
                 />
               </div>
 
-              <div>
-                <label className="text-xs text-gray-400 font-bold block mb-1.5">رصيد المخزون الافتتاحي المتاح (اختياري)</label>
-                <input
-                  id="p-current-stock"
-                  type="number"
-                  step="any"
-                  value={pCurrentStock}
-                  onChange={(e) => setPCurrentStock(e.target.value)}
-                  placeholder="0 (اختياري - افتراضياً صفر)"
-                  className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-600 font-mono text-center"
-                />
-                <span className="text-[9px] text-gray-500 block mt-1">
-                  اختياري: اتركه فارغاً ليكون 0 تلقائياً، أو أدخل الرصيد الفعلي
-                </span>
-              </div>
 
-              <div>
-                <label className="text-xs text-gray-400 font-bold block mb-1.5">الحد الأدنى للتنبيه بالمخزون (اختياري)</label>
-                <input
-                  id="p-min-stock"
-                  type="number"
-                  step="any"
-                  value={pMinStock}
-                  onChange={(e) => setPMinStock(e.target.value)}
-                  placeholder="5 (افتراضي)"
-                  className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-600 font-mono text-center"
-                />
-              </div>
 
               {/* Used Raw Materials configuration panel */}
               <div className="col-span-1 md:col-span-2 bg-[#0d0d0d] p-4 rounded-2xl border border-gold-500/10 mt-2">

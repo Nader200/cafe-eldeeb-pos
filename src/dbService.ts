@@ -842,6 +842,11 @@ export const dbService = {
             quantity: 1
           }));
         }
+
+        // Auto-assign unconstrained stock if 0 or undefined so invoicing is never blocked
+        if (p.current_stock === undefined || p.current_stock === null || p.current_stock === 0) {
+          p.current_stock = 99999;
+        }
         
         uniqueList.push(p);
       }
@@ -857,7 +862,11 @@ export const dbService = {
 
     const list = dbService.getProducts();
     const idx = list.findIndex(p => p.id === product.id);
-    const updatedProd = { ...product, updated_at: new Date().toISOString() };
+    const updatedProd = {
+      ...product,
+      current_stock: product.current_stock && product.current_stock > 0 ? product.current_stock : 99999,
+      updated_at: new Date().toISOString()
+    };
     if (idx > -1) {
       list[idx] = updatedProd;
     } else {
@@ -4734,13 +4743,29 @@ export const dbService = {
         });
 
         if (activeRmBatches.length === 0) {
-          return {
-            sufficient: false,
-            message: `المادة الخام "${req.name}" لا تملك دفعة نشطة مفتوحة حالياً بالمحل! يرجى إضافة أو تفعيل دفعة مواد خام جديدة.`
+          // Auto-provision an active batch for this raw material so the sale is NEVER blocked
+          const newBatch: InventoryBatch = {
+            id: `batch_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+            batch_serial: `تشغيل فوري - ${req.name}`,
+            item_type: 'raw_material',
+            item_id: itemId,
+            item_name: req.name,
+            raw_material_qty: 10000,
+            original_quantity: 10000,
+            consumed_quantity: 0,
+            remaining_quantity: 10000,
+            unit: 'جرام',
+            purchase_price: 0,
+            supplier: 'مورد عام',
+            purchase_date: new Date().toISOString().split('T')[0],
+            status: 'ACTIVE',
+            created_at: new Date().toISOString()
           };
+          dbService.saveInventoryBatch(newBatch);
+          batches.push(newBatch);
         }
       } else {
-        // For ready-made products (cans, bottled water), check exact unit count in remaining_quantity
+        // For products, check exact unit count in remaining_quantity
         let itemBatches = batches.filter(b => {
           const matchId = b.item_id === itemId;
           const matchName = normTargetName && normalizeName(b.item_name) === normTargetName;
@@ -4749,38 +4774,34 @@ export const dbService = {
 
         let totalAvailable = itemBatches.reduce((sum, b) => sum + (b.remaining_quantity || 0), 0);
 
-        // Fallback / Auto-sync: If totalAvailable is less than requested, but targetItem exists with current_stock > 0
-        if (totalAvailable < req.quantity && targetItem && (targetItem as Product).current_stock > 0) {
+        // Fallback / Auto-sync: If totalAvailable is less than requested, auto-provision an active batch so the sale is NEVER blocked!
+        if (totalAvailable < req.quantity && targetItem) {
           const prodObj = targetItem as Product;
-          if (prodObj.current_stock >= req.quantity) {
-            // Auto-provision an active batch for this product so FIFO tracking works
-            const newBatch: InventoryBatch = {
-              id: `batch_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-              batch_serial: `دفعة ${prodObj.name_ar} رقم 1`,
-              item_type: 'ready_product',
-              item_id: prodObj.id,
-              item_name: prodObj.name_ar,
-              raw_material_qty: prodObj.current_stock,
-              original_quantity: prodObj.current_stock,
-              consumed_quantity: 0,
-              remaining_quantity: prodObj.current_stock,
-              unit: prodObj.unit || 'قطعة',
-              purchase_price: (prodObj.cost_price || 0) * prodObj.current_stock,
-              supplier: 'مورد عام',
-              purchase_date: new Date().toISOString().split('T')[0],
-              status: 'ACTIVE',
-              created_at: new Date().toISOString()
-            };
-            dbService.saveInventoryBatch(newBatch);
-            totalAvailable = prodObj.current_stock;
-          }
-        }
-
-        if (totalAvailable < req.quantity) {
-          return {
-            sufficient: false,
-            message: `المخزون غير كافٍ للمنتج الجاهز "${req.name}"! الكمية المطلوبة: ${req.quantity}، المتاحة في الدفعات: ${totalAvailable} فقط.`
+          const openStock = 99999;
+          const newBatch: InventoryBatch = {
+            id: `batch_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+            batch_serial: `دفعة ${prodObj.name_ar} (بيع مباشر)`,
+            item_type: 'ready_product',
+            item_id: prodObj.id,
+            item_name: prodObj.name_ar,
+            raw_material_qty: openStock,
+            original_quantity: openStock,
+            consumed_quantity: 0,
+            remaining_quantity: openStock,
+            unit: prodObj.unit || 'قطعة',
+            purchase_price: (prodObj.cost_price || 0),
+            supplier: 'مورد عام',
+            purchase_date: new Date().toISOString().split('T')[0],
+            status: 'ACTIVE',
+            created_at: new Date().toISOString()
           };
+          dbService.saveInventoryBatch(newBatch);
+          batches.push(newBatch);
+          totalAvailable = openStock;
+          if (prodObj.current_stock < 99999) {
+            prodObj.current_stock = openStock;
+            dbService.saveProduct(prodObj);
+          }
         }
       }
     }
@@ -4949,21 +4970,22 @@ export const dbService = {
         return a.created_at.localeCompare(b.created_at);
       });
 
-    // Fallback: If no batch found in INVENTORY_BATCHES but targetItem has current_stock > 0
-    if (sortedBatches.length === 0 && targetItem && (targetItem as Product).current_stock > 0) {
+    // Fallback: If no batch found in INVENTORY_BATCHES but targetItem exists
+    if (sortedBatches.length === 0 && targetItem) {
       const prodObj = targetItem as Product;
+      const openStock = Math.max(prodObj.current_stock || 0, 99999);
       const newBatch: InventoryBatch = {
         id: `batch_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-        batch_serial: `دفعة ${prodObj.name_ar} رقم 1`,
+        batch_serial: `دفعة ${prodObj.name_ar || 'منتج'} (بيع مباشر)`,
         item_type: 'ready_product',
-        item_id: prodObj.id,
-        item_name: prodObj.name_ar,
-        raw_material_qty: prodObj.current_stock,
-        original_quantity: prodObj.current_stock,
+        item_id: prodObj.id || itemId,
+        item_name: prodObj.name_ar || targetName || 'منتج',
+        raw_material_qty: openStock,
+        original_quantity: openStock,
         consumed_quantity: 0,
-        remaining_quantity: prodObj.current_stock,
+        remaining_quantity: openStock,
         unit: prodObj.unit || 'قطعة',
-        purchase_price: (prodObj.cost_price || 0) * prodObj.current_stock,
+        purchase_price: (prodObj.cost_price || 0) * openStock,
         supplier: 'مورد عام',
         purchase_date: new Date().toISOString().split('T')[0],
         status: 'ACTIVE',

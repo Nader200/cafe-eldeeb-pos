@@ -1313,7 +1313,7 @@ export default function POSView({
                     const stockPercent = Math.min(100, Math.max(5, (prod.current_stock / maxTrackedStock) * 100));
 
                     const isRecipe = prod.recipe_ingredients && prod.recipe_ingredients.length > 0;
-                    const isAvailable = !isRecipe || dbService.checkInventorySufficiency([{ product: prod, quantity: 1, notes: '', kitchen_notes: '' }]).sufficient;
+                    const isAvailable = true;
 
                     return (
                       <div
@@ -1370,13 +1370,13 @@ export default function POSView({
                               </span>
                             ) : (
                               <span className={`font-mono font-bold px-1 py-0.5 rounded text-[9px] ${
-                                prod.current_stock === 0
-                                  ? 'bg-red-950/40 text-red-500 border border-red-950'
+                                prod.current_stock >= 90000 || prod.current_stock === 0
+                                  ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/30'
                                   : lowStock
                                   ? 'bg-amber-950/40 text-amber-500 border border-amber-950'
                                   : 'bg-gray-900 text-gray-300'
                               }`}>
-                                {prod.current_stock}
+                                {prod.current_stock >= 90000 || prod.current_stock === 0 ? 'متاح' : prod.current_stock}
                               </span>
                             )}
                           </div>
