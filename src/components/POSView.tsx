@@ -841,9 +841,9 @@ export default function POSView({
 
     const newCust: Customer = {
       id: `cust_${Date.now()}`,
-      full_name: newCustName,
-      phone: newCustPhone || 'بدون هاتف',
-      address: newCustAddress || 'بدون عنوان',
+      full_name: newCustName.trim(),
+      phone: newCustPhone.trim(),
+      address: newCustAddress.trim() || 'بدون عنوان',
       credit_limit: newCustLimit,
       current_balance: 0,
       notes: 'تم إنشاؤه عبر نافذة المبيعات السريعة',
@@ -2069,7 +2069,7 @@ export default function POSView({
 
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs text-gray-400 font-bold block">رقم الهاتف المحمول *</label>
+                  <label className="text-xs text-gray-400 font-bold block">رقم الهاتف المحمول (اختياري)</label>
                   <ContactPickerButton
                     currentName={newCustName}
                     onSelect={({ phone, name }) => {
@@ -2084,7 +2084,7 @@ export default function POSView({
                 <input
                   id="new-customer-phone"
                   type="tel"
-                  placeholder="مثال: 01012345678"
+                  placeholder="مثال: 01012345678 (اختياري)"
                   value={newCustPhone}
                   onChange={(e) => setNewCustPhone(e.target.value)}
                   className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-600 text-right font-mono"

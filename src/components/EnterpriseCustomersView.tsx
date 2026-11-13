@@ -663,7 +663,7 @@ export default function EnterpriseCustomersView({
       if (!query) return true;
       return (
         c.full_name.toLowerCase().includes(query) ||
-        c.phone.includes(query) ||
+        (c.phone && c.phone.includes(query)) ||
         (c.whatsapp && c.whatsapp.includes(query)) ||
         c.id.toLowerCase().includes(query)
       );
@@ -741,20 +741,23 @@ export default function EnterpriseCustomersView({
       onShowWarningAlert('يرجى إدخال اسم العميل الكامل');
       return;
     }
-    if (!formData.phone.trim()) {
-      onShowWarningAlert('يرجى إدخال رقم الهاتف');
-      return;
-    }
+
+    const cleanFormData = {
+      ...formData,
+      full_name: formData.full_name.trim(),
+      phone: formData.phone.trim(),
+      whatsapp: formData.whatsapp.trim(),
+    };
 
     const customerPayload: Customer = editingCustomer
       ? {
           ...editingCustomer,
-          ...formData,
+          ...cleanFormData,
           updated_at: new Date().toISOString()
         }
       : {
           id: `cust_${Date.now()}`,
-          ...formData,
+          ...cleanFormData,
           current_balance: 0,
           wallet_balance: 0,
           is_archived: false,
@@ -1270,7 +1273,7 @@ export default function EnterpriseCustomersView({
             <td class="label">اسم العميل</td>
             <td>${selectedCustomer.full_name} ${selectedCustomer.is_vip ? '⭐ (عميل VIP)' : ''}</td>
             <td class="label">رقم الهاتف</td>
-            <td>${selectedCustomer.phone}</td>
+            <td>${selectedCustomer.phone || 'غير مدخل'}</td>
           </tr>
           <tr>
             <td class="label">العنوان السكني</td>
@@ -1544,7 +1547,7 @@ export default function EnterpriseCustomersView({
                           )}
                         </div>
                         <span className="text-[10px] text-gray-400 font-mono" dir="ltr">
-                          {cust.phone}
+                          {cust.phone || 'بدون هاتف'}
                         </span>
                       </div>
                     </div>
@@ -1615,7 +1618,7 @@ export default function EnterpriseCustomersView({
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-gray-400">
                         <span className="flex items-center gap-1">
                           <Phone className="w-3.5 h-3.5 text-gold-500" />
-                          <span className="font-mono">{selectedCustomer.phone}</span>
+                          <span className="font-mono">{selectedCustomer.phone || 'بدون هاتف'}</span>
                         </span>
                         {selectedCustomer.address && (
                           <span className="flex items-center gap-1">
@@ -2102,7 +2105,7 @@ export default function EnterpriseCustomersView({
                 >
                   <option value="ALL">كل عملاء الكافيه (الكل)</option>
                   {customers.map(c => (
-                    <option key={c.id} value={c.id}>{c.full_name} ({c.phone})</option>
+                    <option key={c.id} value={c.id}>{c.full_name}{c.phone ? ` (${c.phone})` : ''}</option>
                   ))}
                 </select>
               </div>
@@ -2357,7 +2360,7 @@ export default function EnterpriseCustomersView({
                 >
                   <option value="ALL">كل عملاء الكافيه (الكل)</option>
                   {customers.map(c => (
-                    <option key={c.id} value={c.id}>{c.full_name} ({c.phone})</option>
+                    <option key={c.id} value={c.id}>{c.full_name}{c.phone ? ` (${c.phone})` : ''}</option>
                   ))}
                 </select>
               </div>
@@ -2490,7 +2493,7 @@ export default function EnterpriseCustomersView({
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between">
-                    <label className="text-[10px] font-bold text-gray-400">رقم الهاتف الأساسي *</label>
+                    <label className="text-[10px] font-bold text-gray-400">رقم الهاتف الأساسي (اختياري)</label>
                     <ContactPickerButton
                       currentName={formData.full_name}
                       onSelect={({ phone, name }) => {
@@ -2505,8 +2508,7 @@ export default function EnterpriseCustomersView({
                   </div>
                   <input
                     type="text"
-                    required
-                    placeholder="01xxxxxxxxx"
+                    placeholder="01xxxxxxxxx (اختياري)"
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                     className="w-full bg-luxury-bg border border-luxury-border text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-500 text-right font-mono"
@@ -2967,7 +2969,7 @@ export default function EnterpriseCustomersView({
               </div>
               <div className="flex justify-between items-center text-xs font-bold border-b border-luxury-border pb-1.5">
                 <span className="text-gray-400">رقم الموبايل:</span>
-                <span className="text-gold-400 font-mono" dir="ltr">{selectedCustomer.phone}</span>
+                <span className="text-gold-400 font-mono" dir="ltr">{selectedCustomer.phone || 'غير مدخل'}</span>
               </div>
               <div className="flex justify-between items-center text-xs font-bold font-mono">
                 <span className="text-gray-400">إجمالي المديونية:</span>
@@ -2998,7 +3000,7 @@ export default function EnterpriseCustomersView({
                       <img src="${getEldeebLogoDataUrl(300, false, 'gold')}" alt="Cafe Eldeeb Logo" style="height: 160px; width: auto; margin: 0 auto 10px; display: block; filter: contrast(145%) brightness(92%) saturate(125%) drop-shadow(0 3px 10px rgba(0,0,0,0.25)); -webkit-filter: contrast(145%) brightness(92%) saturate(125%) drop-shadow(0 3px 10px rgba(0,0,0,0.25)); image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges;" />
                       <div class="logo" style="margin-top: 6px;">كافيه الديب • Cafe Eldeeb</div>
                       <div class="name">${selectedCustomer.full_name}</div>
-                      <div class="phone">${selectedCustomer.phone}</div>
+                      <div class="phone">${selectedCustomer.phone || ''}</div>
                       <div class="qr">
                         <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(customerQrPayload)}" width="180"/>
                       </div>
