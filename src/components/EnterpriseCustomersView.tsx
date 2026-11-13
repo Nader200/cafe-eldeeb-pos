@@ -2619,13 +2619,36 @@ export default function EnterpriseCustomersView({
                   accept="image/*"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (file) {
-                      const reader = new FileReader();
-                      reader.onloadend = () => {
-                        setFormData({ ...formData, photo: reader.result as string });
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                      const rawDataUrl = reader.result as string;
+                      const img = new Image();
+                      img.onload = () => {
+                        try {
+                          const maxDim = 220;
+                          const scale = Math.min(1, maxDim / Math.max(img.width || maxDim, img.height || maxDim));
+                          const canvas = document.createElement('canvas');
+                          canvas.width = Math.max(1, Math.round(img.width * scale));
+                          canvas.height = Math.max(1, Math.round(img.height * scale));
+                          const ctx = canvas.getContext('2d');
+                          if (ctx) {
+                            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                            const compressed = canvas.toDataURL('image/jpeg', 0.72);
+                            setFormData(prev => ({ ...prev, photo: compressed }));
+                            return;
+                          }
+                        } catch (err) {
+                          // fallback below
+                        }
+                        setFormData(prev => ({ ...prev, photo: rawDataUrl }));
                       };
-                      reader.readAsDataURL(file);
-                    }
+                      img.onerror = () => {
+                        setFormData(prev => ({ ...prev, photo: rawDataUrl }));
+                      };
+                      img.src = rawDataUrl;
+                    };
+                    reader.readAsDataURL(file);
                   }}
                   className="w-full bg-luxury-bg border border-luxury-border text-gray-400 rounded-xl py-1.5 px-3 text-[10px] focus:outline-none cursor-pointer text-right"
                 />

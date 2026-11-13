@@ -79,12 +79,33 @@ export const safeStorage = (() => {
           return;
         } catch (e: any) {
           console.warn(`localStorage.setItem failed for key ${key} (QuotaExceeded or disabled):`, e);
-          // Clean up non-essential log keys if quota exceeded
+          // Clean up non-essential bulky log keys & stale blobs if quota exceeded
           try {
-            const keysToTrim = ['cafe_audit_logs', 'cafe_update_logs', 'cafe_communication_logs', 'cafe_auth_audit_logs', 'cafe_backup_logs'];
+            const keysToTrim = [
+              'cafe_audit_logs',
+              'cafe_update_logs',
+              'cafe_communication_logs',
+              'cafe_auth_audit_logs',
+              'cafe_backup_logs',
+              'cafe_item_modifications',
+              'cafe_inventory_batch_logs',
+              'cafe_batch_consumptions'
+            ];
             keysToTrim.forEach(k => {
-              try { window.localStorage.removeItem(k); } catch (err) {}
+              if (k !== key) {
+                try { window.localStorage.removeItem(k); } catch (err) {}
+              }
             });
+            for (let i = window.localStorage.length - 1; i >= 0; i--) {
+              const existingKey = window.localStorage.key(i);
+              if (existingKey && existingKey !== key && (
+                existingKey.startsWith('firestore_') ||
+                existingKey.startsWith('cafe_backup_content_') ||
+                existingKey.startsWith('gdrive_file_data_')
+              )) {
+                try { window.localStorage.removeItem(existingKey); } catch (err) {}
+              }
+            }
             window.localStorage.setItem(key, valueStr);
             memoryStorage[key] = valueStr;
             return;

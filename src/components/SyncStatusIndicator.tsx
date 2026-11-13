@@ -45,7 +45,9 @@ export default function SyncStatusIndicator({ className = '' }: SyncStatusIndica
       return (
         <div className="flex items-center gap-1.5 bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2.5 py-1 rounded-full text-[11px] font-bold">
           <CloudOff className="w-3.5 h-3.5 text-amber-400" />
-          <span>أوفلاين (حفظ محلي)</span>
+          <span>
+            أوفلاين (حفظ محلي{syncState.pendingDirtyCount > 0 ? ` • ${syncState.pendingDirtyCount}` : ''})
+          </span>
         </div>
       );
     }
@@ -55,6 +57,15 @@ export default function SyncStatusIndicator({ className = '' }: SyncStatusIndica
         <div className="flex items-center gap-1.5 bg-red-500/10 text-red-400 border border-red-500/30 px-2.5 py-1 rounded-full text-[11px] font-bold">
           <AlertCircle className="w-3.5 h-3.5 text-red-400" />
           <span>خطأ بالمزامنة</span>
+        </div>
+      );
+    }
+
+    if (syncState.pendingDirtyCount > 0) {
+      return (
+        <div className="flex items-center gap-1.5 bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2.5 py-1 rounded-full text-[11px] font-bold">
+          <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
+          <span>جاري حفظ {syncState.pendingDirtyCount} تحديث...</span>
         </div>
       );
     }

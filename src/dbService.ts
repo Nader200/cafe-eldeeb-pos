@@ -663,6 +663,7 @@ export const dbService = {
 
   deleteAuthUser: (id: string): void => {
     const users = dbService.getAuthUsers().filter(u => u.id !== id);
+    firebaseSyncService.recordDeletion(KEYS.AUTH_USERS, id);
     setLocal(KEYS.AUTH_USERS, users);
   },
 
@@ -807,6 +808,7 @@ export const dbService = {
       localStorage.setItem(KEYS.RAW_MATERIALS_DELETED, 'true');
     }
     const list = dbService.getCategories().filter(c => c.id !== id);
+    firebaseSyncService.recordDeletion(KEYS.CATEGORIES, id);
     setLocal(KEYS.CATEGORIES, list);
     return list;
   },
@@ -870,8 +872,8 @@ export const dbService = {
     if (idx > -1) {
       list[idx] = updatedProd;
     } else {
-      updatedProd.id = `prod_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-      updatedProd.created_at = new Date().toISOString();
+      updatedProd.id = (product.id && product.id.trim()) ? product.id : `prod_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      updatedProd.created_at = product.created_at || new Date().toISOString();
       list.push(updatedProd);
     }
     setLocal(KEYS.PRODUCTS, list);
@@ -879,6 +881,7 @@ export const dbService = {
   },
   deleteProduct: (id: string) => {
     const list = dbService.getProducts().filter(p => p.id !== id);
+    firebaseSyncService.recordDeletion(KEYS.PRODUCTS, id);
     setLocal(KEYS.PRODUCTS, list);
     return list;
   },
@@ -918,15 +921,16 @@ export const dbService = {
     if (idx > -1) {
       list[idx] = updatedCust;
     } else {
-      updatedCust.id = `cust_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-      updatedCust.created_at = new Date().toISOString();
+      updatedCust.id = (customer.id && customer.id.trim()) ? customer.id : `cust_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      updatedCust.created_at = customer.created_at || new Date().toISOString();
       list.push(updatedCust);
     }
     setLocal(KEYS.CUSTOMERS, list);
-    syncToServer();
     return list;
   },
   deleteCustomer: (id: string) => {
+    firebaseSyncService.recordDeletion(KEYS.CUSTOMERS, id);
+
     // 1. Remove the customer from the customer list
     const list = dbService.getCustomers().filter(c => c.id !== id);
     setLocal(KEYS.CUSTOMERS, list);
@@ -936,24 +940,33 @@ export const dbService = {
     setLocal(KEYS.COMMUNICATION_LOGS, commLogs);
 
     // 3. Remove all related credit payments (safety cleanup)
-    const payments = getLocal<CreditPayment[]>(KEYS.CREDIT_PAYMENTS, []).filter(p => p.customer_id !== id);
-    setLocal(KEYS.CREDIT_PAYMENTS, payments);
+    const allPayments = getLocal<CreditPayment[]>(KEYS.CREDIT_PAYMENTS, []);
+    const removedPaymentIds = allPayments.filter(p => p.customer_id === id).map(p => p.id);
+    if (removedPaymentIds.length > 0) firebaseSyncService.recordDeletions(KEYS.CREDIT_PAYMENTS, removedPaymentIds);
+    setLocal(KEYS.CREDIT_PAYMENTS, allPayments.filter(p => p.customer_id !== id));
 
     // 4. Remove all related invoices (safety cleanup)
-    const invoices = getLocal<Invoice[]>(KEYS.INVOICES, []).filter(inv => inv.customer_id !== id);
-    setLocal(KEYS.INVOICES, invoices);
+    const allInvoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
+    const removedInvoiceIds = allInvoices.filter(inv => inv.customer_id === id).map(inv => inv.id);
+    if (removedInvoiceIds.length > 0) firebaseSyncService.recordDeletions(KEYS.INVOICES, removedInvoiceIds);
+    setLocal(KEYS.INVOICES, allInvoices.filter(inv => inv.customer_id !== id));
 
     // Cleanup wallet, notes, visits
-    const walletTxs = getLocal<any[]>(KEYS.WALLET_TRANSACTIONS, []).filter(tx => tx.customer_id !== id);
-    setLocal(KEYS.WALLET_TRANSACTIONS, walletTxs);
+    const allWallet = getLocal<any[]>(KEYS.WALLET_TRANSACTIONS, []);
+    const removedWalletIds = allWallet.filter(tx => tx.customer_id === id).map(tx => tx.id);
+    if (removedWalletIds.length > 0) firebaseSyncService.recordDeletions(KEYS.WALLET_TRANSACTIONS, removedWalletIds);
+    setLocal(KEYS.WALLET_TRANSACTIONS, allWallet.filter(tx => tx.customer_id !== id));
 
-    const notes = getLocal<any[]>(KEYS.CUSTOMER_NOTES, []).filter(n => n.customer_id !== id);
-    setLocal(KEYS.CUSTOMER_NOTES, notes);
+    const allNotes = getLocal<any[]>(KEYS.CUSTOMER_NOTES, []);
+    const removedNoteIds = allNotes.filter(n => n.customer_id === id).map(n => n.id);
+    if (removedNoteIds.length > 0) firebaseSyncService.recordDeletions(KEYS.CUSTOMER_NOTES, removedNoteIds);
+    setLocal(KEYS.CUSTOMER_NOTES, allNotes.filter(n => n.customer_id !== id));
 
-    const visits = getLocal<any[]>(KEYS.CUSTOMER_VISITS, []).filter(v => v.customer_id !== id);
-    setLocal(KEYS.CUSTOMER_VISITS, visits);
+    const allVisits = getLocal<any[]>(KEYS.CUSTOMER_VISITS, []);
+    const removedVisitIds = allVisits.filter(v => v.customer_id === id).map(v => v.id);
+    if (removedVisitIds.length > 0) firebaseSyncService.recordDeletions(KEYS.CUSTOMER_VISITS, removedVisitIds);
+    setLocal(KEYS.CUSTOMER_VISITS, allVisits.filter(v => v.customer_id !== id));
 
-    syncToServer();
     return list;
   },
 
@@ -1021,6 +1034,7 @@ export const dbService = {
   deleteCustomerNote: (id: string): void => {
     const list = getLocal<CustomerNote[]>(KEYS.CUSTOMER_NOTES, []);
     const filtered = list.filter(n => n.id !== id);
+    firebaseSyncService.recordDeletion(KEYS.CUSTOMER_NOTES, id);
     setLocal(KEYS.CUSTOMER_NOTES, filtered);
   },
 
@@ -1105,6 +1119,7 @@ export const dbService = {
   },
   deleteSupplier: (id: string) => {
     const list = dbService.getSuppliers().filter(s => s.id !== id);
+    firebaseSyncService.recordDeletion(KEYS.SUPPLIERS, id);
     setLocal(KEYS.SUPPLIERS, list);
     return list;
   },
@@ -1125,6 +1140,7 @@ export const dbService = {
   },
   deleteSupplierPurchase: (id: string) => {
     const list = dbService.getSupplierPurchases().filter(p => p.id !== id);
+    firebaseSyncService.recordDeletion('cafe_supplier_purchases', id);
     setLocal('cafe_supplier_purchases', list);
     return list;
   },
@@ -1145,6 +1161,7 @@ export const dbService = {
   },
   deleteSupplierPayment: (id: string) => {
     const list = dbService.getSupplierPayments().filter(p => p.id !== id);
+    firebaseSyncService.recordDeletion('cafe_supplier_payments', id);
     setLocal('cafe_supplier_payments', list);
     return list;
   },
@@ -3038,6 +3055,7 @@ export const dbService = {
       }
     }
     const filtered = list.filter(e => e.id !== id);
+    firebaseSyncService.recordDeletion(KEYS.EXPENSES, id);
     setLocal(KEYS.EXPENSES, filtered);
     return filtered;
   },
@@ -3724,7 +3742,7 @@ export const dbService = {
       timestamp: new Date().toISOString()
     };
     list.push(newLog);
-    setLocal(KEYS.AUDIT_LOGS, list);
+    setLocal(KEYS.AUDIT_LOGS, list.slice(-300));
     return newLog;
   },
 
@@ -3747,7 +3765,7 @@ export const dbService = {
       time: timeString
     };
     list.push(newLog);
-    setLocal(KEYS.ITEM_MODIFICATIONS, list);
+    setLocal(KEYS.ITEM_MODIFICATIONS, list.slice(-300));
     return newLog;
   },
 
@@ -4112,6 +4130,7 @@ export const dbService = {
   deleteEmployee: (id: string): void => {
     const employees = dbService.getEmployees();
     const filtered = employees.filter(e => e.id !== id);
+    firebaseSyncService.recordDeletion(KEYS.EMPLOYEES, id);
     setLocal(KEYS.EMPLOYEES, filtered);
   },
   getEmployeeTransactions: (): EmployeeTransaction[] => {
@@ -4125,6 +4144,7 @@ export const dbService = {
   deleteEmployeeTransaction: (id: string): void => {
     const txs = dbService.getEmployeeTransactions();
     const filtered = txs.filter(t => t.id !== id);
+    firebaseSyncService.recordDeletion(KEYS.EMPLOYEE_TRANSACTIONS, id);
     setLocal(KEYS.EMPLOYEE_TRANSACTIONS, filtered);
   },
 
@@ -4274,6 +4294,7 @@ export const dbService = {
   deletePSDevice: (id: string): void => {
     const devices = dbService.getPSDevices();
     const filtered = devices.filter(d => d.id !== id);
+    firebaseSyncService.recordDeletion(KEYS.PS_DEVICES, id);
     setLocal(KEYS.PS_DEVICES, filtered);
   },
   getPSSessions: (): PSSession[] => {
@@ -4347,6 +4368,7 @@ export const dbService = {
   },
   deleteRawMaterial: (id: string): RawMaterial[] => {
     const list = dbService.getRawMaterials().filter(r => r.id !== id);
+    firebaseSyncService.recordDeletion(KEYS.RAW_MATERIALS, id);
     setLocal(KEYS.RAW_MATERIALS, list);
     return list;
   },
@@ -4485,6 +4507,7 @@ export const dbService = {
     }
 
     const filtered = list.filter(b => b.id !== id);
+    firebaseSyncService.recordDeletion(KEYS.INVENTORY_BATCHES, id);
     setLocal(KEYS.INVENTORY_BATCHES, filtered);
 
     // Update Raw Material inventory if linked
@@ -4664,7 +4687,7 @@ export const dbService = {
       time: timeStr
     };
     list.unshift(newLog); // latest log first
-    setLocal(KEYS.INVENTORY_BATCH_LOGS, list);
+    setLocal(KEYS.INVENTORY_BATCH_LOGS, list.slice(0, 300));
     return list;
   },
 
@@ -5267,6 +5290,7 @@ export const dbService = {
     const partner = list.find(p => p.id === id);
     if (partner) {
       const filtered = list.filter(p => p.id !== id);
+      firebaseSyncService.recordDeletion(KEYS.PARTNERS, id);
       setLocal(KEYS.PARTNERS, filtered);
 
       // Handle linked financial drawings safely so accounting metrics remain accurate
@@ -5354,6 +5378,7 @@ export const dbService = {
     const drawing = list.find(d => d.id === id);
     if (drawing) {
       const filtered = list.filter(d => d.id !== id);
+      firebaseSyncService.recordDeletion(KEYS.PARTNER_DRAWINGS, id);
       setLocal(KEYS.PARTNER_DRAWINGS, filtered);
       dbService.logAuditAction(
         'DELETE_PARTNER_DRAWING',

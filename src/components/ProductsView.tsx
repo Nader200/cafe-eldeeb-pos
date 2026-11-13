@@ -68,17 +68,7 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
   const [productToDeleteConfirm, setProductToDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
 
   const loadCatalogData = () => {
-    const rawProds = dbService.getProducts();
-    // Auto-heal any existing products with 0 stock so they are never blocked from invoicing
-    const healedProds = rawProds.map(p => {
-      if (p.current_stock === 0 || p.current_stock === undefined) {
-        const updatedP = { ...p, current_stock: 99999 };
-        dbService.saveProduct(updatedP);
-        return updatedP;
-      }
-      return p;
-    });
-    setProducts(healedProds);
+    setProducts(dbService.getProducts());
     setCategories(dbService.getCategories());
     setAllRawMaterials(dbService.getRawMaterials());
   };

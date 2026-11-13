@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { doc, setDoc, getDoc, onSnapshot, collection, Unsubscribe } from 'firebase/firestore';
-import { db, auth, handleFirestoreError, OperationType, ensureFirebaseAuth } from './firebaseClient';
+import { doc, setDoc, onSnapshot, collection, Unsubscribe } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType, ensureFirebaseAuth } from './firebaseClient';
 import { safeStorage } from './safeStorage';
 
 export type SyncStatus = 'connected' | 'syncing' | 'offline' | 'error';
@@ -16,10 +16,48 @@ export interface SyncState {
   cafeId: string;
   isOnline: boolean;
   syncedKeysCount: number;
+  pendingDirtyCount: number;
 }
 
 const DEVICE_ID_KEY = 'cafe_device_id';
 const DEFAULT_CAFE_ID = 'main_cafe_eldeeb';
+const DELETED_RECORDS_KEY = 'cafe_deleted_records';
+const DIRTY_PREFIX = '__dirty_';
+const META_UPDATED_PREFIX = '__meta_updated_';
+const MAX_TOMBSTONES = 1000;
+const TOMBSTONE_TTL_MS = 60 * 24 * 60 * 60 * 1000; // 60 days
+const PUSH_DEBOUNCE_MS = 120;
+const FIRESTORE_SAFE_LIMIT_BYTES = 950 * 1024;
+
+const ALL_SYNC_KEYS: string[] = [
+  'cafe_deleted_records',
+  'cafe_categories', 'cafe_products', 'cafe_customers', 'cafe_suppliers',
+  'cafe_supplier_purchases', 'cafe_supplier_payments',
+  'cafe_invoices', 'cafe_invoice_items', 'cafe_expenses', 'cafe_inventory_transactions',
+  'cafe_credit_payments', 'cafe_cash_drawers', 'cafe_daily_closes', 'cafe_settings',
+  'cafe_backup_logs', 'cafe_communication_logs', 'cafe_audit_logs', 'cafe_item_modifications',
+  'cafe_returns_list', 'cafe_credit_adjustments', 'cafe_cash_history', 'cafe_wallet_transactions',
+  'cafe_customer_notes', 'cafe_customer_visits', 'cafe_credit_transactions_system',
+  'cafe_tables_system', 'cafe_employees', 'cafe_employee_transactions', 'cafe_ps_devices',
+  'cafe_ps_sessions', 'cafe_daily_raw_materials', 'cafe_raw_materials', 'cafe_raw_materials_seeded',
+  'cafe_raw_materials_deleted', 'cafe_inventory_batches', 'cafe_inventory_batch_logs',
+  'cafe_batch_consumptions', 'cafe_auth_users', 'cafe_auth_audit_logs', 'cafe_partners',
+  'cafe_partner_drawings', 'cafe_update_logs', 'cafe_shifts', 'cafe_shift_handovers'
+];
+
+const MERGEABLE_ARRAY_KEYS = new Set<string>([
+  'cafe_categories', 'cafe_products', 'cafe_customers', 'cafe_suppliers',
+  'cafe_supplier_purchases', 'cafe_supplier_payments',
+  'cafe_invoices', 'cafe_invoice_items', 'cafe_expenses', 'cafe_inventory_transactions',
+  'cafe_credit_payments', 'cafe_cash_drawers', 'cafe_daily_closes',
+  'cafe_credit_adjustments', 'cafe_cash_history', 'cafe_wallet_transactions',
+  'cafe_customer_notes', 'cafe_customer_visits', 'cafe_credit_transactions_system',
+  'cafe_tables_system', 'cafe_employees', 'cafe_employee_transactions', 'cafe_ps_devices',
+  'cafe_ps_sessions', 'cafe_daily_raw_materials', 'cafe_raw_materials',
+  'cafe_inventory_batches', 'cafe_inventory_batch_logs', 'cafe_batch_consumptions',
+  'cafe_auth_users', 'cafe_partners', 'cafe_partner_drawings',
+  'cafe_shifts', 'cafe_shift_handovers', 'cafe_returns_list'
+]);
 
 function getDeviceId(): string {
   let devId = safeStorage.getItem(DEVICE_ID_KEY);
@@ -28,6 +66,58 @@ function getDeviceId(): string {
     safeStorage.setItem(DEVICE_ID_KEY, devId);
   }
   return devId;
+}
+
+function parseTimestampMs(val: any): number {
+  if (!val) return 0;
+  if (typeof val === 'number' && !isNaN(val)) return val;
+  if (typeof val === 'string') {
+    const num = Number(val);
+    if (!isNaN(num) && num > 1000000000000) return num;
+    const parsed = Date.parse(val);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+}
+
+function getItemTimestamp(item: any): number {
+  if (!item || typeof item !== 'object') return 0;
+  return Math.max(
+    parseTimestampMs(item.updated_at),
+    parseTimestampMs(item.closed_at),
+    parseTimestampMs(item.ended_at),
+    parseTimestampMs(item.created_at),
+    parseTimestampMs(item.invoice_date),
+    parseTimestampMs(item.opened_at),
+    parseTimestampMs(item.timestamp),
+    parseTimestampMs(item.date)
+  );
+}
+
+function loadDeletedRecordsMap(): Record<string, number> {
+  try {
+    const raw = safeStorage.getItem(DELETED_RECORDS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed;
+    }
+  } catch (e) {}
+  return {};
+}
+
+function pruneDeletedRecordsMap(map: Record<string, number>): Record<string, number> {
+  const cutoff = Date.now() - TOMBSTONE_TTL_MS;
+  const entries = Object.entries(map).filter(([, ts]) => typeof ts === 'number' && ts >= cutoff);
+  if (entries.length > MAX_TOMBSTONES) {
+    entries.sort((a, b) => b[1] - a[1]);
+    entries.length = MAX_TOMBSTONES;
+  }
+  const result: Record<string, number> = {};
+  for (const [k, v] of entries) {
+    result[k] = v;
+  }
+  return result;
 }
 
 class FirebaseSyncService {
@@ -40,6 +130,8 @@ class FirebaseSyncService {
   private isProcessingRemoteChange: boolean = false;
   private cloudTimestamps: Map<string, number> = new Map();
   private activePushes: Map<string, Promise<void>> = new Map();
+  private debounceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+  private pendingPromises: Map<string, { promise: Promise<void>; resolvers: Array<() => void> }> = new Map();
 
   constructor() {
     this.init();
@@ -48,7 +140,6 @@ class FirebaseSyncService {
   private init() {
     if (typeof window === 'undefined') return;
 
-    // Determine Cafe ID from settings or fallback
     this.updateCafeIdFromSettings();
 
     console.log('[FIREBASE DIAGNOSTICS] Firebase projectId:', (db.app.options as any).projectId);
@@ -57,7 +148,6 @@ class FirebaseSyncService {
     console.log('[FIREBASE DIAGNOSTICS] Actual cafeId:', this.cafeId);
     console.log(`[FIREBASE DIAGNOSTICS] Firestore Collection Path: cafes/${this.cafeId}/sync_store`);
 
-    // Online/Offline & Focus/Visibility detection for Android & Web
     this.status = navigator.onLine ? 'connected' : 'offline';
     window.addEventListener('online', () => this.handleOnline());
     window.addEventListener('offline', () => this.handleOffline());
@@ -65,29 +155,51 @@ class FirebaseSyncService {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         this.handleForeground();
+      } else if (document.visibilityState === 'hidden') {
+        this.flushPendingPushes().catch(() => {});
       }
     });
+    window.addEventListener('pagehide', () => {
+      this.flushPendingPushes().catch(() => {});
+    });
+    window.addEventListener('beforeunload', () => {
+      this.flushPendingPushes().catch(() => {});
+    });
 
-    // Start real-time Firestore listener
     this.startListening();
+
+    // Ensure any dirty keys left over from a previous session/crash are pushed on startup
+    if (navigator.onLine && this.hasPendingDirtyKeys()) {
+      setTimeout(() => {
+        this.syncAllLocalToCloud().catch(() => {});
+      }, 500);
+    }
   }
 
   private handleForeground() {
     if (navigator.onLine) {
       this.status = 'connected';
-      this.startListening();
+      if (!this.unsubscribeSnapshot) {
+        this.startListening();
+      }
+      if (this.hasPendingDirtyKeys()) {
+        this.syncAllLocalToCloud().catch(() => {});
+      }
+      this.notifyState();
     }
   }
 
   public updateCafeIdFromSettings() {
-    // Keep cafeId fixed to DEFAULT_CAFE_ID to ensure all clients and devices share the exact same Firestore collection path
     this.cafeId = DEFAULT_CAFE_ID;
   }
 
   private handleOnline() {
     this.status = 'connected';
     this.notifyState();
-    this.startListening();
+    if (!this.unsubscribeSnapshot) {
+      this.startListening();
+    }
+    this.syncAllLocalToCloud().catch(() => {});
   }
 
   private handleOffline() {
@@ -107,6 +219,20 @@ class FirebaseSyncService {
     };
   }
 
+  private getPendingDirtyCount(): number {
+    let count = 0;
+    for (const key of ALL_SYNC_KEYS) {
+      if (safeStorage.getItem(`${DIRTY_PREFIX}${key}`)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  public hasPendingDirtyKeys(): boolean {
+    return this.getPendingDirtyCount() > 0 || this.debounceTimers.size > 0;
+  }
+
   public getState(): SyncState {
     return {
       status: this.status,
@@ -114,13 +240,131 @@ class FirebaseSyncService {
       deviceId: this.deviceId,
       cafeId: this.cafeId,
       isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
-      syncedKeysCount: 38
+      syncedKeysCount: ALL_SYNC_KEYS.length,
+      pendingDirtyCount: this.getPendingDirtyCount()
     };
   }
 
   private notifyState() {
     const state = this.getState();
     this.listeners.forEach(cb => cb(state));
+  }
+
+  /**
+   * Record deleted ID(s) in tombstone store so remote snapshots never resurrect deleted records
+   */
+  public recordDeletion(collectionKey: string, id: string): void {
+    if (!collectionKey || !id) return;
+    this.recordDeletions(collectionKey, [id]);
+  }
+
+  public recordDeletions(collectionKey: string, ids: string[]): void {
+    if (!collectionKey || !ids || ids.length === 0) return;
+    const now = Date.now();
+    const map = loadDeletedRecordsMap();
+    for (const id of ids) {
+      if (id) {
+        map[`${collectionKey}::${id}`] = now;
+      }
+    }
+    const pruned = pruneDeletedRecordsMap(map);
+    safeStorage.setItem(DELETED_RECORDS_KEY, JSON.stringify(pruned));
+    this.pushKeyToCloud(DELETED_RECORDS_KEY, pruned).catch(() => {});
+  }
+
+  /**
+   * Merge two ID-based arrays without wiping out newly added local or remote items
+   */
+  private mergeCollectionArrays(
+    key: string,
+    localArr: any[],
+    remoteArr: any[],
+    deletedMap: Record<string, number>,
+    localUpdatedAt: number,
+    remoteUpdatedAt: number,
+    localIsDirty: boolean
+  ): { merged: any[]; changedLocal: boolean; needsPushBack: boolean } {
+    const byId = new Map<string, { item: any; ts: number; source: 'local' | 'remote' }>();
+    const unkeyedLocal: any[] = [];
+    const unkeyedRemote: any[] = [];
+
+    for (const item of localArr) {
+      if (!item || typeof item !== 'object' || !item.id) {
+        if (item !== undefined && item !== null) unkeyedLocal.push(item);
+        continue;
+      }
+      const id = String(item.id);
+      const itemTs = getItemTimestamp(item);
+      const delTs = deletedMap[`${key}::${id}`] || 0;
+      if (delTs > 0 && delTs >= itemTs) {
+        continue; // Deleted more recently than last edit
+      }
+      const existing = byId.get(id);
+      if (!existing || itemTs >= existing.ts) {
+        byId.set(id, { item, ts: itemTs, source: 'local' });
+      }
+    }
+
+    for (const item of remoteArr) {
+      if (!item || typeof item !== 'object' || !item.id) {
+        if (item !== undefined && item !== null) unkeyedRemote.push(item);
+        continue;
+      }
+      const id = String(item.id);
+      const itemTs = getItemTimestamp(item);
+      const delTs = deletedMap[`${key}::${id}`] || 0;
+      if (delTs > 0 && delTs >= itemTs) {
+        // Ensure local copy is also removed if tombstone is newer
+        byId.delete(id);
+        continue;
+      }
+
+      const existing = byId.get(id);
+      if (!existing) {
+        byId.set(id, { item, ts: itemTs, source: 'remote' });
+      } else {
+        // Both local and remote have this ID: pick fresher record
+        if (itemTs > existing.ts) {
+          byId.set(id, { item, ts: itemTs, source: 'remote' });
+        } else if (itemTs === existing.ts) {
+          // Equal item timestamps: if local has dirty unpushed edits, keep local; otherwise take remote when remoteUpdatedAt >= localUpdatedAt
+          if (!localIsDirty && remoteUpdatedAt >= localUpdatedAt) {
+            byId.set(id, { item, ts: itemTs, source: 'remote' });
+          }
+        }
+      }
+    }
+
+    let merged: any[];
+    if (byId.size > 0 || (unkeyedLocal.length === 0 && unkeyedRemote.length === 0)) {
+      merged = Array.from(byId.values()).map(v => v.item);
+      if (unkeyedLocal.length > 0 || unkeyedRemote.length > 0) {
+        merged = [...merged, ...(remoteUpdatedAt >= localUpdatedAt && !localIsDirty ? unkeyedRemote : unkeyedLocal)];
+      }
+    } else {
+      merged = remoteUpdatedAt >= localUpdatedAt && !localIsDirty ? remoteArr : localArr;
+    }
+
+    let localJson = '';
+    let remoteJson = '';
+    let mergedJson = '';
+    try {
+      localJson = JSON.stringify(localArr);
+      remoteJson = JSON.stringify(remoteArr);
+      mergedJson = JSON.stringify(merged);
+    } catch (e) {
+      return { merged, changedLocal: true, needsPushBack: false };
+    }
+
+    const changedLocal = mergedJson !== localJson;
+    // Check if merged has items or newer values not present on remote
+    const needsPushBack = mergedJson !== remoteJson && (
+      localIsDirty ||
+      Array.from(byId.values()).some(v => v.source === 'local') ||
+      merged.length > remoteArr.length
+    );
+
+    return { merged, changedLocal, needsPushBack };
   }
 
   /**
@@ -143,47 +387,150 @@ class FirebaseSyncService {
     this.unsubscribeSnapshot = onSnapshot(
       storeRef,
       (snapshot) => {
-        console.log(
-          'CASHIER SNAPSHOT',
-          'exists:', !snapshot.empty,
-          'fromCache:', snapshot.metadata.fromCache,
-          'hasPendingWrites:', snapshot.metadata.hasPendingWrites,
-          'data:', snapshot.docs.map(d => ({ id: d.id, key: d.data()?.key, data: d.data()?.data }))
-        );
-
         this.status = 'syncing';
         this.notifyState();
 
         let updatedAny = false;
         const updatedKeys: string[] = [];
 
-        snapshot.docChanges().forEach((change) => {
-          if (change.type === 'removed') return;
+        const changes = snapshot.docChanges().filter(c => c.type !== 'removed');
 
+        // 1. Process tombstones FIRST so deleted records are respected during collection merges
+        const deletedChange = changes.find(c => c.doc.data()?.key === DELETED_RECORDS_KEY);
+        if (deletedChange) {
+          const delDocData = deletedChange.doc.data();
+          const remoteDel = delDocData?.data;
+          const remoteDelUpdatedAt = delDocData?.updatedAt || 0;
+          this.cloudTimestamps.set(DELETED_RECORDS_KEY, remoteDelUpdatedAt);
+
+          if (remoteDel && typeof remoteDel === 'object' && !Array.isArray(remoteDel)) {
+            const localDel = loadDeletedRecordsMap();
+            const mergedDel: Record<string, number> = { ...localDel };
+            let localNeedsUpdate = false;
+            let remoteNeedsUpdate = false;
+
+            for (const [k, ts] of Object.entries(remoteDel)) {
+              const numTs = typeof ts === 'number' ? ts : 0;
+              if (!mergedDel[k] || numTs > mergedDel[k]) {
+                mergedDel[k] = numTs;
+                localNeedsUpdate = true;
+              }
+            }
+            for (const [k, ts] of Object.entries(localDel)) {
+              const remTs = typeof (remoteDel as any)[k] === 'number' ? (remoteDel as any)[k] : 0;
+              if (ts > remTs) {
+                remoteNeedsUpdate = true;
+              }
+            }
+
+            const prunedDel = pruneDeletedRecordsMap(mergedDel);
+            if (localNeedsUpdate) {
+              safeStorage.setItem(DELETED_RECORDS_KEY, JSON.stringify(prunedDel));
+              safeStorage.setItem(`${META_UPDATED_PREFIX}${DELETED_RECORDS_KEY}`, String(Math.max(
+                parseInt(safeStorage.getItem(`${META_UPDATED_PREFIX}${DELETED_RECORDS_KEY}`) || '0', 10),
+                remoteDelUpdatedAt
+              )));
+            }
+            if (remoteNeedsUpdate && navigator.onLine) {
+              this.pushKeyToCloud(DELETED_RECORDS_KEY, prunedDel).catch(() => {});
+            }
+          }
+        }
+
+        const currentDeletedMap = loadDeletedRecordsMap();
+
+        // 2. Process all other collection/document changes
+        changes.forEach((change) => {
           const docSnap = change.doc;
           const docData = docSnap.data();
           if (!docData || !docData.key) return;
 
           const key = docData.key;
-          let remoteData = docData.data;
-          const remoteUpdatedAt = docData.updatedAt || 0;
+          if (key === DELETED_RECORDS_KEY) return;
 
+          const remoteData = docData.data;
+          const remoteUpdatedAt = docData.updatedAt || 0;
           this.cloudTimestamps.set(key, remoteUpdatedAt);
 
-          const localMetaKey = `__meta_updated_${key}`;
+          const localMetaKey = `${META_UPDATED_PREFIX}${key}`;
           const localUpdatedAt = parseInt(safeStorage.getItem(localMetaKey) || '0', 10);
+          const localIsDirty = Boolean(safeStorage.getItem(`${DIRTY_PREFIX}${key}`));
           const localVal = safeStorage.getItem(key);
 
-          const isFromOtherDevice = docData.deviceId && docData.deviceId !== this.deviceId;
+          // Special safe merge for all ID-based array collections (products, customers, invoices, etc.)
+          if (MERGEABLE_ARRAY_KEYS.has(key) && Array.isArray(remoteData)) {
+            let localArr: any[] = [];
+            let hasValidLocalArr = false;
+            if (localVal) {
+              try {
+                const parsed = JSON.parse(localVal);
+                if (Array.isArray(parsed)) {
+                  localArr = parsed;
+                  hasValidLocalArr = true;
+                }
+              } catch (e) {}
+            }
 
-          // Pure timestamp-based conflict resolution:
-          // 1. Accept remote version if it is newer, or if local copy is missing/uninitialized.
-          // 2. If timestamps are equal, accept remote safely without data destruction.
+            if (!hasValidLocalArr) {
+              // Local copy missing or empty -> accept remote (minus deleted tombstones)
+              const filteredRemote = remoteData.filter(item => {
+                if (!item || typeof item !== 'object' || !item.id) return true;
+                const delTs = currentDeletedMap[`${key}::${item.id}`] || 0;
+                return !(delTs > 0 && delTs >= getItemTimestamp(item));
+              });
+              this.isProcessingRemoteChange = true;
+              try {
+                safeStorage.setItem(key, JSON.stringify(filteredRemote));
+                safeStorage.setItem(localMetaKey, String(remoteUpdatedAt));
+                updatedAny = true;
+                updatedKeys.push(key);
+              } finally {
+                this.isProcessingRemoteChange = false;
+              }
+              return;
+            }
+
+            const { merged, changedLocal, needsPushBack } = this.mergeCollectionArrays(
+              key,
+              localArr,
+              remoteData,
+              currentDeletedMap,
+              localUpdatedAt,
+              remoteUpdatedAt,
+              localIsDirty
+            );
+
+            if (changedLocal) {
+              this.isProcessingRemoteChange = true;
+              try {
+                safeStorage.setItem(key, JSON.stringify(merged));
+                const nextTs = Math.max(localUpdatedAt, remoteUpdatedAt);
+                safeStorage.setItem(localMetaKey, String(nextTs));
+                updatedAny = true;
+                updatedKeys.push(key);
+              } catch (err) {
+                console.error(`Error applying merged remote sync for key ${key}:`, err);
+              } finally {
+                this.isProcessingRemoteChange = false;
+              }
+            } else if (!localIsDirty && remoteUpdatedAt > localUpdatedAt) {
+              safeStorage.setItem(localMetaKey, String(remoteUpdatedAt));
+            }
+
+            if ((needsPushBack || localIsDirty) && navigator.onLine) {
+              this.pushKeyToCloud(key, merged).catch(() => {});
+            }
+            return;
+          }
+
+          // Non-array or object keys (e.g. cafe_settings, flags)
           const shouldAcceptRemote =
-            remoteUpdatedAt > localUpdatedAt ||
-            localUpdatedAt === 0 ||
-            !localVal ||
-            (remoteUpdatedAt === localUpdatedAt && remoteData !== null && remoteData !== undefined);
+            !localIsDirty && (
+              remoteUpdatedAt > localUpdatedAt ||
+              localUpdatedAt === 0 ||
+              !localVal ||
+              (remoteUpdatedAt === localUpdatedAt && remoteData !== null && remoteData !== undefined)
+            );
 
           if (shouldAcceptRemote) {
             this.isProcessingRemoteChange = true;
@@ -206,8 +553,6 @@ class FirebaseSyncService {
                 if (isLocallyComplete) {
                   safeStorage.setItem('cafe_setup_completed', 'true');
                   if (!isRemoteComplete) {
-                    // Local settings are complete, but remote snapshot is empty/incomplete.
-                    // DO NOT OVERWRITE local settings with empty/incomplete remote data!
                     console.warn('[FirebaseSync] Guarded local complete cafe_settings from incomplete remote snapshot');
                     const repairedLocal = {
                       ...(existingLocal || {}),
@@ -215,7 +560,7 @@ class FirebaseSyncService {
                     };
                     safeStorage.setItem('cafe_settings', JSON.stringify(repairedLocal));
                     safeStorage.setItem(localMetaKey, String(Date.now()));
-                    this.pushKeyToCloud('cafe_settings', repairedLocal);
+                    this.pushKeyToCloud('cafe_settings', repairedLocal).catch(() => {});
                     return;
                   }
                 } else if (isRemoteComplete) {
@@ -236,11 +581,10 @@ class FirebaseSyncService {
             } finally {
               this.isProcessingRemoteChange = false;
             }
-          } else if (localUpdatedAt > remoteUpdatedAt && localVal) {
-            // Local device has newer edits created offline; sync local edit back to cloud
+          } else if ((localIsDirty || localUpdatedAt > remoteUpdatedAt) && localVal) {
             try {
               const parsed = JSON.parse(localVal);
-              this.pushKeyToCloud(key, parsed);
+              this.pushKeyToCloud(key, parsed).catch(() => {});
             } catch (e) {}
           }
         });
@@ -250,7 +594,7 @@ class FirebaseSyncService {
           minute: '2-digit',
           second: '2-digit'
         });
-        this.status = 'connected';
+        this.status = navigator.onLine ? 'connected' : 'offline';
         this.notifyState();
 
         if (updatedAny && typeof window !== 'undefined') {
@@ -275,24 +619,92 @@ class FirebaseSyncService {
   }
 
   /**
-   * Push a specific key's mutation to Firestore
+   * Queue a debounced/coalesced push for a key.
+   * Marks the key dirty immediately in persistent storage and only clears the dirty flag after setDoc succeeds.
    */
-  public async pushKeyToCloud(key: string, data: any): Promise<void> {
-    const cafeId = 'main_cafe_eldeeb';
+  public pushKeyToCloud(key: string, _data: any): Promise<void> {
+    if (this.isProcessingRemoteChange) {
+      return Promise.resolve();
+    }
+
+    const now = Date.now();
+    safeStorage.setItem(`${META_UPDATED_PREFIX}${key}`, String(now));
+    safeStorage.setItem(`${DIRTY_PREFIX}${key}`, String(now));
+    this.notifyState();
+
+    // Clear existing debounce timer for this key so rapid mutations coalesce into one clean push of the latest state
+    const existingTimer = this.debounceTimers.get(key);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+
+    let pendingEntry = this.pendingPromises.get(key);
+    if (!pendingEntry) {
+      const resolvers: Array<() => void> = [];
+      const promise = new Promise<void>((resolve) => {
+        resolvers.push(resolve);
+      });
+      pendingEntry = { promise, resolvers };
+      this.pendingPromises.set(key, pendingEntry);
+    }
+
+    const timer = setTimeout(() => {
+      this.debounceTimers.delete(key);
+      this.executePushFromStorage(key);
+    }, PUSH_DEBOUNCE_MS);
+
+    this.debounceTimers.set(key, timer);
+    return pendingEntry.promise;
+  }
+
+  /**
+   * Immediately execute all pending debounced writes without waiting for the debounce window
+   */
+  public async flushPendingPushes(): Promise<void> {
+    const keysToFlush = Array.from(this.debounceTimers.keys());
+    const promises: Promise<void>[] = [];
+
+    for (const key of keysToFlush) {
+      const timer = this.debounceTimers.get(key);
+      if (timer) {
+        clearTimeout(timer);
+        this.debounceTimers.delete(key);
+      }
+      const pending = this.pendingPromises.get(key);
+      if (pending) {
+        promises.push(pending.promise);
+      }
+      this.executePushFromStorage(key);
+    }
+
+    // Also include any active in-flight pushes
+    for (const p of this.activePushes.values()) {
+      promises.push(p);
+    }
+
+    if (promises.length > 0) {
+      await Promise.allSettled(promises);
+    }
+  }
+
+  private resolvePending(key: string) {
+    const pendingEntry = this.pendingPromises.get(key);
+    if (pendingEntry) {
+      this.pendingPromises.delete(key);
+      pendingEntry.resolvers.forEach(r => r());
+    }
+  }
+
+  private async executePushFromStorage(key: string): Promise<void> {
+    const cafeId = DEFAULT_CAFE_ID;
     this.cafeId = cafeId;
     const docPath = `cafes/${cafeId}/sync_store/${key}`;
-    const projectId = (db.app.options as any)?.projectId || 'cafe-eldeeb-pos';
 
-    // Concurrency control: check if a push for this key is already in flight
     const existingPush = this.activePushes.get(key);
     if (existingPush) {
-      console.warn(`[CONCURRENCY DETECTED] Multiple calls to pushKeyToCloud("${key}") detected at the same time!`);
-      console.warn(`[CONCURRENCY CONTROL] Waiting for active push on key "${key}" to complete before starting new push...`);
       try {
         await existingPush;
-      } catch (e) {
-        // Continue after previous push finishes or fails
-      }
+      } catch (e) {}
     }
 
     let pushResolver: () => void = () => {};
@@ -301,93 +713,97 @@ class FirebaseSyncService {
     });
     this.activePushes.set(key, pushPromise);
 
-    const now = Date.now();
-    safeStorage.setItem(`__meta_updated_${key}`, String(now));
-    this.cloudTimestamps.set(key, now);
+    try {
+      ensureFirebaseAuth().catch(() => {});
 
-    ensureFirebaseAuth().catch(() => {});
-
-    if (!navigator.onLine) {
-      this.status = 'offline';
-      this.notifyState();
-      this.activePushes.delete(key);
-      pushResolver();
-      return;
-    }
-
-    this.status = 'syncing';
-    this.notifyState();
-
-    let sanitizedData: any = null;
-    if (data !== undefined && data !== null) {
-      try {
-        sanitizedData = JSON.parse(JSON.stringify(data, (k, v) => (v === undefined ? null : v)));
-      } catch (e) {
-        console.warn(`[SYNC] Failed to JSON stringify payload for key ${key}:`, e);
-        sanitizedData = data;
+      if (!navigator.onLine) {
+        this.status = 'offline';
+        this.notifyState();
+        this.resolvePending(key);
+        return;
       }
-    }
 
-    let payloadSizeBytes = 0;
-    try {
-      payloadSizeBytes = new Blob([JSON.stringify(sanitizedData || {})]).size;
-    } catch (e) {
-      payloadSizeBytes = 0;
-    }
+      // Always read the LATEST persisted value from safeStorage right before pushing
+      const dirtyStampAtStart = safeStorage.getItem(`${DIRTY_PREFIX}${key}`) || String(Date.now());
+      const rawStored = safeStorage.getItem(key);
+      let latestData: any = null;
+      if (rawStored !== null) {
+        try {
+          latestData = JSON.parse(rawStored);
+        } catch (e) {
+          latestData = rawStored;
+        }
+      }
 
-    // Print REQUIRED pre-write diagnostics to console
-    console.log(`=== PUSH WRITE START [${key}] ===`);
-    console.log('Writing to:', docPath);
-    console.log('Project ID:', projectId);
-    console.log('Cafe ID:', cafeId);
-    console.log('Device ID:', this.deviceId);
-    console.log('Document Path:', docPath);
-    console.log('Payload Size (Bytes):', payloadSizeBytes);
+      this.status = 'syncing';
+      this.notifyState();
 
-    const docRef = doc(db, 'cafes', cafeId, 'sync_store', key);
-    const payload = {
-      key,
-      data: sanitizedData,
-      updatedAt: now,
-      deviceId: this.deviceId,
-      cafeId: cafeId
-    };
+      let sanitizedData: any = null;
+      if (latestData !== undefined && latestData !== null) {
+        try {
+          sanitizedData = JSON.parse(JSON.stringify(latestData, (_k, v) => (v === undefined ? null : v)));
+        } catch (e) {
+          sanitizedData = latestData;
+        }
+      }
 
-    console.log('ADMIN WRITE', projectId, cafeId, docPath, payload);
+      let payloadSizeBytes = 0;
+      try {
+        payloadSizeBytes = new Blob([JSON.stringify(sanitizedData || {})]).size;
+      } catch (e) {
+        payloadSizeBytes = 0;
+      }
 
-    const start = Date.now();
+      if (payloadSizeBytes > FIRESTORE_SAFE_LIMIT_BYTES) {
+        console.warn(`[SYNC WARNING] Payload for ${key} is ${payloadSizeBytes} bytes, near Firestore 1 MiB limit.`);
+      }
 
-    try {
-      console.log(`[SYNC DIRECT PUSH] Invoking setDoc on ${docPath}...`);
+      const writeTimestamp = Math.max(
+        parseInt(safeStorage.getItem(`${META_UPDATED_PREFIX}${key}`) || '0', 10),
+        Date.now()
+      );
+      safeStorage.setItem(`${META_UPDATED_PREFIX}${key}`, String(writeTimestamp));
+
+      const docRef = doc(db, 'cafes', cafeId, 'sync_store', key);
+      const payload = {
+        key,
+        data: sanitizedData,
+        updatedAt: writeTimestamp,
+        deviceId: this.deviceId,
+        cafeId
+      };
 
       await setDoc(docRef, payload);
 
-      console.log('WRITE COMPLETED');
-      const duration = Date.now() - start;
+      // Mark cloud timestamp ONLY AFTER setDoc succeeds
+      this.cloudTimestamps.set(key, writeTimestamp);
 
-      // Print REQUIRED post-write diagnostics to console
-      console.log(`=== PUSH WRITE END [${key}] ===`);
-      console.log('هل انتهى await setDoc؟: نعم (COMPLETED)');
-      console.log('كم استغرق بالمللي ثانية؟:', duration, 'ms');
+      // Clear dirty flag only if no newer local write occurred while setDoc was in flight
+      const currentDirtyStamp = safeStorage.getItem(`${DIRTY_PREFIX}${key}`);
+      if (!currentDirtyStamp || currentDirtyStamp === dirtyStampAtStart) {
+        safeStorage.removeItem(`${DIRTY_PREFIX}${key}`);
+      } else if (!this.debounceTimers.has(key)) {
+        // Newer write occurred during in-flight setDoc; schedule a follow-up push
+        const followUpTimer = setTimeout(() => {
+          this.debounceTimers.delete(key);
+          this.executePushFromStorage(key);
+        }, PUSH_DEBOUNCE_MS);
+        this.debounceTimers.set(key, followUpTimer);
+      }
 
       this.lastSyncTime = new Date().toLocaleTimeString('ar-EG', {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit'
       });
-      this.status = 'connected';
+      this.status = navigator.onLine ? 'connected' : 'offline';
+      this.resolvePending(key);
     } catch (error: any) {
-      const duration = Date.now() - start;
-      console.error(`=== PUSH WRITE FAILED [${key}] after ${duration}ms ===`);
-      console.error('setDoc FAILED for path:', docPath);
-      console.error('Error object:', error);
-      console.error('Error code:', error?.code);
-      console.error('Error message:', error?.message);
-      console.error('Error stack:', error?.stack);
-
+      console.error(`=== PUSH WRITE FAILED [${key}] ===`, docPath, error?.code, error?.message);
       handleFirestoreError(error, OperationType.WRITE, docPath);
       this.status = 'error';
-      throw error;
+      // Dirty flag intentionally kept so syncAllLocalToCloud retries automatically
+      this.resolvePending(key);
     } finally {
       this.activePushes.delete(key);
       pushResolver();
@@ -396,40 +812,27 @@ class FirebaseSyncService {
   }
 
   /**
-   * Push local keys that are strictly newer than cloud data
+   * Push local keys that are dirty (failed/offline) OR strictly newer than cloud data
    */
   public async syncAllLocalToCloud(): Promise<void> {
     if (!navigator.onLine) return;
+
+    await this.flushPendingPushes();
 
     this.status = 'syncing';
     this.notifyState();
 
     this.updateCafeIdFromSettings();
-    const keysToSync = [
-      'cafe_categories', 'cafe_products', 'cafe_customers', 'cafe_suppliers',
-      'cafe_invoices', 'cafe_invoice_items', 'cafe_expenses', 'cafe_inventory_transactions',
-      'cafe_credit_payments', 'cafe_cash_drawers', 'cafe_daily_closes', 'cafe_settings',
-      'cafe_backup_logs', 'cafe_communication_logs', 'cafe_audit_logs', 'cafe_item_modifications',
-      'cafe_returns_list', 'cafe_credit_adjustments', 'cafe_cash_history', 'cafe_wallet_transactions',
-      'cafe_customer_notes', 'cafe_customer_visits', 'cafe_credit_transactions_system',
-      'cafe_tables_system', 'cafe_employees', 'cafe_employee_transactions', 'cafe_ps_devices',
-      'cafe_ps_sessions', 'cafe_daily_raw_materials', 'cafe_raw_materials', 'cafe_raw_materials_seeded',
-      'cafe_raw_materials_deleted', 'cafe_inventory_batches', 'cafe_inventory_batch_logs',
-      'cafe_batch_consumptions', 'cafe_auth_users', 'cafe_auth_audit_logs', 'cafe_partners',
-      'cafe_partner_drawings', 'cafe_update_logs', 'cafe_shifts', 'cafe_shift_handovers'
-    ];
 
     try {
-      for (const key of keysToSync) {
+      for (const key of ALL_SYNC_KEYS) {
         const val = safeStorage.getItem(key);
-        const localUpdatedAt = parseInt(safeStorage.getItem(`__meta_updated_${key}`) || '0', 10);
+        const isDirty = Boolean(safeStorage.getItem(`${DIRTY_PREFIX}${key}`));
+        const localUpdatedAt = parseInt(safeStorage.getItem(`${META_UPDATED_PREFIX}${key}`) || '0', 10);
         const remoteUpdatedAt = this.cloudTimestamps.get(key) || 0;
 
-        if (val !== null && localUpdatedAt > remoteUpdatedAt) {
-          try {
-            const parsed = JSON.parse(val);
-            await this.pushKeyToCloud(key, parsed);
-          } catch (e) {}
+        if (val !== null && (isDirty || localUpdatedAt > remoteUpdatedAt)) {
+          await this.executePushFromStorage(key);
         }
       }
       this.lastSyncTime = new Date().toLocaleTimeString('ar-EG', {
@@ -437,7 +840,7 @@ class FirebaseSyncService {
         minute: '2-digit',
         second: '2-digit'
       });
-      this.status = 'connected';
+      this.status = navigator.onLine ? 'connected' : 'offline';
     } catch (e) {
       console.error('Error syncing local keys to cloud:', e);
       this.status = 'error';
@@ -450,34 +853,20 @@ class FirebaseSyncService {
    * Force push all local keys regardless of timestamp comparison
    */
   public async forcePushAllKeys(): Promise<number> {
-    const keysToSync = [
-      'cafe_categories', 'cafe_products', 'cafe_customers', 'cafe_suppliers',
-      'cafe_invoices', 'cafe_invoice_items', 'cafe_expenses', 'cafe_inventory_transactions',
-      'cafe_credit_payments', 'cafe_cash_drawers', 'cafe_daily_closes', 'cafe_settings',
-      'cafe_backup_logs', 'cafe_communication_logs', 'cafe_audit_logs', 'cafe_item_modifications',
-      'cafe_returns_list', 'cafe_credit_adjustments', 'cafe_cash_history', 'cafe_wallet_transactions',
-      'cafe_customer_notes', 'cafe_customer_visits', 'cafe_credit_transactions_system',
-      'cafe_tables_system', 'cafe_employees', 'cafe_employee_transactions', 'cafe_ps_devices',
-      'cafe_ps_sessions', 'cafe_daily_raw_materials', 'cafe_raw_materials', 'cafe_raw_materials_seeded',
-      'cafe_raw_materials_deleted', 'cafe_inventory_batches', 'cafe_inventory_batch_logs',
-      'cafe_batch_consumptions', 'cafe_auth_users', 'cafe_auth_audit_logs', 'cafe_partners',
-      'cafe_partner_drawings', 'cafe_update_logs', 'cafe_shifts', 'cafe_shift_handovers'
-    ];
-
+    await this.flushPendingPushes();
     let pushedCount = 0;
-    for (const key of keysToSync) {
+    for (const key of ALL_SYNC_KEYS) {
       const val = safeStorage.getItem(key);
       if (val !== null) {
         try {
-          const parsed = JSON.parse(val);
-          await this.pushKeyToCloud(key, parsed);
+          safeStorage.setItem(`${DIRTY_PREFIX}${key}`, String(Date.now()));
+          await this.executePushFromStorage(key);
           pushedCount++;
         } catch (e) {
           console.error(`Failed force push for key ${key}:`, e);
         }
       }
     }
-
     return pushedCount;
   }
 
