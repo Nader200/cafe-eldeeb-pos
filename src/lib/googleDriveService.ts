@@ -110,6 +110,9 @@ export async function signInWithFirebaseGooglePopup(): Promise<GoogleDriveUser |
   }
 }
 
+export const DEFAULT_GOOGLE_CLIENT_ID =
+  '864337937711-f5r4n9td21hf187o22f8du4vbfcq79al.apps.googleusercontent.com';
+
 /**
  * Trigger OAuth Sign-In flow with Google Identity Services or Custom Token Prompt
  */
@@ -123,10 +126,8 @@ export async function requestGoogleDriveAuth(clientId?: string): Promise<GoogleD
 
   const passedClientId = (clientId && clientId.includes('.apps.googleusercontent.com')) ? clientId.trim() : null;
   const settingsClientId = (storedSettings?.google_drive_client_id && storedSettings.google_drive_client_id.includes('.apps.googleusercontent.com')) ? storedSettings.google_drive_client_id.trim() : null;
-  const envClientId = ((import.meta as any).env?.VITE_GOOGLE_CLIENT_ID && (import.meta as any).env.VITE_GOOGLE_CLIENT_ID.includes('.apps.googleusercontent.com')) ? (import.meta as any).env.VITE_GOOGLE_CLIENT_ID.trim() : null;
-  const configClientId = ((firebaseConfig as any)?.oAuthClientId && (firebaseConfig as any).oAuthClientId.includes('.apps.googleusercontent.com')) ? (firebaseConfig as any).oAuthClientId : null;
 
-  const resolvedClientId = passedClientId || settingsClientId || envClientId || configClientId || '834307898677-6sh4d2s80ucmvk7u8k4c2f647ij418v2.apps.googleusercontent.com';
+  const resolvedClientId = passedClientId || settingsClientId || DEFAULT_GOOGLE_CLIENT_ID;
 
   // ==========================================
   // 1. Android Native Flow (Capacitor Native Platform)

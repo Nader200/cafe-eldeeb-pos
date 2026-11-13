@@ -31,6 +31,7 @@ import { dbService, safeStorage } from '../dbService';
 const localStorage = safeStorage;
 import { AppSettings } from '../types';
 import {
+  DEFAULT_GOOGLE_CLIENT_ID,
   GoogleDriveUser,
   GoogleDriveBackupFile,
   requestGoogleDriveAuth,
@@ -75,7 +76,9 @@ export default function GoogleDriveBackupView({
   const [originMismatchError, setOriginMismatchError] = useState<string | null>(null);
   const [copiedOrigin, setCopiedOrigin] = useState<boolean>(false);
   const [showCustomClientConfig, setShowCustomClientConfig] = useState<boolean>(false);
-  const [customClientIdInput, setCustomClientIdInput] = useState<string>(() => settings.google_drive_client_id || '');
+  const [customClientIdInput, setCustomClientIdInput] = useState<string>(
+    () => settings.google_drive_client_id || DEFAULT_GOOGLE_CLIENT_ID
+  );
 
   // Restore confirmation modal states
   const [selectedBackupToRestore, setSelectedBackupToRestore] = useState<GoogleDriveBackupFile | null>(null);
@@ -91,6 +94,7 @@ export default function GoogleDriveBackupView({
   useEffect(() => {
     const s = dbService.getSettings();
     setSettings(s);
+    setCustomClientIdInput(s.google_drive_client_id || DEFAULT_GOOGLE_CLIENT_ID);
 
     // Load cached list first
     loadCachedBackupList();
@@ -171,6 +175,7 @@ export default function GoogleDriveBackupView({
 
   const handleSaveCustomClientId = () => {
     const trimmed = customClientIdInput.trim();
+    const effectiveValue = trimmed || DEFAULT_GOOGLE_CLIENT_ID;
     const updatedSettings: AppSettings = {
       ...settings,
       google_drive_client_id: trimmed || undefined,
@@ -178,8 +183,13 @@ export default function GoogleDriveBackupView({
     };
     dbService.saveSettings(updatedSettings);
     setSettings(updatedSettings);
+    setCustomClientIdInput(effectiveValue);
     if (onSettingsChanged) onSettingsChanged();
-    onShowSuccessAlert(trimmed ? 'تم حفظ معرّف العميل Google Client ID بنجاح! سيتم استخدامه في محاولات الربط التالية.' : 'تمت استعادة معرّف العميل الافتراضي.');
+    onShowSuccessAlert(
+      trimmed && trimmed !== DEFAULT_GOOGLE_CLIENT_ID
+        ? 'تم حفظ معرّف العميل Google Client ID بنجاح! سيتم استخدامه في محاولات الربط التالية.'
+        : 'تم اعتماد معرّف العميل الافتراضي المثبّت بنجاح.'
+    );
   };
 
   const handleConnectWithFirebasePopup = async () => {
