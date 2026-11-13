@@ -638,7 +638,7 @@ function AppContent() {
   const activeThemeDef = THEMES[normalizeThemeKey(settings.seasonal_theme)];
 
   return (
-    <div className={`min-h-screen bg-luxury-bg text-white flex flex-col md:flex-row relative theme-${normalizeThemeKey(settings.seasonal_theme)}`} dir="rtl">
+    <div className={`${activeTab === 'pos' ? 'h-[100dvh] overflow-hidden' : 'min-h-screen'} bg-luxury-bg text-white flex flex-col md:flex-row relative theme-${normalizeThemeKey(settings.seasonal_theme)}`} dir="rtl">
       {/* Dynamic Interactive Animated Background */}
       <ThemeAnimatedBackground
         theme={settings.seasonal_theme}
@@ -778,7 +778,7 @@ function AppContent() {
       </aside>
 
       {/* 3. CORE VIEWPORT CONTAINER (HEADER + MAIN CONTENT) */}
-      <main className="flex-1 min-w-0 bg-luxury-bg flex flex-col">
+      <main className="flex-1 min-w-0 min-h-0 bg-luxury-bg flex flex-col">
         
         {/* UPPER STATUS BAR HEADER HEADER */}
         <header className={`${(activeTab === 'dashboard' || activeTab === 'pos') ? 'hidden' : 'sticky top-0 z-30 bg-luxury-card border-b border-luxury-border py-4 px-6 flex justify-between items-center shrink-0'}`}>
@@ -926,7 +926,7 @@ function AppContent() {
         </header>
 
         {/* 4. CHOSEN SUBVIEW ROUTED PANEL */}
-        <div className={`flex-1 ${activeTab === 'pos' ? 'p-2 md:p-4 h-[calc(100vh-135px)] max-h-[calc(100vh-135px)] md:h-[calc(100vh-80px)] md:max-h-[calc(100vh-80px)] overflow-hidden' : 'p-3 md:p-6 overflow-y-auto pb-24 md:pb-8'}`}>
+        <div className={`flex-1 min-h-0 ${activeTab === 'pos' ? 'p-2 md:p-4 pb-[68px] md:pb-4 overflow-hidden flex flex-col' : 'p-3 md:p-6 overflow-y-auto pb-24 md:pb-8'}`}>
           {activeTab !== 'dashboard' && activeTab !== 'pos' && (
             <div className="mb-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between bg-[#070707] border border-gold-500/10 p-4 rounded-2xl shadow-md gap-3">
               {hasPermission('dashboard') ? (

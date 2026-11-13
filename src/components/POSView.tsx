@@ -1125,7 +1125,7 @@ export default function POSView({
   };
 
   return (
-    <div className="flex flex-col gap-3 md:gap-4 w-full h-full select-none" dir="rtl">
+    <div className="flex flex-col gap-2.5 md:gap-4 w-full flex-1 min-h-0 h-full select-none" dir="rtl">
       
       {/* Top Navigation & Search Bar */}
       <div className="bg-luxury-card border border-luxury-border p-3 rounded-2xl flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3 shadow-md shrink-0">
@@ -1242,13 +1242,13 @@ export default function POSView({
       </div>
 
       {/* Main Workspace split */}
-      <div className="flex-1 flex flex-col md:flex-row gap-4 overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-col md:flex-row gap-3 md:gap-4 overflow-hidden">
         
         {/* RIGHT PANEL: Category navigation list & Product Grid */}
-        <div className={`flex-1 min-h-0 flex gap-3 md:gap-4 overflow-hidden ${posMobileTab === 'products' ? 'h-[calc(100vh-310px)] flex' : 'hidden md:flex md:h-full'}`}>
+        <div className={`flex-1 min-h-0 min-w-0 gap-2.5 md:gap-4 overflow-hidden ${posMobileTab === 'products' ? 'flex h-full' : 'hidden md:flex md:h-full'}`}>
           
           {/* Categories Sidebar (RTL Sidebar is on the right) */}
-          <div className="w-20 md:w-32 bg-luxury-card border border-luxury-border rounded-2xl md:rounded-3xl p-1.5 md:p-2 flex flex-col gap-1.5 md:gap-2 overflow-y-auto shrink-0">
+          <div className="w-20 md:w-32 min-h-0 bg-luxury-card border border-luxury-border rounded-2xl md:rounded-3xl p-1.5 md:p-2 pb-16 md:pb-2 flex flex-col gap-1.5 md:gap-2 overflow-y-auto overscroll-contain touch-pan-y shrink-0" style={{ WebkitOverflowScrolling: 'touch' }}>
             <button
               id="category-tab-all"
               onClick={() => setSelectedCategory('all')}
@@ -1280,7 +1280,7 @@ export default function POSView({
           </div>
 
           {/* Product grid Workspace */}
-          <div className="flex-1 flex flex-col gap-3 md:gap-4 overflow-hidden h-full">
+          <div className="flex-1 min-h-0 min-w-0 flex flex-col gap-2.5 md:gap-4 overflow-hidden h-full">
             
             {/* Quick Favorites buttons strip */}
             <div className="bg-luxury-card border border-luxury-border p-2 md:p-3 rounded-xl md:rounded-2xl flex items-center gap-1.5 md:gap-2 overflow-x-auto shrink-0 no-scrollbar">
@@ -1299,13 +1299,13 @@ export default function POSView({
             </div>
 
             {/* Core Product Cards Grid */}
-            <div className="flex-1 overflow-y-auto pr-1">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y pr-1" style={{ WebkitOverflowScrolling: 'touch' }}>
               {sortedProducts.length === 0 ? (
                 <div className="text-center py-20 text-gray-500">
                   لا توجد منتجات مطابقة لخيارات البحث الحالية
                 </div>
               ) : (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 md:gap-4 pb-4">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 md:gap-4 pb-24 md:pb-6">
                   {sortedProducts.map(prod => {
                     const lowStock = prod.current_stock <= prod.minimum_stock;
                     // Calculate a dynamic stock level percentage for the premium stat bar
@@ -1392,7 +1392,7 @@ export default function POSView({
         </div>
 
         {/* LEFT PANEL: Active Order / Bill Summary Panel */}
-        <div className={`w-full md:w-[380px] min-h-0 bg-luxury-card border border-luxury-border rounded-3xl p-4 md:p-5 flex flex-col justify-start md:justify-between shadow-xl shrink-0 overflow-y-auto md:overflow-hidden relative ${posMobileTab === 'cart' ? 'h-[calc(100vh-310px)] pb-32 flex' : 'hidden md:flex md:h-full'}`}>
+        <div className={`w-full md:w-[380px] min-h-0 bg-luxury-card border border-luxury-border rounded-3xl p-4 md:p-5 flex flex-col justify-start md:justify-between shadow-xl shrink-0 overflow-y-auto md:overflow-hidden overscroll-contain touch-pan-y relative ${posMobileTab === 'cart' ? 'flex-1 h-full pb-24 flex' : 'hidden md:flex md:h-full'}`}>
           
           {/* 1. High-Density Unified POS Header */}
           <div className="border-b border-gray-950 pb-2 shrink-0 flex flex-col gap-1.5">

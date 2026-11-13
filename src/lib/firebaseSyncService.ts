@@ -94,6 +94,35 @@ function getItemTimestamp(item: any): number {
   );
 }
 
+function canonicalNormalize(val: any): any {
+  if (val === undefined || val === null) return undefined;
+  if (Array.isArray(val)) {
+    return val.map(item => {
+      const n = canonicalNormalize(item);
+      return n === undefined ? null : n;
+    });
+  }
+  if (typeof val === 'object') {
+    const out: Record<string, any> = {};
+    for (const k of Object.keys(val).sort()) {
+      const n = canonicalNormalize(val[k]);
+      if (n !== undefined) {
+        out[k] = n;
+      }
+    }
+    return out;
+  }
+  return val;
+}
+
+function canonicalStringify(val: any): string {
+  try {
+    return JSON.stringify(canonicalNormalize(val)) ?? 'null';
+  } catch (e) {
+    return String(val);
+  }
+}
+
 function loadDeletedRecordsMap(): Record<string, number> {
   try {
     const raw = safeStorage.getItem(DELETED_RECORDS_KEY);
@@ -345,24 +374,36 @@ class FirebaseSyncService {
       merged = remoteUpdatedAt >= localUpdatedAt && !localIsDirty ? remoteArr : localArr;
     }
 
-    let localJson = '';
-    let remoteJson = '';
-    let mergedJson = '';
-    try {
-      localJson = JSON.stringify(localArr);
-      remoteJson = JSON.stringify(remoteArr);
-      mergedJson = JSON.stringify(merged);
-    } catch (e) {
-      return { merged, changedLocal: true, needsPushBack: false };
+    const remoteIds = new Set<string>();
+    const remoteById = new Map<string, any>();
+    for (const r of remoteArr) {
+      if (r && typeof r === 'object' && r.id) {
+        const id = String(r.id);
+        remoteIds.add(id);
+        remoteById.set(id, r);
+      }
     }
 
-    const changedLocal = mergedJson !== localJson;
-    // Check if merged has items or newer values not present on remote
-    const needsPushBack = mergedJson !== remoteJson && (
-      localIsDirty ||
-      Array.from(byId.values()).some(v => v.source === 'local') ||
-      merged.length > remoteArr.length
-    );
+    const changedLocal = canonicalStringify(merged) !== canonicalStringify(localArr);
+
+    let needsPushBack = false;
+    if (localIsDirty) {
+      needsPushBack = canonicalStringify(merged) !== canonicalStringify(remoteArr);
+    } else {
+      for (const item of merged) {
+        if (!item || typeof item !== 'object' || !item.id) continue;
+        const id = String(item.id);
+        if (!remoteIds.has(id)) {
+          needsPushBack = true;
+          break;
+        }
+        const rem = remoteById.get(id);
+        if (getItemTimestamp(item) > getItemTimestamp(rem)) {
+          needsPushBack = true;
+          break;
+        }
+      }
+    }
 
     return { merged, changedLocal, needsPushBack };
   }
@@ -456,6 +497,12 @@ class FirebaseSyncService {
           const localUpdatedAt = parseInt(safeStorage.getItem(localMetaKey) || '0', 10);
           const localIsDirty = Boolean(safeStorage.getItem(`${DIRTY_PREFIX}${key}`));
           const localVal = safeStorage.getItem(key);
+
+          // Ignore our own echoed writes when local state is clean and up to date
+          if (docData.deviceId === this.deviceId && !localIsDirty && remoteUpdatedAt >= localUpdatedAt) {
+            safeStorage.setItem(localMetaKey, String(remoteUpdatedAt));
+            return;
+          }
 
           // Special safe merge for all ID-based array collections (products, customers, invoices, etc.)
           if (MERGEABLE_ARRAY_KEYS.has(key) && Array.isArray(remoteData)) {
@@ -741,7 +788,7 @@ class FirebaseSyncService {
       let sanitizedData: any = null;
       if (latestData !== undefined && latestData !== null) {
         try {
-          sanitizedData = JSON.parse(JSON.stringify(latestData, (_k, v) => (v === undefined ? null : v)));
+          sanitizedData = JSON.parse(JSON.stringify(latestData));
         } catch (e) {
           sanitizedData = latestData;
         }

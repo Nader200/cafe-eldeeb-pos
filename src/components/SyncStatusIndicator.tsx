@@ -34,8 +34,8 @@ export default function SyncStatusIndicator({ className = '' }: SyncStatusIndica
   const getStatusBadge = () => {
     if (syncState.status === 'syncing' || isManualSyncing) {
       return (
-        <div className="flex items-center gap-1.5 bg-blue-500/10 text-blue-400 border border-blue-500/30 px-2.5 py-1 rounded-full text-[11px] font-bold animate-pulse">
-          <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-400" />
+        <div className="flex items-center gap-1.5 bg-blue-500/10 text-blue-400 border border-blue-500/30 px-2.5 py-1 rounded-full text-[11px] font-bold animate-pulse whitespace-nowrap shrink-0">
+          <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-400 shrink-0" />
           <span>تتم المزامنة...</span>
         </div>
       );
@@ -43,8 +43,8 @@ export default function SyncStatusIndicator({ className = '' }: SyncStatusIndica
 
     if (syncState.status === 'offline' || !syncState.isOnline) {
       return (
-        <div className="flex items-center gap-1.5 bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2.5 py-1 rounded-full text-[11px] font-bold">
-          <CloudOff className="w-3.5 h-3.5 text-amber-400" />
+        <div className="flex items-center gap-1.5 bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2.5 py-1 rounded-full text-[11px] font-bold whitespace-nowrap shrink-0">
+          <CloudOff className="w-3.5 h-3.5 text-amber-400 shrink-0" />
           <span>
             أوفلاين (حفظ محلي{syncState.pendingDirtyCount > 0 ? ` • ${syncState.pendingDirtyCount}` : ''})
           </span>
@@ -54,8 +54,8 @@ export default function SyncStatusIndicator({ className = '' }: SyncStatusIndica
 
     if (syncState.status === 'error') {
       return (
-        <div className="flex items-center gap-1.5 bg-red-500/10 text-red-400 border border-red-500/30 px-2.5 py-1 rounded-full text-[11px] font-bold">
-          <AlertCircle className="w-3.5 h-3.5 text-red-400" />
+        <div className="flex items-center gap-1.5 bg-red-500/10 text-red-400 border border-red-500/30 px-2.5 py-1 rounded-full text-[11px] font-bold whitespace-nowrap shrink-0">
+          <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
           <span>خطأ بالمزامنة</span>
         </div>
       );
@@ -63,18 +63,18 @@ export default function SyncStatusIndicator({ className = '' }: SyncStatusIndica
 
     if (syncState.pendingDirtyCount > 0) {
       return (
-        <div className="flex items-center gap-1.5 bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2.5 py-1 rounded-full text-[11px] font-bold">
-          <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
-          <span>جاري حفظ {syncState.pendingDirtyCount} تحديث...</span>
+        <div className="flex items-center gap-1.5 bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2.5 py-1 rounded-full text-[11px] font-bold whitespace-nowrap shrink-0">
+          <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400 shrink-0" />
+          <span>جاري حفظ {syncState.pendingDirtyCount}...</span>
         </div>
       );
     }
 
     // Connected
     return (
-      <div className="flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2.5 py-1 rounded-full text-[11px] font-extrabold shadow-sm">
-        <div className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-        <Cloud className="w-3.5 h-3.5 text-emerald-400" />
+      <div className="flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2.5 py-1 rounded-full text-[11px] font-extrabold shadow-sm whitespace-nowrap shrink-0">
+        <div className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0" />
+        <Cloud className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
         <span>مزامنة سحابية فورية</span>
       </div>
     );
@@ -86,7 +86,7 @@ export default function SyncStatusIndicator({ className = '' }: SyncStatusIndica
       <button
         type="button"
         onClick={() => setIsModalOpen(true)}
-        className={`flex items-center gap-2 hover:opacity-90 transition-all cursor-pointer ${className}`}
+        className={`flex items-center gap-2 hover:opacity-90 transition-all cursor-pointer shrink-0 whitespace-nowrap ${className}`}
         title="انقر لمشاهدة تفاصيل المزامنة السحابية الفورية بين الأجهزة"
       >
         {getStatusBadge()}
