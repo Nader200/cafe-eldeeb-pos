@@ -4151,7 +4151,7 @@ export const dbService = {
   recordEmployeeConsumption: (
     employeeId: string,
     employeeName: string,
-    items: { product: Product; quantity: number }[],
+    items: { product: Product; quantity: number; unitPrice?: number; custom_price?: number }[],
     policy: 'FREE' | 'DEDUCT',
     cashierName: string
   ): void => {
@@ -4233,18 +4233,25 @@ export const dbService = {
           });
         }
 
+        const effectiveUnitPrice =
+          item.unitPrice !== undefined && !isNaN(item.unitPrice)
+            ? item.unitPrice
+            : (item.custom_price !== undefined && !isNaN(item.custom_price) ? item.custom_price : prod.selling_price);
+
         totalCost += prod.cost_price * item.quantity;
-        totalSellingPrice += prod.selling_price * item.quantity;
+        totalSellingPrice += effectiveUnitPrice * item.quantity;
 
         consumedProductsList.push({
           product_id: prod.id,
           product_name_ar: prod.name_ar,
           quantity: item.quantity,
-          selling_price: prod.selling_price,
+          selling_price: effectiveUnitPrice,
           cost_price: prod.cost_price
         });
       }
     });
+
+    totalSellingPrice = Math.round(totalSellingPrice * 100) / 100;
 
     setLocal(KEYS.PRODUCTS, products);
     setLocal(KEYS.RAW_MATERIALS, rawMaterialsList);
@@ -4258,7 +4265,12 @@ export const dbService = {
       employee_name: employeeName,
       type: 'CONSUMPTION',
       amount: amountToDeduct,
-      notes: `استهلاك منتجات: ${items.map(i => `${i.product.name_ar} (x${i.quantity})`).join(', ')} (${policy === 'FREE' ? 'مشروب مجاني للموظف' : 'خصم من الراتب'})`,
+      notes: `استهلاك منتجات: ${items.map(i => {
+        const pPrice = i.unitPrice !== undefined && !isNaN(i.unitPrice)
+          ? i.unitPrice
+          : (i.custom_price !== undefined && !isNaN(i.custom_price) ? i.custom_price : i.product.selling_price);
+        return `${i.product.name_ar} (x${i.quantity} × ${pPrice} ج.م)`;
+      }).join(', ')} (${policy === 'FREE' ? 'مشروب مجاني للموظف' : 'خصم من الراتب'})`,
       date: new Date().toISOString().split('T')[0],
       created_at: dateStr,
       products: consumedProductsList

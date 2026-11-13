@@ -74,7 +74,7 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
   // Employee consumption modal states
   const [showConsumptionModal, setShowConsumptionModal] = useState<boolean>(false);
   const [selectedEmpForCons, setSelectedEmpForCons] = useState<Employee | null>(null);
-  const [consumptionCart, setConsumptionCart] = useState<{ product: Product; quantity: number }[]>([]);
+  const [consumptionCart, setConsumptionCart] = useState<{ product: Product; quantity: number; unitPrice: number }[]>([]);
   const [productSearch, setProductSearch] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
 
@@ -205,7 +205,7 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
       if (existing) {
         return prev.map(item => item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item);
       }
-      return [...prev, { product, quantity: 1 }];
+      return [...prev, { product, quantity: 1, unitPrice: Number(product.selling_price) || 0 }];
     });
   };
 
@@ -215,6 +215,13 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
       return;
     }
     setConsumptionCart(prev => prev.map(item => item.product.id === productId ? { ...item, quantity } : item));
+  };
+
+  const handleUpdateConsumptionPrice = (productId: string, newPrice: number) => {
+    const safePrice = isNaN(newPrice) || newPrice < 0 ? 0 : newPrice;
+    setConsumptionCart(prev =>
+      prev.map(item => item.product.id === productId ? { ...item, unitPrice: safePrice } : item)
+    );
   };
 
   const handleRemoveFromConsumptionCart = (productId: string) => {
@@ -232,6 +239,10 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
     const policy = settings.employee_consumption_policy || 'DEDUCT';
 
     for (const item of consumptionCart) {
+      if (item.unitPrice < 0 || isNaN(item.unitPrice)) {
+        onShowWarningAlert(`يرجى إدخال سعر صحيح للمنتج "${item.product.name_ar}"!`);
+        return;
+      }
       if (item.product.current_stock < item.quantity) {
         onShowWarningAlert(`الكمية المطلوبة من "${item.product.name_ar}" (${item.quantity}) غير متوفرة بالكامل بالمخزن (المتاح: ${item.product.current_stock})!`);
         return;
@@ -1539,41 +1550,75 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                     </div>
                   ) : (
                     <div className="space-y-2 pr-1">
-                      {consumptionCart.map(item => (
-                        <div key={item.product.id} className="bg-black/50 border border-gray-900/60 p-2.5 rounded-xl flex items-center justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <span className="text-[10px] font-bold text-white block truncate">{item.product.name_ar}</span>
-                            <span className="text-[8px] text-gold-500 font-mono block mt-0.5">
-                              {item.product.selling_price} × {item.quantity} = {item.product.selling_price * item.quantity} ج.م
-                            </span>
-                          </div>
+                      {consumptionCart.map(item => {
+                        const isPriceEdited = item.unitPrice !== item.product.selling_price;
+                        const lineTotal = Math.round(item.unitPrice * item.quantity * 100) / 100;
+                        return (
+                          <div key={item.product.id} className="bg-black/50 border border-gray-900/60 p-2.5 rounded-xl flex flex-col gap-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-[11px] font-bold text-white truncate">{item.product.name_ar}</span>
+                                  {isPriceEdited && (
+                                    <span className="text-[8px] px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400 font-bold">
+                                      سعر معدّل
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
 
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => handleUpdateConsumptionQty(item.product.id, item.quantity - 1)}
-                              className="w-5 h-5 rounded bg-gray-900 hover:bg-gray-800 text-white font-bold text-[10px] flex items-center justify-center cursor-pointer"
-                            >
-                              -
-                            </button>
-                            <span className="w-6 text-center text-[10px] font-bold font-mono text-white">
-                              {item.quantity}
-                            </span>
-                            <button
-                              onClick={() => handleUpdateConsumptionQty(item.product.id, item.quantity + 1)}
-                              className="w-5 h-5 rounded bg-gray-900 hover:bg-gray-800 text-white font-bold text-[10px] flex items-center justify-center cursor-pointer"
-                            >
-                              +
-                            </button>
-                            <button
-                              onClick={() => handleRemoveFromConsumptionCart(item.product.id)}
-                              className="w-5 h-5 rounded hover:bg-red-950/20 text-red-500 font-bold text-[10px] flex items-center justify-center cursor-pointer mr-1"
-                              title="حذف"
-                            >
-                              ✕
-                            </button>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateConsumptionQty(item.product.id, item.quantity - 1)}
+                                  className="w-6 h-6 rounded bg-gray-900 hover:bg-gray-800 text-white font-bold text-[11px] flex items-center justify-center cursor-pointer"
+                                >
+                                  -
+                                </button>
+                                <span className="w-6 text-center text-[11px] font-bold font-mono text-white">
+                                  {item.quantity}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateConsumptionQty(item.product.id, item.quantity + 1)}
+                                  className="w-6 h-6 rounded bg-gray-900 hover:bg-gray-800 text-white font-bold text-[11px] flex items-center justify-center cursor-pointer"
+                                >
+                                  +
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveFromConsumptionCart(item.product.id)}
+                                  className="w-6 h-6 rounded hover:bg-red-950/20 text-red-500 font-bold text-[11px] flex items-center justify-center cursor-pointer mr-1"
+                                  title="حذف"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Editable unit price + line total */}
+                            <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-gray-900/60">
+                              <div className="flex items-center gap-1.5">
+                                <label className="text-[9px] text-gray-400 font-bold">السعر:</label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="any"
+                                  value={item.unitPrice}
+                                  onFocus={(e) => e.target.select()}
+                                  onChange={(e) => handleUpdateConsumptionPrice(item.product.id, parseFloat(e.target.value))}
+                                  className="w-16 bg-luxury-bg border border-gray-800 focus:border-gold-500 text-gold-400 rounded-lg py-1 px-1.5 text-[11px] font-mono font-bold text-center outline-none"
+                                  dir="ltr"
+                                />
+                                <span className="text-[9px] text-gray-500">ج.م</span>
+                              </div>
+                              <span className="text-[10px] text-gold-500 font-mono font-bold">
+                                = {lineTotal} ج.م
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -1588,9 +1633,9 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                       </strong>
                     </div>
                     <div className="flex justify-between border-b border-gray-900/50 pb-2">
-                      <span className="text-gray-400">القيمة الإجمالية بسعر البيع:</span>
+                      <span className="text-gray-400">القيمة الإجمالية للاستهلاك:</span>
                       <strong className="text-gold-500 font-mono font-bold">
-                        {consumptionCart.reduce((acc, curr) => acc + curr.product.selling_price * curr.quantity, 0)} ج.م
+                        {Math.round(consumptionCart.reduce((acc, curr) => acc + curr.unitPrice * curr.quantity, 0) * 100) / 100} ج.م
                       </strong>
                     </div>
                     
@@ -1605,7 +1650,7 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                       ) : (
                         <div className="text-[9px] leading-relaxed text-amber-400">
                           📌 <b>الاحتساب المالي: خصم من اليومية (DEDUCT)</b><br />
-                          سيخصم مبلغ <span className="font-extrabold font-mono">{consumptionCart.reduce((acc, curr) => acc + curr.product.selling_price * curr.quantity, 0)} ج.م</span> من راتب الموظف فور تأكيد الحفظ تلقائياً.
+                          سيخصم مبلغ <span className="font-extrabold font-mono">{Math.round(consumptionCart.reduce((acc, curr) => acc + curr.unitPrice * curr.quantity, 0) * 100) / 100} ج.م</span> من راتب الموظف فور تأكيد الحفظ تلقائياً.
                         </div>
                       )}
                     </div>
