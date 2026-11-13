@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   ClipboardList, 
   ShoppingCart, 
@@ -42,6 +42,7 @@ import { dbService, safeStorage } from '../dbService';
 const localStorage = safeStorage;
 import { Invoice, Customer, TableSystem, InvoiceItem } from '../types';
 import { useAuth } from '../contexts/AuthContext';
+import { uploadReceiptImage } from '../lib/receiptStorage';
 
 interface OpenInvoicesViewProps {
   onNavigate: (tab: string) => void;
@@ -75,6 +76,18 @@ export default function OpenInvoicesView({
   
   // Selected Invoice Detail Left-Tab
   const [detailTab, setDetailTab] = useState<DetailTabType>('items');
+  const detailsPanelRef = useRef<HTMLDivElement | null>(null);
+
+  const matchesTableNumber = (invTable?: string | null, table?: TableSystem): boolean => {
+    if (!invTable || !table) return false;
+    const raw = invTable.trim().toLowerCase();
+    const idLower = table.id.trim().toLowerCase();
+    const nameLower = table.name.trim().toLowerCase();
+    if (raw === idLower || raw === nameLower) return true;
+    const strippedRaw = raw.replace(/طاولة/g, '').trim();
+    const strippedId = idLower.replace(/^t/, '');
+    return strippedRaw === idLower || strippedRaw === strippedId;
+  };
 
   // Sorting
   const [sortBy, setSortBy] = useState<SortType>('NEWEST');
@@ -167,13 +180,16 @@ export default function OpenInvoicesView({
     if (!editingNotesInvoice) return;
     const trimmed = newInvoiceNotesInput.trim();
 
-    // Update invoice notes in local database
-    const invoices = dbService.getInvoices();
-    const idx = invoices.findIndex(i => i.id === editingNotesInvoice.id);
-    if (idx > -1) {
-      invoices[idx].notes = trimmed;
-      invoices[idx].updated_at = new Date().toISOString();
-      dbService.saveInvoices(invoices);
+    // Update invoice notes in local & cloud database safely (preserving OPEN & DRAFT invoices)
+    const updatedInv = dbService.updateInvoiceNotes(editingNotesInvoice.id, trimmed);
+    if (!updatedInv) {
+      const allInvs = dbService.getInvoices(true);
+      const idx = allInvs.findIndex(i => i.id === editingNotesInvoice.id);
+      if (idx > -1) {
+        allInvs[idx].notes = trimmed;
+        allInvs[idx].updated_at = new Date().toISOString();
+        dbService.saveInvoices(allInvs);
+      }
     }
 
     if (selectedInvoice && selectedInvoice.id === editingNotesInvoice.id) {
@@ -386,7 +402,7 @@ export default function OpenInvoicesView({
     updatedTables.forEach((table, idx) => {
       // Find any open invoice assigned to this table
       const activeInvs = openInvoices.filter(
-        inv => inv.table_number === table.id && (inv.invoice_status === 'OPEN' || inv.invoice_status === 'DRAFT')
+        inv => matchesTableNumber(inv.table_number, table) && (inv.invoice_status === 'OPEN' || inv.invoice_status === 'DRAFT')
       );
       
       if (activeInvs.length > 0) {
@@ -429,26 +445,9 @@ export default function OpenInvoicesView({
     }
 
     try {
-      const invoices = dbService.getInvoices(true);
-      const filtered = invoices.filter(inv => inv.id !== invoiceToDeleteId);
-      
-      localStorage.setItem('cafe_invoices', JSON.stringify(filtered));
-      
-      const allItems = JSON.parse(localStorage.getItem('cafe_invoice_items') || '[]');
-      const filteredItems = allItems.filter((it: any) => it.invoice_id !== invoiceToDeleteId);
-      localStorage.setItem('cafe_invoice_items', JSON.stringify(filteredItems));
-      dbService.syncToServer();
-      
-      dbService.logAuditAction(
-        'CANCEL_OPEN_INVOICE', 
-        `تم إلغاء وحذف الفاتورة المفتوحة رقم ${invoiceToDeleteId} بالكامل من نظام التعليق بواسطة المسؤول`, 
-        'أدمن النظام / نادر الديب'
-      );
-      
-      window.dispatchEvent(new CustomEvent('open_invoices_updated'));
-      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+      dbService.deleteOpenInvoice(invoiceToDeleteId, currentUser?.name || 'أدمن النظام / نادر الديب');
       onShowSuccessAlert('تم حذف وإلغاء الفاتورة المفتوحة بنجاح وصفرت تعليقاتها.');
-      
+
       setShowDeletePinModal(false);
       setInvoiceToDeleteId(null);
       setDeletePin('');
@@ -457,6 +456,7 @@ export default function OpenInvoicesView({
 
       if (selectedInvoice?.id === invoiceToDeleteId) {
         setSelectedInvoice(null);
+        setInvoiceItems([]);
       }
     } catch (e: any) {
       onShowWarningAlert('حدث خطأ أثناء إلغاء الفاتورة.');
@@ -468,6 +468,11 @@ export default function OpenInvoicesView({
     const items = dbService.getInvoiceItems(invoice.id);
     setInvoiceItems(items);
     setDetailTab('items');
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      setTimeout(() => {
+        detailsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 60);
+    }
   };
 
   const formatDateTime = (isoString: string) => {
@@ -504,7 +509,7 @@ export default function OpenInvoicesView({
   // Searching & sorting open invoices
   const sortedAndFilteredInvoices = useMemo(() => {
     let result = [...openInvoices].filter(inv => {
-      const numMatch = inv.invoice_number.toLowerCase().includes(searchQuery.toLowerCase());
+      const numMatch = (inv.invoice_number || '').toLowerCase().includes(searchQuery.toLowerCase());
       const custMatch = getCustomerName(inv.customer_id).toLowerCase().includes(searchQuery.toLowerCase());
       const tableMatch = (inv.table_number || '').toLowerCase().includes(searchQuery.toLowerCase());
       const matchSearch = numMatch || custMatch || tableMatch;
@@ -600,39 +605,13 @@ export default function OpenInvoicesView({
       if (targetInvs.length > 0) {
         targetInvId = targetInvs[0].id;
       } else {
-        // Create a blank target invoice registered with target table
-        const year = new Date().getFullYear();
-        const seq = String(openInvoices.length + 1).padStart(5, '0');
-        const num = `INV-${year}-${seq}`;
-        const newInv: Invoice = {
-          id: `inv_${Date.now()}`,
-          invoice_number: num,
-          customer_id: 'c_general',
-          payment_type: 'CASH',
-          subtotal: 0,
-          discount: 0,
-          tax: 0,
-          total: 0,
-          paid_amount: 0,
-          remaining_amount: 0,
-          invoice_status: 'OPEN',
-          cashier_name: 'نادر الديب (أدمن)',
-          invoice_date: new Date().toISOString(),
-          table_number: mergeTargetTableId,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          timeline: [{
-            status: 'OPEN',
-            timestamp: new Date().toISOString(),
-            operator: 'نادر الديب (أدمن)',
-            notes: `فاتورة جديدة تم إنشاؤها لاستقبال دمج الطاولات: ${mergeSourceTableIds.join(', ')}`
-          }]
-        };
-        const allInvoices = JSON.parse(localStorage.getItem('cafe_invoices') || '[]');
-        allInvoices.push(newInv);
-        localStorage.setItem('cafe_invoices', JSON.stringify(allInvoices));
-        dbService.syncToServer();
-        targetInvId = newInv.id;
+        // Create a blank target invoice registered with target table via dbService so it syncs cleanly
+        const blankInv = dbService.createBlankTableInvoice(
+          mergeTargetTableId,
+          currentUser?.name || 'نادر الديب (أدمن)',
+          `فاتورة جديدة تم إنشاؤها لاستقبال دمج الطاولات: ${mergeSourceTableIds.join(', ')}`
+        );
+        targetInvId = blankInv.id;
       }
 
       const allIdsToMerge = [...sourceInvoices.map(s => s.id), targetInvId].filter((v, i, a) => a.indexOf(v) === i);
@@ -883,7 +862,7 @@ export default function OpenInvoicesView({
   };
 
   return (
-    <div className="flex flex-col h-full gap-5 animate-fade-in" dir="rtl">
+    <div className="flex flex-col lg:h-full gap-5 animate-fade-in" dir="rtl">
       
       {/* Visual Tab Bar Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-luxury-card border border-luxury-border p-4 rounded-3xl shrink-0 shadow-lg">
@@ -924,10 +903,10 @@ export default function OpenInvoicesView({
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col lg:flex-row gap-5 overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-5 lg:overflow-hidden">
         
         {/* RIGHT AREA - Dynamic display based on activeMainTab */}
-        <div className="flex-1 bg-luxury-card border border-luxury-border rounded-3xl p-5 flex flex-col gap-4 overflow-hidden shadow-xl">
+        <div className="flex-1 min-h-0 bg-luxury-card border border-luxury-border rounded-3xl p-4 sm:p-5 flex flex-col gap-4 lg:overflow-hidden shadow-xl">
           
           {activeMainTab === 'invoices' ? (
             <>
@@ -993,7 +972,7 @@ export default function OpenInvoicesView({
               </div>
 
               {/* Invoices List */}
-              <div className="flex-1 overflow-y-auto pr-1 space-y-3">
+              <div className="flex-1 min-h-0 max-h-[65vh] lg:max-h-none overflow-y-auto pr-1 space-y-3">
                 {sortedAndFilteredInvoices.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-20 text-center">
                     <div className="w-16 h-16 rounded-full bg-luxury-bg border border-gray-900 flex items-center justify-center text-2xl mb-4">
@@ -1092,7 +1071,7 @@ export default function OpenInvoicesView({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setSelectedInvoice(inv);
+                                handleViewDetails(inv);
                               }}
                               className="px-2.5 py-1 bg-luxury-bg border border-gray-800 hover:border-gold-500 text-gold-400 text-[9px] font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
                               title="فتح معاينة تفاصيل الفاتورة"
@@ -1292,7 +1271,10 @@ export default function OpenInvoicesView({
         </div>
 
         {/* LEFT PANEL - Invoice Details & Advanced Operations */}
-        <div className="w-full lg:w-96 bg-luxury-card border border-luxury-border rounded-3xl p-5 flex flex-col gap-4 overflow-hidden shadow-xl">
+        <div
+          ref={detailsPanelRef}
+          className="w-full lg:w-96 min-h-0 bg-luxury-card border border-luxury-border rounded-3xl p-4 sm:p-5 flex flex-col gap-4 lg:overflow-hidden shadow-xl"
+        >
           
           <div className="border-b border-gray-900 pb-3">
             <h3 className="text-xs font-black text-gray-400">تتبع الإجراءات المتقدمة للفاتورة</h3>
@@ -1325,12 +1307,12 @@ export default function OpenInvoicesView({
           </div>
 
           {!selectedInvoice ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-center py-20">
+            <div className="flex-1 flex flex-col items-center justify-center text-center py-12 lg:py-20">
               <ClipboardList className="w-14 h-14 text-gray-800 stroke-[1.2] mb-3" />
               <p className="text-[10px] text-gray-500">حدد فاتورة معلقة من قائمة اليمين لعرض تفاصيلها وتشغيل عمليات الفصل، النقل والدمج الحسابي لها.</p>
             </div>
           ) : (
-            <div className="flex-1 flex flex-col justify-between overflow-hidden">
+            <div className="flex-1 min-h-0 flex flex-col justify-between lg:overflow-hidden">
               
               {detailTab === 'items' ? (
                 // ITEMS VIEW
@@ -2759,8 +2741,11 @@ export default function OpenInvoicesView({
                             const file = e.target.files?.[0];
                             if (file) {
                               const reader = new FileReader();
-                              reader.onloadend = () => {
-                                if (reader.result) setPayReceiptImage(reader.result as string);
+                              reader.onloadend = async () => {
+                                if (reader.result) {
+                                  const uploaded = await uploadReceiptImage(reader.result as string, 'vodafone_receipt');
+                                  setPayReceiptImage(uploaded);
+                                }
                               };
                               reader.readAsDataURL(file);
                             }
@@ -2780,8 +2765,11 @@ export default function OpenInvoicesView({
                             const file = e.target.files?.[0];
                             if (file) {
                               const reader = new FileReader();
-                              reader.onloadend = () => {
-                                if (reader.result) setPayReceiptImage(reader.result as string);
+                              reader.onloadend = async () => {
+                                if (reader.result) {
+                                  const uploaded = await uploadReceiptImage(reader.result as string, 'vodafone_receipt');
+                                  setPayReceiptImage(uploaded);
+                                }
                               };
                               reader.readAsDataURL(file);
                             }
@@ -2922,8 +2910,11 @@ export default function OpenInvoicesView({
                             const file = e.target.files?.[0];
                             if (file) {
                               const reader = new FileReader();
-                              reader.onloadend = () => {
-                                if (reader.result) setPayReceiptImage(reader.result as string);
+                              reader.onloadend = async () => {
+                                if (reader.result) {
+                                  const uploaded = await uploadReceiptImage(reader.result as string, 'instapay_receipt');
+                                  setPayReceiptImage(uploaded);
+                                }
                               };
                               reader.readAsDataURL(file);
                             }
@@ -2943,8 +2934,11 @@ export default function OpenInvoicesView({
                             const file = e.target.files?.[0];
                             if (file) {
                               const reader = new FileReader();
-                              reader.onloadend = () => {
-                                if (reader.result) setPayReceiptImage(reader.result as string);
+                              reader.onloadend = async () => {
+                                if (reader.result) {
+                                  const uploaded = await uploadReceiptImage(reader.result as string, 'instapay_receipt');
+                                  setPayReceiptImage(uploaded);
+                                }
                               };
                               reader.readAsDataURL(file);
                             }

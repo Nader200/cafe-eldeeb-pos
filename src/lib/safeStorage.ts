@@ -106,9 +106,78 @@ export const safeStorage = (() => {
                 try { window.localStorage.removeItem(existingKey); } catch (err) {}
               }
             }
-            window.localStorage.setItem(key, valueStr);
-            memoryStorage[key] = valueStr;
-            return;
+            try {
+              window.localStorage.setItem(key, valueStr);
+              memoryStorage[key] = valueStr;
+              return;
+            } catch (firstRetryErr) {
+              // Compact oversized inline base64 receipt images on historical CLOSED/CANCELLED invoices
+              // so core data (especially OPEN and DRAFT invoices) still fits in real localStorage quota
+              try {
+                const trimHeavyImagesInInvoices = (rawJson: string): string => {
+                  const arr = JSON.parse(rawJson);
+                  if (!Array.isArray(arr)) return rawJson;
+                  let closedSeen = 0;
+                  // Walk backwards (newest last in array) so the 15 newest closed invoices keep receipts
+                  const compacted = arr.slice().reverse().map((inv: any) => {
+                    if (!inv || typeof inv !== 'object') return inv;
+                    const status = String(inv.invoice_status || '').toUpperCase().trim();
+                    const isOpenOrDraft = status === 'OPEN' || status === 'DRAFT';
+                    if (isOpenOrDraft) {
+                      // Avoid storing duplicate data:image strings twice
+                      if (
+                        typeof inv.receipt_image_url === 'string' &&
+                        inv.receipt_image_url.startsWith('data:image/') &&
+                        inv.receiptImageUrl === inv.receipt_image_url
+                      ) {
+                        const copy = { ...inv };
+                        delete copy.receiptImageUrl;
+                        return copy;
+                      }
+                      return inv;
+                    }
+                    closedSeen++;
+                    const copy = { ...inv };
+                    if (
+                      typeof copy.receipt_image_url === 'string' &&
+                      copy.receipt_image_url.startsWith('data:image/') &&
+                      copy.receiptImageUrl === copy.receipt_image_url
+                    ) {
+                      delete copy.receiptImageUrl;
+                    }
+                    if (closedSeen > 15) {
+                      if (typeof copy.receipt_image_url === 'string' && copy.receipt_image_url.startsWith('data:image/') && copy.receipt_image_url.length > 20000) {
+                        copy.receipt_image_url = '';
+                      }
+                      if (typeof copy.receiptImageUrl === 'string' && copy.receiptImageUrl.startsWith('data:image/') && copy.receiptImageUrl.length > 20000) {
+                        delete copy.receiptImageUrl;
+                      }
+                    }
+                    return copy;
+                  }).reverse();
+                  return JSON.stringify(compacted);
+                };
+
+                if (key === 'cafe_invoices') {
+                  const compactedTarget = trimHeavyImagesInInvoices(valueStr);
+                  window.localStorage.setItem(key, compactedTarget);
+                  memoryStorage[key] = compactedTarget;
+                  return;
+                } else {
+                  const existingInvoicesRaw = window.localStorage.getItem('cafe_invoices');
+                  if (existingInvoicesRaw && existingInvoicesRaw.length > 200000) {
+                    const compactedInvoices = trimHeavyImagesInInvoices(existingInvoicesRaw);
+                    window.localStorage.setItem('cafe_invoices', compactedInvoices);
+                    memoryStorage['cafe_invoices'] = compactedInvoices;
+                  }
+                  window.localStorage.setItem(key, valueStr);
+                  memoryStorage[key] = valueStr;
+                  return;
+                }
+              } catch (compactErr) {
+                // fallback to in-memory storage if storage completely full
+              }
+            }
           } catch (retryErr) {
             // fallback to in-memory storage if storage completely full
           }

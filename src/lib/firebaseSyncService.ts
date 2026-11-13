@@ -802,7 +802,53 @@ class FirebaseSyncService {
       }
 
       if (payloadSizeBytes > FIRESTORE_SAFE_LIMIT_BYTES) {
-        console.warn(`[SYNC WARNING] Payload for ${key} is ${payloadSizeBytes} bytes, near Firestore 1 MiB limit.`);
+        console.warn(`[SYNC WARNING] Payload for ${key} is ${payloadSizeBytes} bytes, near Firestore 1 MiB limit. Compacting bulky base64 blobs...`);
+        if (key === 'cafe_invoices' && Array.isArray(sanitizedData)) {
+          // 1. Remove duplicate receiptImageUrl aliases if identical to receipt_image_url
+          let compact = sanitizedData.map((inv: any) => {
+            if (!inv || typeof inv !== 'object') return inv;
+            if (inv.receiptImageUrl !== undefined && inv.receipt_image_url && inv.receiptImageUrl === inv.receipt_image_url) {
+              const copy = { ...inv };
+              delete copy.receiptImageUrl;
+              return copy;
+            }
+            return inv;
+          });
+
+          const measure = (d: any) => {
+            try { return new Blob([JSON.stringify(d || {})]).size; } catch { return 0; }
+          };
+          payloadSizeBytes = measure(compact);
+
+          // 2. If still over Firestore limit, strip inline data:image/ blobs from oldest non-OPEN/non-DRAFT invoices
+          if (payloadSizeBytes > FIRESTORE_SAFE_LIMIT_BYTES) {
+            const indexed = compact.map((inv: any, idx: number) => ({
+              idx,
+              inv,
+              isOpenOrDraft: ['OPEN', 'DRAFT'].includes(String(inv?.invoice_status || '').toUpperCase().trim()),
+              ts: getItemTimestamp(inv),
+              hasBigImg: (typeof inv?.receipt_image_url === 'string' && inv.receipt_image_url.startsWith('data:image/') && inv.receipt_image_url.length > 10000) ||
+                         (typeof inv?.receiptImageUrl === 'string' && inv.receiptImageUrl.startsWith('data:image/') && inv.receiptImageUrl.length > 10000)
+            }));
+            // Strip oldest closed invoices first, preserving OPEN/DRAFT invoices
+            const candidates = indexed
+              .filter(e => !e.isOpenOrDraft && e.hasBigImg)
+              .sort((a, b) => a.ts - b.ts);
+            for (const c of candidates) {
+              if (payloadSizeBytes <= FIRESTORE_SAFE_LIMIT_BYTES) break;
+              const copy = { ...compact[c.idx] };
+              if (typeof copy.receipt_image_url === 'string' && copy.receipt_image_url.startsWith('data:image/')) {
+                copy.receipt_image_url = '';
+              }
+              if (typeof copy.receiptImageUrl === 'string' && copy.receiptImageUrl.startsWith('data:image/')) {
+                delete copy.receiptImageUrl;
+              }
+              compact[c.idx] = copy;
+              payloadSizeBytes = measure(compact);
+            }
+          }
+          sanitizedData = compact;
+        }
       }
 
       const writeTimestamp = Math.max(

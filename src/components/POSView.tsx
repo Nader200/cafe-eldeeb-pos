@@ -55,9 +55,41 @@ import { shareInvoicePDFToWhatsApp } from '../utils/pdfInvoiceGenerator';
 import { useAuth } from '../contexts/AuthContext';
 import SyncStatusIndicator from './SyncStatusIndicator';
 import { uploadReceiptImage } from '../lib/receiptStorage';
+import { firebaseSyncService } from '../lib/firebaseSyncService';
 import { getPaymentMethodLabel } from '../utils/paymentUtils';
 import ShiftHandoverModal from './ShiftHandoverModal';
 import { Sun, Moon, ArrowLeftRight } from 'lucide-react';
+
+const POS_ACTIVE_CART_KEY = 'cafe_pos_active_cart_v1';
+
+interface PersistedPOSCartState {
+  cart: CartItem[];
+  selectedCustomer: string;
+  discount: number;
+  taxPercentage: number;
+  paymentType: PaymentType;
+  invoiceNotes: string;
+  tableNumber: string;
+  activeInvoiceId?: string;
+}
+
+const loadPersistedPOSCart = (): PersistedPOSCartState | null => {
+  try {
+    const raw = safeStorage.getItem(POS_ACTIVE_CART_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.cart)) {
+      return parsed;
+    }
+  } catch (e) {}
+  return null;
+};
+
+const clearPersistedPOSCart = () => {
+  try {
+    safeStorage.removeItem(POS_ACTIVE_CART_KEY);
+  } catch (e) {}
+};
 
 interface POSViewProps {
   onNavigate: (tab: string) => void;
@@ -115,12 +147,15 @@ export default function POSView({
     return `${prod.current_stock} وحدة`;
   };
 
+  const initialSavedDraft = useMemo(() => (reopenedInvoiceId ? null : loadPersistedPOSCart()), []);
+
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const [cart, setCart] = useState<CartItem[]>(() => initialSavedDraft?.cart || []);
+  const [openInvoicesCount, setOpenInvoicesCount] = useState<number>(() => dbService.getOpenInvoices().length);
 
   // Dispatch global cart status event so Update System can postpone updates if invoice active
   useEffect(() => {
@@ -128,16 +163,19 @@ export default function POSView({
     (window as any).hasActivePOSCart = hasItems;
     window.dispatchEvent(new CustomEvent('pos_cart_updated', { detail: { hasItems, count: cart.length } }));
   }, [cart]);
-  const [selectedCustomer, setSelectedCustomer] = useState<string>('c_general'); // default general customer
-  const [discount, setDiscount] = useState<number>(0);
+  const [selectedCustomer, setSelectedCustomer] = useState<string>(() => initialSavedDraft?.selectedCustomer || 'c_general'); // default general customer
+  const [discount, setDiscount] = useState<number>(() => initialSavedDraft?.discount || 0);
   const [taxPercentage, setTaxPercentage] = useState<number>(() => {
+    if (initialSavedDraft && typeof initialSavedDraft.taxPercentage === 'number') {
+      return initialSavedDraft.taxPercentage;
+    }
     const s = dbService.getSettings();
     return s.default_tax_percentage !== undefined ? s.default_tax_percentage : 0;
   }); // VAT standard Egyptian tax from settings
-  const [paymentType, setPaymentType] = useState<PaymentType>('CASH');
+  const [paymentType, setPaymentType] = useState<PaymentType>(() => initialSavedDraft?.paymentType || 'CASH');
   const [cashReceived, setCashReceived] = useState<string>('');
-  const [invoiceNotes, setInvoiceNotes] = useState<string>('');
-  const [tableNumber, setTableNumber] = useState<string>('');
+  const [invoiceNotes, setInvoiceNotes] = useState<string>(() => initialSavedDraft?.invoiceNotes || '');
+  const [tableNumber, setTableNumber] = useState<string>(() => initialSavedDraft?.tableNumber || '');
   const [activeTab, setActiveTab] = useState<'items' | 'cart'>('items'); // Mobile screen toggle
 
   // Shift Handover System State
@@ -206,7 +244,7 @@ export default function POSView({
     const dx = clientX - startX;
     const dy = clientY - startY;
 
-    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+    if (Math.abs(dx) > 14 || Math.abs(dy) > 14) {
       dragStartRef.current.hasMoved = true;
     }
 
@@ -292,7 +330,46 @@ export default function POSView({
     return dbService.hasRegisteredRawMaterialsForToday();
   }, []);
   
-  const [activeInvoiceId, setActiveInvoiceId] = useState<string | undefined>(reopenedInvoiceId);
+  const [activeInvoiceId, setActiveInvoiceId] = useState<string | undefined>(() => reopenedInvoiceId || initialSavedDraft?.activeInvoiceId);
+
+  // Auto-persist active in-progress cart state so switching screens or app reloads never lose items
+  useEffect(() => {
+    if (cart.length === 0 && !activeInvoiceId && !invoiceNotes.trim() && !tableNumber.trim()) {
+      clearPersistedPOSCart();
+      return;
+    }
+    try {
+      const payload: PersistedPOSCartState = {
+        cart,
+        selectedCustomer,
+        discount,
+        taxPercentage,
+        paymentType,
+        invoiceNotes,
+        tableNumber,
+        activeInvoiceId
+      };
+      safeStorage.setItem(POS_ACTIVE_CART_KEY, JSON.stringify(payload));
+    } catch (e) {}
+  }, [cart, selectedCustomer, discount, taxPercentage, paymentType, invoiceNotes, tableNumber, activeInvoiceId]);
+
+  // Keep open invoices badge count in sync with local & cloud events
+  useEffect(() => {
+    const refreshOpenCount = () => {
+      setOpenInvoicesCount(dbService.getOpenInvoices().length);
+    };
+    refreshOpenCount();
+    window.addEventListener('open_invoices_updated', refreshOpenCount);
+    window.addEventListener('open_invoice_created', refreshOpenCount);
+    window.addEventListener('cafe_db_synced_remote', refreshOpenCount);
+    window.addEventListener('storage', refreshOpenCount);
+    return () => {
+      window.removeEventListener('open_invoices_updated', refreshOpenCount);
+      window.removeEventListener('open_invoice_created', refreshOpenCount);
+      window.removeEventListener('cafe_db_synced_remote', refreshOpenCount);
+      window.removeEventListener('storage', refreshOpenCount);
+    };
+  }, []);
 
   // Load reopened invoice details if provided
   useEffect(() => {
@@ -540,9 +617,7 @@ export default function POSView({
       return;
     }
 
-    const tableNumberStr = tableNumber ? (tableNumber.includes('طاولة') ? tableNumber : `طاولة ${tableNumber}`) : '';
-    const customerObj = customers.find(c => c.id === selectedCustomer);
-    const cashierName = currentUser?.name || 'الكاشير';
+    const cleanTableNumber = tableNumber.trim();
 
     try {
       // 1. Save Open Invoice in DB
@@ -556,7 +631,7 @@ export default function POSView({
         0,
         cashierName,
         invoiceNotes,
-        tableNumberStr,
+        cleanTableNumber,
         paymentMethod,
         referenceNumber,
         paymentNotes,
@@ -565,9 +640,12 @@ export default function POSView({
         receiptImageUrl
       );
 
+      firebaseSyncService.flushPendingPushes().catch(() => {});
+      setOpenInvoicesCount(dbService.getOpenInvoices().length);
       onShowSuccessAlert(`تم حفظ الطلب رقم #${savedOpenRes.invoice.invoice_number} كفاتورة مفتوحة 📋!`);
 
       // 2. Reset cart state for cashier
+      clearPersistedPOSCart();
       setCart([]);
       setDiscount(0);
       setTaxPercentage(settings.default_tax_percentage !== undefined ? settings.default_tax_percentage : 0);
@@ -575,11 +653,13 @@ export default function POSView({
       setTableNumber('');
       setSelectedCustomer('c_general');
       setPaymentMethod('CASH');
+      setPaymentNumber('');
       setReferenceNumber('');
       setPaymentNotes('');
       setSenderPhone('');
       setReceiptImageUrl('');
       setActiveInvoiceId(undefined);
+      setProducts(dbService.getProducts());
       if (clearReopenedInvoiceId) {
         clearReopenedInvoiceId();
       }
@@ -723,12 +803,20 @@ export default function POSView({
   };
 
   const handleClearOrder = () => {
+    clearPersistedPOSCart();
     setCart([]);
     setDiscount(0);
     setTaxPercentage(settings.default_tax_percentage !== undefined ? settings.default_tax_percentage : 0);
     setInvoiceNotes('');
+    setTableNumber('');
     setSelectedCustomer('c_general');
     setCashReceived('');
+    setPaymentMethod('CASH');
+    setPaymentNumber('');
+    setReferenceNumber('');
+    setSenderPhone('');
+    setReceiptImageUrl('');
+    setPaymentNotes('');
     setActiveInvoiceId(undefined);
     if (clearReopenedInvoiceId) {
       clearReopenedInvoiceId();
@@ -787,16 +875,21 @@ export default function POSView({
         0,
         cashierName,
         invoiceNotes,
-        tableNumber,
+        tableNumber.trim(),
         paymentMethod,
         referenceNumber,
         paymentNotes,
-        'DRAFT'
+        'DRAFT',
+        senderPhone,
+        receiptImageUrl
       );
 
+      firebaseSyncService.flushPendingPushes().catch(() => {});
+      setOpenInvoicesCount(dbService.getOpenInvoices().length);
       onShowSuccessAlert(`تم حفظ وتعليق الفاتورة كمسودة بنجاح برقم: ${res.invoice.invoice_number}`);
 
       // Clear Cart state
+      clearPersistedPOSCart();
       setCart([]);
       setDiscount(0);
       setTaxPercentage(settings.default_tax_percentage !== undefined ? settings.default_tax_percentage : 0);
@@ -804,7 +897,10 @@ export default function POSView({
       setTableNumber('');
       setSelectedCustomer('c_general');
       setPaymentMethod('CASH');
+      setPaymentNumber('');
       setReferenceNumber('');
+      setSenderPhone('');
+      setReceiptImageUrl('');
       setPaymentNotes('');
       setActiveInvoiceId(undefined);
       if (clearReopenedInvoiceId) {
@@ -938,6 +1034,8 @@ export default function POSView({
       onShowSuccessAlert(`تم الدفع النقدي السريع بنجاح! فاتورة رقم: ${res.invoice.invoice_number}`);
 
       // Clear Cart state
+      clearPersistedPOSCart();
+      setOpenInvoicesCount(dbService.getOpenInvoices().length);
       setCart([]);
       setDiscount(0);
       setTaxPercentage(settings.default_tax_percentage !== undefined ? settings.default_tax_percentage : 0);
@@ -945,7 +1043,10 @@ export default function POSView({
       setTableNumber('');
       setSelectedCustomer('c_general');
       setPaymentMethod('CASH');
+      setPaymentNumber('');
       setReferenceNumber('');
+      setSenderPhone('');
+      setReceiptImageUrl('');
       setPaymentNotes('');
       setActiveInvoiceId(undefined);
       if (clearReopenedInvoiceId) {
@@ -1064,6 +1165,8 @@ export default function POSView({
       onShowSuccessAlert(`تم تسجيل وإغلاق الفاتورة بنجاح برقم: ${res.invoice.invoice_number}`);
 
       // Clear Cart state
+      clearPersistedPOSCart();
+      setOpenInvoicesCount(dbService.getOpenInvoices().length);
       setCart([]);
       setDiscount(0);
       setTaxPercentage(settings.default_tax_percentage !== undefined ? settings.default_tax_percentage : 0);
@@ -1071,6 +1174,7 @@ export default function POSView({
       setTableNumber('');
       setSelectedCustomer('c_general');
       setPaymentMethod('CASH');
+      setPaymentNumber('');
       setReferenceNumber('');
       setSenderPhone('');
       setReceiptImageUrl('');
@@ -1185,6 +1289,21 @@ export default function POSView({
           >
             <Home className="w-3.5 h-3.5 text-gold-500" />
             <span>لوحة التحكم الرئيسية</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigate('open-invoices')}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/30 border border-amber-500/40 hover:border-amber-400 rounded-xl text-amber-300 hover:text-white font-bold text-xs transition-all cursor-pointer whitespace-nowrap active:scale-95 shrink-0"
+            title="عرض وإدارة جميع الفواتير المفتوحة والمعلقة"
+          >
+            <ClipboardList className="w-3.5 h-3.5 text-amber-400" />
+            <span>الفواتير المفتوحة والمعلقة</span>
+            {openInvoicesCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-black font-black font-mono text-[10px] leading-none">
+                {openInvoicesCount}
+              </span>
+            )}
           </button>
 
           <button
@@ -3478,9 +3597,9 @@ export default function POSView({
         <ClipboardList className="w-6 h-6 text-black stroke-[2.2]" />
         
         {/* Badge with count of open invoices */}
-        {dbService.getOpenInvoices().length > 0 && (
+        {openInvoicesCount > 0 && (
           <span className="absolute -top-1 -right-1 bg-red-600 text-white border-2 border-black rounded-full text-[10px] font-black font-mono w-6 h-6 flex items-center justify-center shadow-lg">
-            {dbService.getOpenInvoices().length}
+            {openInvoicesCount}
           </span>
         )}
       </button>

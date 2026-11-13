@@ -1211,15 +1211,25 @@ export const dbService = {
   getOpenInvoices: (): Invoice[] => {
     const list = getLocal<Invoice[]>(KEYS.INVOICES, []);
     return list
-      .filter(inv => inv.invoice_status === 'OPEN' || inv.invoice_status === 'DRAFT')
+      .filter(inv => {
+        if (!inv) return false;
+        const st = String(inv.invoice_status || '').toUpperCase().trim();
+        return st === 'OPEN' || st === 'DRAFT';
+      })
       .map(inv => {
+        const st = String(inv.invoice_status || '').toUpperCase().trim() as InvoiceStatus;
         if (!inv.payment_status) {
           inv.payment_status = dbService.determinePaymentStatus(inv);
         }
         if (!inv.operational_status) {
           inv.operational_status = 'NEW';
         }
-        return inv;
+        return {
+          ...inv,
+          invoice_status: st,
+          invoice_number: inv.invoice_number || `INV-${new Date().getFullYear()}-${String(inv.id || '').slice(-5)}`,
+          created_at: inv.created_at || inv.invoice_date || new Date().toISOString()
+        };
       });
   },
   getInvoiceById: (id: string): { invoice: Invoice; items: InvoiceItem[] } | null => {
@@ -1367,7 +1377,7 @@ export const dbService = {
       sender_phone: senderPhone || '',
       senderPhone: senderPhone || '',
       receipt_image_url: receiptImageUrl || '',
-      receiptImageUrl: receiptImageUrl || '',
+      receiptImageUrl: (receiptImageUrl && !receiptImageUrl.startsWith('data:')) ? receiptImageUrl : '',
       payment_number: paymentNumber,
       payment_date: new Date().toISOString().split('T')[0],
       payment_time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
@@ -1728,6 +1738,14 @@ export const dbService = {
         appSettings.instapay_number
       );
 
+      const prevTimeline = Array.isArray(existingInv.timeline) ? [...existingInv.timeline] : [];
+      prevTimeline.push({
+        status: status === 'DRAFT' ? 'DRAFT_UPDATED' : 'OPEN_UPDATED',
+        timestamp: dateStr,
+        operator: cashierName,
+        notes: status === 'DRAFT' ? 'تم تحديث الفاتورة المعلقة / المسودة' : 'تم تحديث الفاتورة المفتوحة'
+      });
+
       invoice = {
         ...existingInv,
         customer_id: customerId,
@@ -1739,6 +1757,8 @@ export const dbService = {
         paid_amount: 0,
         remaining_amount: total,
         invoice_status: status,
+        operational_status: existingInv.operational_status || 'NEW',
+        cashier_name: cashierName || existingInv.cashier_name,
         notes: invoiceNotes,
         table_number: tableNumber,
         payment_method: sanitizedMethod || 'CASH',
@@ -1746,13 +1766,24 @@ export const dbService = {
         sender_phone: effSenderPhone,
         senderPhone: effSenderPhone,
         receipt_image_url: effReceiptUrl,
-        receiptImageUrl: effReceiptUrl,
+        receiptImageUrl: (effReceiptUrl && !effReceiptUrl.startsWith('data:')) ? effReceiptUrl : '',
+        timeline: prevTimeline,
+        created_at: existingInv.created_at || existingInv.invoice_date || dateStr,
         updated_at: dateStr
       };
       invoices[existingInvIdx] = invoice;
     } else {
       const year = new Date().getFullYear();
-      const seq = String(invoices.length + 1).padStart(5, '0');
+      let maxSeq = invoices.length;
+      const seqRegex = new RegExp(`INV-${year}-(\\d+)`);
+      invoices.forEach(inv => {
+        const m = String(inv?.invoice_number || '').match(seqRegex);
+        if (m) {
+          const n = parseInt(m[1], 10);
+          if (!isNaN(n) && n > maxSeq) maxSeq = n;
+        }
+      });
+      const seq = String(maxSeq + 1).padStart(5, '0');
       const invoiceNum = `INV-${year}-${seq}`;
 
       const sanitizedMethod = sanitizePaymentMethod(
@@ -1777,6 +1808,7 @@ export const dbService = {
         paid_amount: 0,
         remaining_amount: total,
         invoice_status: status,
+        operational_status: 'NEW',
         cashier_name: cashierName,
         invoice_date: dateStr,
         notes: invoiceNotes,
@@ -1786,9 +1818,15 @@ export const dbService = {
         sender_phone: senderPhone || '',
         senderPhone: senderPhone || '',
         receipt_image_url: receiptImageUrl || '',
-        receiptImageUrl: receiptImageUrl || '',
+        receiptImageUrl: (receiptImageUrl && !receiptImageUrl.startsWith('data:')) ? receiptImageUrl : '',
         payment_date: dateStr.split('T')[0],
         payment_time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        timeline: [{
+          status: status === 'DRAFT' ? 'DRAFT' : 'OPEN',
+          timestamp: dateStr,
+          operator: cashierName,
+          notes: status === 'DRAFT' ? 'تم تعليق الفاتورة وحفظها كمسودة' : 'تم فتح الفاتورة وحفظها في الطلبات المفتوحة'
+        }],
         created_at: dateStr,
         updated_at: dateStr
       };
@@ -1797,11 +1835,11 @@ export const dbService = {
 
     // Save items
     const filteredItems = invoiceItemsList.filter(item => item.invoice_id !== invoiceId);
-    const newItems: InvoiceItem[] = cartItems.map(cartItem => {
+    const newItems: InvoiceItem[] = cartItems.map((cartItem, idx) => {
       const unitPrice = cartItem.custom_price !== undefined ? cartItem.custom_price : cartItem.product.selling_price;
       const itemTotalPrice = (unitPrice * cartItem.quantity) - (cartItem.item_discount_amount || 0);
       return {
-        id: `item_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        id: `item_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}`,
         invoice_id: invoiceId,
         product_id: cartItem.product.id,
         quantity: cartItem.quantity,
@@ -1809,6 +1847,7 @@ export const dbService = {
         cost_price: cartItem.product.cost_price,
         total_price: itemTotalPrice,
         product_name_ar: cartItem.product.name_ar,
+        notes: cartItem.notes || '',
         created_at: dateStr,
         updated_at: dateStr,
         original_price: cartItem.product.selling_price,
@@ -1822,7 +1861,12 @@ export const dbService = {
 
     setLocal(KEYS.INVOICES, invoices);
     setLocal(KEYS.INVOICE_ITEMS, [...filteredItems, ...newItems]);
-    syncToServer();
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('open_invoices_updated', { detail: { invoice } }));
+      window.dispatchEvent(new CustomEvent('open_invoice_created', { detail: { invoice } }));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
 
     return { invoice, items: newItems };
   },
@@ -1936,7 +1980,7 @@ export const dbService = {
       sender_phone: effSenderPhone,
       senderPhone: effSenderPhone,
       receipt_image_url: effReceiptUrl,
-      receiptImageUrl: effReceiptUrl,
+      receiptImageUrl: (effReceiptUrl && !effReceiptUrl.startsWith('data:')) ? effReceiptUrl : '',
       payment_number: effPayNum,
       payment_date: dateStr.split('T')[0],
       payment_time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
@@ -2212,6 +2256,7 @@ export const dbService = {
     );
 
     if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('open_invoices_updated'));
       window.dispatchEvent(new CustomEvent(isCredit ? 'invoice_credit_notification' : 'invoice_paid_notification', {
         detail: {
           invoice: updatedInvoice,
@@ -5456,10 +5501,108 @@ export const dbService = {
     setLocal(KEYS.INVOICES, invoices);
 
     if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('open_invoices_updated'));
       window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
     }
 
     return invoices[idx];
+  },
+
+  updateInvoiceNotes: (invoiceId: string, notes: string): Invoice | null => {
+    const invoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
+    const idx = invoices.findIndex(i => i.id === invoiceId);
+    if (idx === -1) return null;
+
+    invoices[idx].notes = notes;
+    invoices[idx].updated_at = new Date().toISOString();
+    setLocal(KEYS.INVOICES, invoices);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('open_invoices_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
+    return invoices[idx];
+  },
+
+  deleteOpenInvoice: (invoiceId: string, operator = 'أدمن النظام / نادر الديب'): void => {
+    const invoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
+    const filtered = invoices.filter(inv => inv.id !== invoiceId);
+
+    const allItems = getLocal<InvoiceItem[]>(KEYS.INVOICE_ITEMS, []);
+    const deletedItemIds = allItems.filter(it => it.invoice_id === invoiceId).map(it => it.id).filter(Boolean);
+    const filteredItems = allItems.filter(it => it.invoice_id !== invoiceId);
+
+    firebaseSyncService.recordDeletion(KEYS.INVOICES, invoiceId);
+    if (deletedItemIds.length > 0) {
+      firebaseSyncService.recordDeletions(KEYS.INVOICE_ITEMS, deletedItemIds);
+    }
+
+    setLocal(KEYS.INVOICES, filtered);
+    setLocal(KEYS.INVOICE_ITEMS, filteredItems);
+
+    dbService.logAuditAction(
+      'CANCEL_OPEN_INVOICE',
+      `تم إلغاء وحذف الفاتورة المفتوحة رقم ${invoiceId} بالكامل من نظام التعليق بواسطة المسؤول`,
+      operator
+    );
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('open_invoices_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+  },
+
+  createBlankTableInvoice: (tableId: string, operator: string, mergeNotes = ''): Invoice => {
+    const invoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
+    const year = new Date().getFullYear();
+    let maxSeq = invoices.length;
+    const seqRegex = new RegExp(`INV-${year}-(\\d+)`);
+    invoices.forEach(inv => {
+      const m = String(inv?.invoice_number || '').match(seqRegex);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (!isNaN(n) && n > maxSeq) maxSeq = n;
+      }
+    });
+    const seq = String(maxSeq + 1).padStart(5, '0');
+    const dateStr = new Date().toISOString();
+
+    const newInv: Invoice = {
+      id: `inv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      invoice_number: `INV-${year}-${seq}`,
+      customer_id: 'c_general',
+      payment_type: 'CASH',
+      subtotal: 0,
+      discount: 0,
+      tax: 0,
+      total: 0,
+      paid_amount: 0,
+      remaining_amount: 0,
+      invoice_status: 'OPEN',
+      operational_status: 'NEW',
+      cashier_name: operator,
+      invoice_date: dateStr,
+      table_number: tableId,
+      created_at: dateStr,
+      updated_at: dateStr,
+      timeline: [{
+        status: 'OPEN',
+        timestamp: dateStr,
+        operator,
+        notes: mergeNotes || `فاتورة جديدة على الطاولة ${tableId}`
+      }]
+    };
+
+    invoices.push(newInv);
+    setLocal(KEYS.INVOICES, invoices);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('open_invoices_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
+    return newInv;
   },
 
   getCurrentUser: (): AuthUser | null => {
@@ -5473,6 +5616,7 @@ export const dbService = {
   saveInvoices: (invoices: Invoice[]): void => {
     setLocal(KEYS.INVOICES, invoices);
     if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('open_invoices_updated'));
       window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
     }
   },
