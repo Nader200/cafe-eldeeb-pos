@@ -156,6 +156,8 @@ export default function OpenInvoicesView({
   const [paySenderPhone, setPaySenderPhone] = useState<string>('');
   const [payRefNo, setPayRefNo] = useState<string>('');
   const [payReceiptImage, setPayReceiptImage] = useState<string>('');
+  const [payIncludeOldCredit, setPayIncludeOldCredit] = useState<boolean>(false);
+  const [payOldCreditAmount, setPayOldCreditAmount] = useState<number>(0);
 
   // Credit Conversion Modal State
   const [showCreditModal, setShowCreditModal] = useState<boolean>(false);
@@ -282,6 +284,12 @@ export default function OpenInvoicesView({
       });
 
       const isCreditType = payMethod === 'CREDIT';
+      const payCust = customers.find(c => c.id === payInvoice.customer_id);
+      const oldCreditBal = (payCust && payCust.id !== 'c_general') ? Math.max(0, payCust.current_balance || 0) : 0;
+      const creditSettlementAmt = (!isCreditType && payIncludeOldCredit && oldCreditBal > 0)
+        ? Math.min(oldCreditBal, Math.max(0, payOldCreditAmount))
+        : 0;
+
       const targetPaymentNumber = payMethod === 'VODAFONE_CASH'
         ? (settings.vodafone_cash_number || '01094793701')
         : payMethod === 'INSTAPAY'
@@ -305,7 +313,8 @@ export default function OpenInvoicesView({
         0,
         targetPaymentNumber,
         paySenderPhone,
-        payReceiptImage
+        payReceiptImage,
+        creditSettlementAmt
       );
 
       setShowPayModal(false);
@@ -314,9 +323,15 @@ export default function OpenInvoicesView({
       setPaySenderPhone('');
       setPayRefNo('');
       setPayReceiptImage('');
+      setPayIncludeOldCredit(false);
+      setPayOldCreditAmount(0);
       loadData();
       if (onShowSuccessAlert) {
-        onShowSuccessAlert(`تم سداد وإغلاق الفاتورة رقم #${payInvoice.invoice_number} بنجاح!`);
+        onShowSuccessAlert(
+          creditSettlementAmt > 0
+            ? `تم سداد وإغلاق الفاتورة #${payInvoice.invoice_number} وخصم ${creditSettlementAmt.toLocaleString()} ${settings.currency} من الحساب الآجل السابق بنجاح!`
+            : `تم سداد وإغلاق الفاتورة رقم #${payInvoice.invoice_number} بنجاح!`
+        );
       }
     } catch (err: any) {
       if (onShowWarningAlert) {
@@ -1030,6 +1045,17 @@ export default function OpenInvoicesView({
                                 <User className="w-3.5 h-3.5 text-gold-500" />
                                 <span>العميل: {getCustomerName(inv.customer_id)}</span>
                               </p>
+                              {(() => {
+                                const invCust = customers.find(c => c.id === inv.customer_id);
+                                if (!invCust || invCust.id === 'c_general' || (invCust.current_balance || 0) <= 0) return null;
+                                return (
+                                  <p className="flex items-center gap-1.5 text-amber-400 font-bold">
+                                    <span>📌 حساب أجل سابق: {(invCust.current_balance || 0).toLocaleString()} {settings.currency}</span>
+                                    <span className="text-gray-500">|</span>
+                                    <span className="text-amber-300">الكلي: {(inv.total + (invCust.current_balance || 0)).toLocaleString()} {settings.currency}</span>
+                                  </p>
+                                );
+                              })()}
                               <p className="flex items-center gap-1.5">
                                 <Layers className="w-3.5 h-3.5 text-gold-500" />
                                 <span>رقم الطاولة: {inv.table_number || 'الطلب الخارجي / كاونتر'}</span>
@@ -1110,8 +1136,12 @@ export default function OpenInvoicesView({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
+                                const invCust = customers.find(c => c.id === inv.customer_id);
+                                const oldBal = invCust && invCust.id !== 'c_general' ? Math.max(0, invCust.current_balance || 0) : 0;
                                 setPayInvoice(inv);
                                 setPayMethod('CASH');
+                                setPayIncludeOldCredit(false);
+                                setPayOldCreditAmount(oldBal);
                                 setPayCashReceived(inv.total);
                                 setPayNotes('');
                                 setPaySenderPhone('');
@@ -2504,65 +2534,158 @@ export default function OpenInvoicesView({
               <p className="text-[10px] text-gray-500 mt-1">حدد طريقة السداد لإكمال العملية ونقل الفاتورة تلقائياً إلى سجل الفواتير المغلقة.</p>
             </div>
 
-            {/* Invoice Summary Box */}
-            <div className="bg-luxury-bg p-3 rounded-2xl border border-gray-900 space-y-1.5 text-xs">
-              <div className="flex justify-between text-gray-400">
-                <span>العميل:</span>
-                <span className="text-white font-bold">{getCustomerName(payInvoice.customer_id)}</span>
-              </div>
-              <div className="flex justify-between text-gray-400">
-                <span>رقم الطاولة:</span>
-                <span className="text-gold-500 font-bold">{payInvoice.table_number || 'طلب خارجي كاونتر'}</span>
-              </div>
-              <div className="flex justify-between text-xs font-black text-emerald-400 pt-2 border-t border-gray-900">
-                <span>المبلغ الكلي المطلوب:</span>
-                <span className="text-sm font-mono">{payInvoice.total} {settings.currency}</span>
-              </div>
-            </div>
+            {/* Invoice Summary Box + Previous Customer Credit Settlement */}
+            {(() => {
+              const payCust = customers.find(c => c.id === payInvoice.customer_id);
+              const oldCreditBal = (payCust && payCust.id !== 'c_general') ? Math.max(0, payCust.current_balance || 0) : 0;
+              const creditSettlementAmt = (payIncludeOldCredit && oldCreditBal > 0)
+                ? Math.min(oldCreditBal, Math.max(0, payOldCreditAmount))
+                : 0;
+              const totalDueNow = payInvoice.total + creditSettlementAmt;
 
-            {/* Payment Method Selector */}
-            <div className="space-y-2">
-              <label className="text-[10px] font-extrabold text-gold-500 tracking-wider">اختر طريقة الدفع</label>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { id: 'CASH', name: '💵 نقدي (Cash)', icon: '💵' },
-                  { id: 'VODAFONE_CASH', name: '📱 فودافون كاش', icon: '📱' },
-                  { id: 'INSTAPAY', name: '⚡ انستا باي', icon: '⚡' },
-                ].map(method => (
-                  <button
-                    key={method.id}
-                    type="button"
-                    onClick={() => setPayMethod(method.id)}
-                    className={`p-2.5 rounded-xl border text-xs font-bold text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
-                      payMethod === method.id
-                        ? 'bg-emerald-500/15 border-emerald-500 text-emerald-300 shadow-md'
-                        : 'bg-luxury-bg border-gray-900 hover:border-gray-800 text-gray-400'
-                    }`}
-                  >
-                    <span className="text-base">{method.icon}</span>
-                    <span className="text-[11px] font-extrabold">{method.name.split(' ')[1] || method.name}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
+              return (
+                <>
+                  <div className="bg-luxury-bg p-3 rounded-2xl border border-gray-900 space-y-1.5 text-xs">
+                    <div className="flex justify-between text-gray-400">
+                      <span>العميل:</span>
+                      <span className="text-white font-bold">{getCustomerName(payInvoice.customer_id)}</span>
+                    </div>
+                    <div className="flex justify-between text-gray-400">
+                      <span>رقم الطاولة:</span>
+                      <span className="text-gold-500 font-bold">{payInvoice.table_number || 'طلب خارجي كاونتر'}</span>
+                    </div>
+                    <div className="flex justify-between text-xs font-black text-emerald-400 pt-2 border-t border-gray-900">
+                      <span>قيمة الفاتورة الجديدة:</span>
+                      <span className="text-sm font-mono">{payInvoice.total.toLocaleString()} {settings.currency}</span>
+                    </div>
+                  </div>
 
-            {/* Cash Input if CASH */}
-            {payMethod === 'CASH' && (
-              <div className="space-y-1 bg-luxury-bg p-3 rounded-2xl border border-gray-900">
-                <label className="text-[10px] font-bold text-gray-400">المبلغ المستلم نقداً من العميل:</label>
-                <input
-                  type="number"
-                  value={payCashReceived}
-                  onChange={(e) => setPayCashReceived(Number(e.target.value) || 0)}
-                  className="w-full bg-black border border-gray-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-white font-mono text-sm font-bold text-left"
-                />
-                {payCashReceived > payInvoice.total && (
-                  <p className="text-[10px] text-emerald-400 font-bold text-left mt-1">
-                    المتبقي (الباقي للعميل): {payCashReceived - payInvoice.total} {settings.currency}
-                  </p>
-                )}
-              </div>
-            )}
+                  {oldCreditBal > 0 && (
+                    <div className="bg-amber-950/25 border border-amber-500/40 p-3.5 rounded-2xl space-y-2.5 text-xs">
+                      <div className="flex justify-between items-center">
+                        <span className="text-amber-300 font-bold">📌 الحساب الآجل السابق على العميل:</span>
+                        <span className="font-mono font-black text-amber-400">{oldCreditBal.toLocaleString()} {settings.currency}</span>
+                      </div>
+                      <div className="flex justify-between items-center border-t border-amber-500/20 pt-1.5">
+                        <span className="text-white font-black">الإجمالي الكلي (الجديد + الآجل):</span>
+                        <span className="font-mono font-black text-amber-300">{(payInvoice.total + oldCreditBal).toLocaleString()} {settings.currency}</span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-1.5 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPayIncludeOldCredit(false);
+                            setPayCashReceived(payInvoice.total);
+                          }}
+                          className={`py-2 px-2 rounded-xl text-[10px] font-black border transition-all cursor-pointer ${
+                            !payIncludeOldCredit
+                              ? 'bg-amber-500/20 border-amber-500 text-amber-200'
+                              : 'bg-black/40 border-gray-800 text-gray-400 hover:text-white'
+                          }`}
+                        >
+                          دفع الجديد فقط (يبقى الآجل)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPayIncludeOldCredit(true);
+                            setPayOldCreditAmount(oldCreditBal);
+                            setPayCashReceived(payInvoice.total + oldCreditBal);
+                          }}
+                          className={`py-2 px-2 rounded-xl text-[10px] font-black border transition-all cursor-pointer ${
+                            payIncludeOldCredit
+                              ? 'bg-emerald-600/25 border-emerald-500 text-emerald-300'
+                              : 'bg-black/40 border-gray-800 text-gray-400 hover:text-white'
+                          }`}
+                        >
+                          دفع الجديد + الآجل معاً 💰
+                        </button>
+                      </div>
+
+                      {payIncludeOldCredit ? (
+                        <div className="bg-black/50 border border-emerald-500/30 p-2.5 rounded-xl space-y-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] text-emerald-300 font-bold">المبلغ المسدد من الآجل القديم:</span>
+                            <input
+                              type="number"
+                              min={0}
+                              max={oldCreditBal}
+                              value={payOldCreditAmount}
+                              onChange={(e) => {
+                                const raw = Math.max(0, Number(e.target.value) || 0);
+                                const clamped = Math.min(oldCreditBal, raw);
+                                setPayOldCreditAmount(clamped);
+                                setPayCashReceived(payInvoice.total + clamped);
+                              }}
+                              className="w-24 bg-black border border-emerald-500/50 text-emerald-300 rounded-lg py-1 px-2 text-xs text-center font-mono font-bold focus:outline-none"
+                            />
+                          </div>
+                          <div className="flex justify-between text-[11px] font-black text-emerald-400 border-t border-gray-800 pt-1.5">
+                            <span>الإجمالي المطلوب تحصيله الآن:</span>
+                            <span className="font-mono">{totalDueNow.toLocaleString()} {settings.currency}</span>
+                          </div>
+                          <div className="flex justify-between text-[10px] text-amber-300">
+                            <span>المتبقي على العميل بعد الدفع:</span>
+                            <span className="font-mono font-bold">{Math.max(0, oldCreditBal - creditSettlementAmt).toLocaleString()} {settings.currency}</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-amber-300/90 text-center font-bold bg-black/40 p-1.5 rounded-lg">
+                          سيظل الحساب الآجل ({oldCreditBal.toLocaleString()} {settings.currency}) كما هو وسيظهر في الفاتورة.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Payment Method Selector */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-extrabold text-gold-500 tracking-wider">اختر طريقة الدفع</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { id: 'CASH', name: '💵 نقدي (Cash)', icon: '💵' },
+                        { id: 'VODAFONE_CASH', name: '📱 فودافون كاش', icon: '📱' },
+                        { id: 'INSTAPAY', name: '⚡ انستا باي', icon: '⚡' },
+                      ].map(method => (
+                        <button
+                          key={method.id}
+                          type="button"
+                          onClick={() => setPayMethod(method.id)}
+                          className={`p-2.5 rounded-xl border text-xs font-bold text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
+                            payMethod === method.id
+                              ? 'bg-emerald-500/15 border-emerald-500 text-emerald-300 shadow-md'
+                              : 'bg-luxury-bg border-gray-900 hover:border-gray-800 text-gray-400'
+                          }`}
+                        >
+                          <span className="text-base">{method.icon}</span>
+                          <span className="text-[11px] font-extrabold">{method.name.split(' ')[1] || method.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Cash Input if CASH */}
+                  {payMethod === 'CASH' && (
+                    <div className="space-y-1 bg-luxury-bg p-3 rounded-2xl border border-gray-900">
+                      <label className="text-[10px] font-bold text-gray-400">
+                        المبلغ المستلم نقداً من العميل (المطلوب: {totalDueNow.toLocaleString()} {settings.currency}):
+                      </label>
+                      <input
+                        type="number"
+                        value={payCashReceived}
+                        onChange={(e) => setPayCashReceived(Number(e.target.value) || 0)}
+                        className="w-full bg-black border border-gray-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-white font-mono text-sm font-bold text-left"
+                      />
+                      {payCashReceived > totalDueNow && (
+                        <p className="text-[10px] text-emerald-400 font-bold text-left mt-1">
+                          المتبقي (الباقي للعميل): {(payCashReceived - totalDueNow).toLocaleString()} {settings.currency}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
 
             {/* Vodafone Cash Details */}
             {payMethod === 'VODAFONE_CASH' && (
@@ -3034,7 +3157,7 @@ export default function OpenInvoicesView({
                 <option value="">-- اختر عميل من القائمة --</option>
                 {customers.filter(c => c.id !== 'c_general').map(cust => (
                   <option key={cust.id} value={cust.id}>
-                    {cust.full_name} ({cust.phone}) - الدين الحالي: {cust.total_debt || 0} {settings.currency}
+                    {cust.full_name} {cust.phone ? `(${cust.phone})` : ''} - الآجل الحالي: {(cust.current_balance || 0).toLocaleString()} {settings.currency}
                   </option>
                 ))}
               </select>
@@ -3045,18 +3168,18 @@ export default function OpenInvoicesView({
               <div className="bg-purple-950/20 border border-purple-900/40 p-3 rounded-2xl space-y-1.5 text-xs">
                 <div className="flex justify-between text-purple-300">
                   <span>قيمة الفاتورة الحالية:</span>
-                  <span className="font-mono font-bold">{creditInvoice.total} {settings.currency}</span>
+                  <span className="font-mono font-bold">{creditInvoice.total.toLocaleString()} {settings.currency}</span>
                 </div>
                 <div className="flex justify-between text-gray-400">
                   <span>الديون السابقة على العميل:</span>
                   <span className="font-mono">
-                    {(customers.find(c => c.id === creditCustomerId)?.total_debt || 0)} {settings.currency}
+                    {(customers.find(c => c.id === creditCustomerId)?.current_balance || 0).toLocaleString()} {settings.currency}
                   </span>
                 </div>
                 <div className="flex justify-between text-xs font-black text-purple-400 pt-2 border-t border-purple-900/40">
                   <span>إجمالي الدين المتوقع بعد التحويل:</span>
                   <span className="font-mono">
-                    {(customers.find(c => c.id === creditCustomerId)?.total_debt || 0) + creditInvoice.total} {settings.currency}
+                    {((customers.find(c => c.id === creditCustomerId)?.current_balance || 0) + creditInvoice.total).toLocaleString()} {settings.currency}
                   </span>
                 </div>
               </div>

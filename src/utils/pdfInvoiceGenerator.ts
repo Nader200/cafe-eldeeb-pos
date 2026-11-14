@@ -77,6 +77,11 @@ export async function createInvoicePDF({
   const total = invoice.total ?? 0;
   const paidAmount = invoice.paid_amount ?? 0;
   const remainingAmount = invoice.remaining_amount ?? 0;
+  const prevCredit = invoice.previous_credit_balance ?? 0;
+  const creditPaidWithInv = invoice.credit_paid_with_invoice ?? 0;
+  const remCreditAfter = invoice.remaining_credit_after_invoice ?? Math.max(0, prevCredit - creditPaidWithInv + remainingAmount);
+  const grandTotalWithCredit = invoice.grand_total_with_credit ?? (total + prevCredit);
+  const hasCreditSummary = invoice.previous_credit_balance !== undefined && (prevCredit > 0 || creditPaidWithInv > 0 || remCreditAfter > 0);
 
   // Products Table Rows
   const productRowsHtml = safeItems.length > 0
@@ -198,17 +203,43 @@ export async function createInvoicePDF({
             </div>
           ` : ''}
           <div style="display: flex; justify-content: space-between; padding: 10px 0; margin-top: 6px; border-top: 1px solid #e5e7eb; font-size: 17px; font-weight: 800; color: #d4af37;">
-            <span>الإجمالي النهائي:</span>
+            <span>${hasCreditSummary ? 'إجمالي الفاتورة الجديدة:' : 'الإجمالي النهائي:'}</span>
             <span>${total.toLocaleString()} ${currency}</span>
           </div>
           <div style="display: flex; justify-content: space-between; padding: 4px 0; color: #16a34a; font-size: 12px; font-weight: bold;">
-            <span>المبلغ المدفوع:</span>
+            <span>${hasCreditSummary ? 'المسدد من الفاتورة الجديدة:' : 'المبلغ المدفوع:'}</span>
             <span>${paidAmount.toLocaleString()} ${currency}</span>
           </div>
           ${remainingAmount > 0 ? `
             <div style="display: flex; justify-content: space-between; padding: 4px 0; color: #d97706; font-size: 12px; font-weight: bold;">
-              <span>المتبقي في الذمة:</span>
+              <span>المتبقي من الفاتورة الحالية (آجل):</span>
               <span>${remainingAmount.toLocaleString()} ${currency}</span>
+            </div>
+          ` : ''}
+          ${hasCreditSummary ? `
+            <div style="margin-top: 10px; padding: 10px 12px; background-color: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; font-size: 12px;">
+              <div style="display: flex; justify-content: space-between; padding: 3px 0; color: #92400e; font-weight: bold;">
+                <span>الحساب الآجل السابق:</span>
+                <span>${prevCredit.toLocaleString()} ${currency}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding: 4px 0; color: #111827; font-weight: 800; border-top: 1px dashed #fbbf24; margin-top: 3px;">
+                <span>الإجمالي الكلي (الجديد + الآجل):</span>
+                <span>${grandTotalWithCredit.toLocaleString()} ${currency}</span>
+              </div>
+              ${creditPaidWithInv > 0 ? `
+                <div style="display: flex; justify-content: space-between; padding: 3px 0; color: #15803d; font-weight: bold;">
+                  <span>المسدد من الآجل السابق:</span>
+                  <span>-${creditPaidWithInv.toLocaleString()} ${currency}</span>
+                </div>
+              ` : ''}
+              <div style="display: flex; justify-content: space-between; padding: 3px 0; color: #065f46; font-weight: 800;">
+                <span>إجمالي المبلغ المدفوع الآن:</span>
+                <span>${(paidAmount + creditPaidWithInv).toLocaleString()} ${currency}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding: 5px 0 0; margin-top: 4px; border-top: 1px solid #fcd34d; font-size: 13px; font-weight: 900; color: ${remCreditAfter > 0 ? '#dc2626' : '#16a34a'};">
+                <span>الحساب الآجل المتبقي على العميل:</span>
+                <span>${remCreditAfter > 0 ? `${remCreditAfter.toLocaleString()} ${currency}` : `0 ${currency} (تم السداد بالكامل)`}</span>
+              </div>
             </div>
           ` : ''}
         </div>

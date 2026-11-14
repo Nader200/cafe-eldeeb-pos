@@ -569,7 +569,7 @@ export default function InvoiceHistoryView({
             </div>
             <div class="divider"></div>
             <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 14px;">
-              <span>الإجمالي النهائي:</span>
+              <span>${invoice.previous_credit_balance !== undefined && ((invoice.previous_credit_balance || 0) > 0 || (invoice.credit_paid_with_invoice || 0) > 0 || (invoice.remaining_credit_after_invoice || 0) > 0) ? 'حساب الفاتورة الجديدة:' : 'الإجمالي النهائي:'}</span>
               <span>${invoice.total.toLocaleString()} ${settings.currency}</span>
             </div>
             <div style="display: flex; justify-content: space-between; font-size: 11px;">
@@ -578,8 +578,34 @@ export default function InvoiceHistoryView({
             </div>
             ${invoice.remaining_amount > 0 ? `
               <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: bold;">
-                <span>المتبقي في الذمم:</span>
+                <span>المتبقي من الفاتورة الحالية:</span>
                 <span>${invoice.remaining_amount.toLocaleString()} ${settings.currency}</span>
+              </div>
+            ` : ''}
+            ${invoice.previous_credit_balance !== undefined && ((invoice.previous_credit_balance || 0) > 0 || (invoice.credit_paid_with_invoice || 0) > 0 || (invoice.remaining_credit_after_invoice || 0) > 0) ? `
+              <div style="border-top: 1px dashed #000; margin-top: 6px; padding-top: 6px; font-size: 11px;">
+                <div style="display: flex; justify-content: space-between;">
+                  <span>الحساب الآجل السابق:</span>
+                  <span>${(invoice.previous_credit_balance || 0).toLocaleString()} ${settings.currency}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-weight: bold;">
+                  <span>الإجمالي (الجديد + الآجل):</span>
+                  <span>${(invoice.grand_total_with_credit ?? (invoice.total + (invoice.previous_credit_balance || 0))).toLocaleString()} ${settings.currency}</span>
+                </div>
+                ${(invoice.credit_paid_with_invoice || 0) > 0 ? `
+                  <div style="display: flex; justify-content: space-between;">
+                    <span>المسدد من الآجل السابق:</span>
+                    <span>-${(invoice.credit_paid_with_invoice || 0).toLocaleString()} ${settings.currency}</span>
+                  </div>
+                ` : ''}
+                <div style="display: flex; justify-content: space-between; font-weight: bold;">
+                  <span>إجمالي المدفوع الآن:</span>
+                  <span>${((invoice.paid_amount || 0) + (invoice.credit_paid_with_invoice || 0)).toLocaleString()} ${settings.currency}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-weight: bold; margin-top: 3px;">
+                  <span>الحساب الآجل المتبقي:</span>
+                  <span>${(invoice.remaining_credit_after_invoice || 0) > 0 ? `${(invoice.remaining_credit_after_invoice || 0).toLocaleString()} ${settings.currency}` : `0 ${settings.currency} (خالص)`}</span>
+                </div>
               </div>
             ` : ''}
             ${invoice.notes ? `<div style="margin-top: 10px; font-size: 10px;">📌 ملاحظات: ${invoice.notes}</div>` : ''}
@@ -674,9 +700,18 @@ export default function InvoiceHistoryView({
             <div class="total-row"><span>المجموع الفرعي:</span><span>${invoice.subtotal.toLocaleString()} ${settings.currency}</span></div>
             ${invoice.discount > 0 ? `<div class="total-row" style="color: red;"><span>الخصم المباشر:</span><span>-${invoice.discount.toLocaleString()} ${settings.currency}</span></div>` : ''}
             <div class="total-row"><span>الضريبة الكلية:</span><span>${invoice.tax.toLocaleString()} ${settings.currency}</span></div>
-            <div class="total-row grand-total"><span>الإجمالي المستحق:</span><span>${invoice.total.toLocaleString()} ${settings.currency}</span></div>
-            <div class="total-row"><span>المدفوع نقداً:</span><span>${invoice.paid_amount.toLocaleString()} ${settings.currency}</span></div>
+            <div class="total-row grand-total"><span>${invoice.previous_credit_balance !== undefined && ((invoice.previous_credit_balance || 0) > 0 || (invoice.credit_paid_with_invoice || 0) > 0 || (invoice.remaining_credit_after_invoice || 0) > 0) ? 'حساب الفاتورة الجديدة:' : 'الإجمالي المستحق:'}</span><span>${invoice.total.toLocaleString()} ${settings.currency}</span></div>
+            <div class="total-row"><span>المدفوع للفاتورة:</span><span>${invoice.paid_amount.toLocaleString()} ${settings.currency}</span></div>
             ${invoice.remaining_amount > 0 ? `<div class="total-row" style="color: #d97706;"><span>المتبقي في الذمة:</span><span>${invoice.remaining_amount.toLocaleString()} ${settings.currency}</span></div>` : ''}
+            ${invoice.previous_credit_balance !== undefined && ((invoice.previous_credit_balance || 0) > 0 || (invoice.credit_paid_with_invoice || 0) > 0 || (invoice.remaining_credit_after_invoice || 0) > 0) ? `
+              <div style="margin-top: 8px; padding: 8px; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px;">
+                <div class="total-row" style="color: #92400e;"><span>الحساب الآجل السابق:</span><span>${(invoice.previous_credit_balance || 0).toLocaleString()} ${settings.currency}</span></div>
+                <div class="total-row" style="color: #111;"><span>الإجمالي (الجديد + الآجل):</span><span>${(invoice.grand_total_with_credit ?? (invoice.total + (invoice.previous_credit_balance || 0))).toLocaleString()} ${settings.currency}</span></div>
+                ${(invoice.credit_paid_with_invoice || 0) > 0 ? `<div class="total-row" style="color: #15803d;"><span>المسدد من الآجل السابق:</span><span>-${(invoice.credit_paid_with_invoice || 0).toLocaleString()} ${settings.currency}</span></div>` : ''}
+                <div class="total-row" style="color: #065f46;"><span>إجمالي المدفوع الآن:</span><span>${((invoice.paid_amount || 0) + (invoice.credit_paid_with_invoice || 0)).toLocaleString()} ${settings.currency}</span></div>
+                <div class="total-row" style="color: ${(invoice.remaining_credit_after_invoice || 0) > 0 ? '#dc2626' : '#16a34a'}; border-top: 1px dashed #fbbf24; padding-top: 4px;"><span>الحساب الآجل المتبقي:</span><span>${(invoice.remaining_credit_after_invoice || 0) > 0 ? `${(invoice.remaining_credit_after_invoice || 0).toLocaleString()} ${settings.currency}` : `0 ${settings.currency} (خالص)`}</span></div>
+              </div>
+            ` : ''}
           </div>
           ${invoice.notes ? `<p style="font-size: 11px; color:#555; background:#f9f9f9; padding: 8px; border-radius: 8px; margin-top:15px;">📌 ملاحظة: ${invoice.notes}</p>` : ''}
           <div class="footer">${settings.receipt_footer || 'شكراً لزيارتكم الملوكية!'}</div>
@@ -1178,17 +1213,53 @@ export default function InvoiceHistoryView({
                   <span>{selectedInvoice.tax.toLocaleString()} {settings.currency}</span>
                 </div>
                 <div className="flex justify-between text-black font-black text-xs pt-1 border-t border-dotted border-gray-300">
-                  <span>الإجمالي النهائي:</span>
+                  <span>{selectedInvoice.previous_credit_balance !== undefined && ((selectedInvoice.previous_credit_balance || 0) > 0 || (selectedInvoice.credit_paid_with_invoice || 0) > 0 || (selectedInvoice.remaining_credit_after_invoice || 0) > 0) ? 'حساب الفاتورة الجديدة:' : 'الإجمالي النهائي:'}</span>
                   <span>{selectedInvoice.total.toLocaleString()} {settings.currency}</span>
                 </div>
                 <div className="flex justify-between text-gray-600 pt-1">
-                  <span>المسدد نقداً:</span>
+                  <span>المسدد للفاتورة:</span>
                   <span>{selectedInvoice.paid_amount.toLocaleString()} {settings.currency}</span>
                 </div>
                 {selectedInvoice.remaining_amount > 0 && (
                   <div className="flex justify-between text-amber-600">
-                    <span>المتبقي بالذمم الآجلة:</span>
+                    <span>المتبقي من الفاتورة الحالية (آجل):</span>
                     <span>{selectedInvoice.remaining_amount.toLocaleString()} {settings.currency}</span>
+                  </div>
+                )}
+                {selectedInvoice.previous_credit_balance !== undefined && (
+                  (selectedInvoice.previous_credit_balance > 0) ||
+                  ((selectedInvoice.credit_paid_with_invoice || 0) > 0) ||
+                  ((selectedInvoice.remaining_credit_after_invoice || 0) > 0)
+                ) && (
+                  <div className="mt-1.5 pt-1.5 border-t border-dashed border-amber-400 bg-amber-50 p-2 rounded-lg space-y-1">
+                    <div className="flex justify-between text-amber-900">
+                      <span>الحساب الآجل السابق:</span>
+                      <span>{(selectedInvoice.previous_credit_balance || 0).toLocaleString()} {settings.currency}</span>
+                    </div>
+                    <div className="flex justify-between text-black font-black">
+                      <span>الإجمالي (الجديد + الآجل):</span>
+                      <span>{(selectedInvoice.grand_total_with_credit ?? (selectedInvoice.total + (selectedInvoice.previous_credit_balance || 0))).toLocaleString()} {settings.currency}</span>
+                    </div>
+                    {(selectedInvoice.credit_paid_with_invoice || 0) > 0 && (
+                      <div className="flex justify-between text-emerald-700">
+                        <span>المسدد من الآجل السابق:</span>
+                        <span>-{(selectedInvoice.credit_paid_with_invoice || 0).toLocaleString()} {settings.currency}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-emerald-900 font-black">
+                      <span>إجمالي المدفوع الآن:</span>
+                      <span>{((selectedInvoice.paid_amount || 0) + (selectedInvoice.credit_paid_with_invoice || 0)).toLocaleString()} {settings.currency}</span>
+                    </div>
+                    <div className={`flex justify-between font-black pt-1 border-t border-amber-200 ${
+                      (selectedInvoice.remaining_credit_after_invoice || 0) > 0 ? 'text-red-700' : 'text-emerald-700'
+                    }`}>
+                      <span>الحساب الآجل المتبقي على العميل:</span>
+                      <span>
+                        {(selectedInvoice.remaining_credit_after_invoice || 0) > 0
+                          ? `${(selectedInvoice.remaining_credit_after_invoice || 0).toLocaleString()} ${settings.currency}`
+                          : `0 ${settings.currency} (خالص)`}
+                      </span>
+                    </div>
                   </div>
                 )}
               </div>

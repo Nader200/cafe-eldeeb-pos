@@ -159,6 +159,10 @@ export interface Invoice {
   delivery_time?: string;
   admin_name?: string;
   timeline?: InvoiceTimelineEvent[];
+  previous_credit_balance?: number;
+  credit_paid_with_invoice?: number;
+  remaining_credit_after_invoice?: number;
+  grand_total_with_credit?: number;
 }
 
 export interface InvoiceItem {

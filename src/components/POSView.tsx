@@ -583,6 +583,26 @@ export default function POSView({
   const [walletDeductionAmount, setWalletDeductionAmount] = useState<number>(0);
   const [showAdvancedPanel, setShowAdvancedPanel] = useState<boolean>(false);
 
+  // Customer previous credit balance settlement states
+  const [payPreviousCredit, setPayPreviousCredit] = useState<boolean>(false);
+  const [previousCreditPayAmount, setPreviousCreditPayAmount] = useState<number>(0);
+
+  const selectedCustomerObj = useMemo(
+    () => customers.find(c => c.id === selectedCustomer) || null,
+    [customers, selectedCustomer]
+  );
+
+  useEffect(() => {
+    if (selectedCustomerObj && selectedCustomerObj.id !== 'c_general' && (selectedCustomerObj.current_balance || 0) > 0) {
+      setPreviousCreditPayAmount(prev =>
+        prev > 0 ? Math.min(prev, selectedCustomerObj.current_balance || 0) : (selectedCustomerObj.current_balance || 0)
+      );
+    } else {
+      setPayPreviousCredit(false);
+      setPreviousCreditPayAmount(0);
+    }
+  }, [selectedCustomerObj]);
+
   // Load datasets on startup & subscribe to real-time sync
   useEffect(() => {
     const refreshData = () => {
@@ -970,10 +990,19 @@ export default function POSView({
       return;
     }
 
-    // Prefill cash received for quick checkout
+    // Prefill cash received for quick checkout (include old credit only if toggle is enabled)
     setUseWallet(false);
     setWalletDeductionAmount(0);
-    setCashReceived(String(cartTotals.total));
+    const oldCredit = (selectedCustomerObj && selectedCustomerObj.id !== 'c_general')
+      ? Math.max(0, selectedCustomerObj.current_balance || 0)
+      : 0;
+    const activeOldCreditPay = (paymentType !== 'CREDIT' && payPreviousCredit && oldCredit > 0)
+      ? Math.min(oldCredit, previousCreditPayAmount > 0 ? previousCreditPayAmount : oldCredit)
+      : 0;
+    if (payPreviousCredit && oldCredit > 0 && previousCreditPayAmount <= 0) {
+      setPreviousCreditPayAmount(oldCredit);
+    }
+    setCashReceived(String(paymentType === 'CREDIT' ? 0 : (cartTotals.total + activeOldCreditPay)));
     if (!paymentMethod || paymentMethod === 'CASH') {
       if (senderPhone || referenceNumber || receiptImageUrl) {
         setPaymentMethod(paymentNumber === settings.instapay_number ? 'BANK_TRANSFER' : 'VODAFONE_CASH');
@@ -989,6 +1018,12 @@ export default function POSView({
       onShowWarningAlert('يرجى إضافة سلع أولاً لتسجيل عملية الدفع السريع!');
       return;
     }
+    const oldCredit = (selectedCustomerObj && selectedCustomerObj.id !== 'c_general')
+      ? Math.max(0, selectedCustomerObj.current_balance || 0)
+      : 0;
+    const creditSettlementAmt = (payPreviousCredit && oldCredit > 0)
+      ? Math.min(oldCredit, previousCreditPayAmount > 0 ? previousCreditPayAmount : oldCredit)
+      : 0;
     try {
       let res;
       if (activeInvoiceId) {
@@ -1007,7 +1042,10 @@ export default function POSView({
           '',
           '',
           0,
-          ''
+          '',
+          undefined,
+          undefined,
+          creditSettlementAmt
         );
       } else {
         res = dbService.createInvoice(
@@ -1024,14 +1062,21 @@ export default function POSView({
           '',
           '',
           0,
-          ''
+          '',
+          undefined,
+          undefined,
+          creditSettlementAmt
         );
       }
 
       setRecentInvoice(res.invoice);
       setShowCheckoutModal(false);
       setShowReceiptModal(true);
-      onShowSuccessAlert(`تم الدفع النقدي السريع بنجاح! فاتورة رقم: ${res.invoice.invoice_number}`);
+      onShowSuccessAlert(
+        creditSettlementAmt > 0
+          ? `تم الدفع النقدي وخصم ${creditSettlementAmt.toLocaleString()} ${settings.currency} من الحساب الآجل! فاتورة رقم: ${res.invoice.invoice_number}`
+          : `تم الدفع النقدي السريع بنجاح! فاتورة رقم: ${res.invoice.invoice_number}`
+      );
 
       // Clear Cart state
       clearPersistedPOSCart();
@@ -1042,6 +1087,8 @@ export default function POSView({
       setInvoiceNotes('');
       setTableNumber('');
       setSelectedCustomer('c_general');
+      setPayPreviousCredit(false);
+      setPreviousCreditPayAmount(0);
       setPaymentMethod('CASH');
       setPaymentNumber('');
       setReferenceNumber('');
@@ -1057,6 +1104,21 @@ export default function POSView({
     } catch (e: any) {
       onShowWarningAlert(e.message || 'حدث خطأ أثناء السداد النقدي السريع');
     }
+  };
+
+  const getActiveCreditSettlementAmount = (): number => {
+    const cust = customers.find(c => c.id === selectedCustomer);
+    const oldBal = cust && cust.id !== 'c_general' ? Math.max(0, cust.current_balance || 0) : 0;
+    if (!payPreviousCredit || oldBal <= 0 || paymentType === 'CREDIT') return 0;
+    const requestedCredit = Math.min(oldBal, Math.max(0, previousCreditPayAmount));
+    if (paymentType === 'SPLIT') {
+      const walletAmt = useWallet ? walletDeductionAmount : 0;
+      const netInvoiceDue = Math.max(0, cartTotals.total - walletAmt);
+      const enteredCash = Math.max(0, parseFloat(cashReceived) || 0);
+      const cashTowardNew = Math.min(netInvoiceDue, enteredCash);
+      return Math.min(requestedCredit, Math.max(0, enteredCash - cashTowardNew));
+    }
+    return requestedCredit;
   };
 
   const handleCompletePayment = () => {
@@ -1086,9 +1148,13 @@ export default function POSView({
     // Validate Credit Limit
     const cust = customers.find(c => c.id === selectedCustomer);
     if ((paymentType === 'CREDIT' || paymentType === 'SPLIT') && cust && cust.id !== 'c_general') {
-      const paidVal = paymentType === 'CREDIT' ? 0 : (parseFloat(cashReceived) || 0);
+      const walletAmt = useWallet ? walletDeductionAmount : 0;
+      const netInvoiceDue = Math.max(0, cartTotals.total - walletAmt);
+      const enteredCash = paymentType === 'CREDIT' ? 0 : Math.min(netInvoiceDue, Math.max(0, parseFloat(cashReceived) || 0));
+      const paidVal = enteredCash + walletAmt;
       const addedDebt = Math.max(0, cartTotals.total - paidVal);
-      const expectedBalance = cust.current_balance + addedDebt;
+      const creditSettled = getActiveCreditSettlementAmount();
+      const expectedBalance = Math.max(0, cust.current_balance - creditSettled + addedDebt);
       if (addedDebt > 0 && expectedBalance > cust.credit_limit) {
         setShowCreditWarningModal(true);
         setCreditWarningPin('');
@@ -1113,8 +1179,15 @@ export default function POSView({
 
   const completePaymentDirectly = () => {
     const walletAmt = useWallet ? walletDeductionAmount : 0;
-    const cashAmt = paymentType === 'CASH' ? (cartTotals.total - walletAmt) : (paymentType === 'CREDIT' ? 0 : parseFloat(cashReceived) || 0);
+    const netInvoiceDue = Math.max(0, cartTotals.total - walletAmt);
+    const enteredCash = Math.max(0, parseFloat(cashReceived) || 0);
+    const cashAmt = paymentType === 'CASH'
+      ? netInvoiceDue
+      : paymentType === 'CREDIT'
+      ? 0
+      : Math.min(netInvoiceDue, enteredCash);
     const paidVal = cashAmt + walletAmt;
+    const creditSettlementAmt = getActiveCreditSettlementAmount();
 
     try {
       let res;
@@ -1136,7 +1209,8 @@ export default function POSView({
           walletAmt,
           paymentNumber,
           senderPhone,
-          receiptImageUrl
+          receiptImageUrl,
+          creditSettlementAmt
         );
       } else {
         res = dbService.createInvoice(
@@ -1155,14 +1229,19 @@ export default function POSView({
           walletAmt,
           paymentNumber,
           senderPhone,
-          receiptImageUrl
+          receiptImageUrl,
+          creditSettlementAmt
         );
       }
 
       setRecentInvoice(res.invoice);
       setShowCheckoutModal(false);
       setShowReceiptModal(true);
-      onShowSuccessAlert(`تم تسجيل وإغلاق الفاتورة بنجاح برقم: ${res.invoice.invoice_number}`);
+      onShowSuccessAlert(
+        creditSettlementAmt > 0
+          ? `تم إغلاق الفاتورة #${res.invoice.invoice_number} وخصم ${creditSettlementAmt.toLocaleString()} ${settings.currency} من الحساب الآجل تلقائياً!`
+          : `تم تسجيل وإغلاق الفاتورة بنجاح برقم: ${res.invoice.invoice_number}`
+      );
 
       // Clear Cart state
       clearPersistedPOSCart();
@@ -1173,6 +1252,8 @@ export default function POSView({
       setInvoiceNotes('');
       setTableNumber('');
       setSelectedCustomer('c_general');
+      setPayPreviousCredit(false);
+      setPreviousCreditPayAmount(0);
       setPaymentMethod('CASH');
       setPaymentNumber('');
       setReferenceNumber('');
@@ -1538,7 +1619,13 @@ export default function POSView({
                 <select
                   id="customer-select"
                   value={selectedCustomer}
-                  onChange={(e) => setSelectedCustomer(e.target.value)}
+                  onChange={(e) => {
+                    const nextId = e.target.value;
+                    setSelectedCustomer(nextId);
+                    setPayPreviousCredit(false);
+                    const nextCust = customers.find(c => c.id === nextId);
+                    setPreviousCreditPayAmount(nextCust && nextCust.id !== 'c_general' ? Math.max(0, nextCust.current_balance || 0) : 0);
+                  }}
                   className="w-full bg-luxury-bg border border-gray-900 text-gray-200 text-[11px] py-1.5 pl-3 pr-8 rounded-xl focus:outline-none focus:border-gold-600 text-right font-medium cursor-pointer"
                 >
                   {customers.map(c => (
@@ -1745,11 +1832,53 @@ export default function POSView({
 
               {/* Mega Final Total display */}
               <div className="flex justify-between items-center border-t border-gray-900/50 pt-1">
-                <span className="text-[11px] md:text-xs font-black text-gold-500">الإجمالي النهائي:</span>
+                <span className="text-[11px] md:text-xs font-black text-gold-500">إجمالي الفاتورة الجديدة:</span>
                 <span className="text-base md:text-lg font-black text-gold-500 font-mono gold-glow">
                   {cartTotals.total.toLocaleString()} <span className="text-[9px] md:text-[10px] text-gold-500">{settings.currency}</span>
                 </span>
               </div>
+
+              {/* Customer Previous Credit Balance Summary & 1-Tap Settlement Toggle */}
+              {selectedCustomerObj && selectedCustomerObj.id !== 'c_general' && (selectedCustomerObj.current_balance || 0) > 0 && (
+                <div className="bg-amber-950/30 border border-amber-500/40 rounded-xl p-2 mt-1 space-y-1.5">
+                  <div className="flex justify-between items-center text-[10px]">
+                    <span className="text-amber-300 font-bold">📌 الحساب الآجل السابق:</span>
+                    <span className="font-mono font-black text-amber-400">
+                      {(selectedCustomerObj.current_balance || 0).toLocaleString()} {settings.currency}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-[11px] border-t border-amber-500/20 pt-1">
+                    <span className="text-white font-black">الإجمالي الكلي (الجديد + الآجل):</span>
+                    <span className="font-mono font-black text-amber-300">
+                      {(cartTotals.total + (selectedCustomerObj.current_balance || 0)).toLocaleString()} {settings.currency}
+                    </span>
+                  </div>
+                  <label className="flex items-center justify-between gap-2 bg-black/50 hover:bg-black/70 px-2 py-1.5 rounded-lg border border-amber-500/30 cursor-pointer transition-all">
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={payPreviousCredit}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setPayPreviousCredit(checked);
+                          if (checked) {
+                            setPreviousCreditPayAmount(selectedCustomerObj.current_balance || 0);
+                          }
+                        }}
+                        className="w-3.5 h-3.5 accent-amber-500 rounded cursor-pointer"
+                      />
+                      <span className="text-[10px] font-extrabold text-amber-200">
+                        تحصيل الحساب الآجل مع الفاتورة
+                      </span>
+                    </div>
+                    <span className="text-[9px] font-mono font-bold text-emerald-400">
+                      {payPreviousCredit
+                        ? `${(cartTotals.total + (previousCreditPayAmount || selectedCustomerObj.current_balance || 0)).toLocaleString()} ${settings.currency}`
+                        : 'الجديد فقط'}
+                    </span>
+                  </label>
+                </div>
+              )}
 
               {/* Advanced Popover Toggle Button */}
               <button
@@ -2280,7 +2409,9 @@ export default function POSView({
                   if (paymentMethod === 'CREDIT') {
                     setPaymentMethod('CASH');
                   }
-                  setCashReceived(String(cartTotals.total - walletDeductionAmount));
+                  const oldBal = selectedCustomerObj && selectedCustomerObj.id !== 'c_general' ? Math.max(0, selectedCustomerObj.current_balance || 0) : 0;
+                  const creditExtra = payPreviousCredit && oldBal > 0 ? Math.min(oldBal, previousCreditPayAmount || oldBal) : 0;
+                  setCashReceived(String(Math.max(0, cartTotals.total - walletDeductionAmount) + creditExtra));
                 }}
                 className={`py-2 px-1 rounded-xl text-center font-black text-[10px] border transition-all cursor-pointer flex flex-col items-center justify-center gap-1 ${
                   paymentType === 'CASH'
@@ -2318,7 +2449,9 @@ export default function POSView({
                   if (paymentMethod === 'CREDIT') {
                     setPaymentMethod('CASH');
                   }
-                  setCashReceived(String(cartTotals.total - walletDeductionAmount));
+                  const oldBal = selectedCustomerObj && selectedCustomerObj.id !== 'c_general' ? Math.max(0, selectedCustomerObj.current_balance || 0) : 0;
+                  const creditExtra = payPreviousCredit && oldBal > 0 ? Math.min(oldBal, previousCreditPayAmount || oldBal) : 0;
+                  setCashReceived(String(Math.max(0, cartTotals.total - walletDeductionAmount) + creditExtra));
                 }}
                 className={`py-2 px-1 rounded-xl text-center font-black text-[10px] border transition-all cursor-pointer flex flex-col items-center justify-center gap-1 ${
                   paymentType === 'SPLIT'
@@ -2362,13 +2495,17 @@ export default function POSView({
                           onChange={(e) => {
                             const checked = e.target.checked;
                             setUseWallet(checked);
+                            const oldBal = Math.max(0, cust.current_balance || 0);
+                            const creditExtra = (paymentType !== 'CREDIT' && payPreviousCredit && oldBal > 0)
+                              ? Math.min(oldBal, previousCreditPayAmount || oldBal)
+                              : 0;
                             if (checked) {
                               const amt = Math.min(walletBal, cartTotals.total);
                               setWalletDeductionAmount(amt);
-                              setCashReceived(String(cartTotals.total - amt));
+                              setCashReceived(String(Math.max(0, cartTotals.total - amt) + creditExtra));
                             } else {
                               setWalletDeductionAmount(0);
-                              setCashReceived(String(cartTotals.total));
+                              setCashReceived(String(cartTotals.total + creditExtra));
                             }
                           }}
                           className="rounded border-gray-800 text-gold-600 focus:ring-gold-600 focus:ring-offset-luxury-bg bg-luxury-bg w-4 h-4 accent-gold-600"
@@ -2388,7 +2525,7 @@ export default function POSView({
                           <span className="font-mono font-bold text-gold-500">-{walletDeductionAmount.toLocaleString()} ج.م</span>
                         </div>
                         <div className="flex justify-between text-white border-t border-gray-900/80 pt-1.5">
-                          <span>المتبقي المطلوب سداده:</span>
+                          <span>المتبقي من الفاتورة الجديدة:</span>
                           <span className="font-mono font-extrabold text-white">{(cartTotals.total - walletDeductionAmount).toLocaleString()} ج.م</span>
                         </div>
                       </div>
@@ -2397,17 +2534,132 @@ export default function POSView({
                 );
               })()}
 
+              {/* Customer Previous Credit Balance Settlement Card */}
+              {(() => {
+                const cust = customers.find(c => c.id === selectedCustomer);
+                if (!cust || selectedCustomer === 'c_general') return null;
+                const oldBal = Math.max(0, cust.current_balance || 0);
+                if (oldBal <= 0 && paymentType !== 'CREDIT' && paymentType !== 'SPLIT') return null;
+                const netNewDue = Math.max(0, cartTotals.total - walletDeductionAmount);
+                const combinedTotal = cartTotals.total + oldBal;
+                const clampedCreditPay = payPreviousCredit ? Math.min(oldBal, Math.max(0, previousCreditPayAmount)) : 0;
+
+                return (
+                  <div className="bg-amber-950/20 border border-amber-500/40 p-4 rounded-2xl space-y-2.5 animate-fade-in">
+                    <div className="flex items-center justify-between border-b border-amber-500/20 pb-2">
+                      <span className="text-xs font-black text-amber-400">📋 الحساب الآجل للعميل ({cust.full_name})</span>
+                      <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-bold font-mono">
+                        الآجل السابق: {oldBal.toLocaleString()} {settings.currency}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1 text-xs">
+                      <div className="flex justify-between text-gray-300">
+                        <span>حساب الفاتورة الجديدة:</span>
+                        <span className="font-mono font-bold text-white">{cartTotals.total.toLocaleString()} {settings.currency}</span>
+                      </div>
+                      <div className="flex justify-between text-amber-300">
+                        <span>الحساب الآجل السابق:</span>
+                        <span className="font-mono font-bold">{oldBal.toLocaleString()} {settings.currency}</span>
+                      </div>
+                      <div className="flex justify-between text-sm font-black text-amber-400 border-t border-amber-500/20 pt-1.5">
+                        <span>إجمالي الحساب (الجديد + الآجل):</span>
+                        <span className="font-mono">{combinedTotal.toLocaleString()} {settings.currency}</span>
+                      </div>
+                    </div>
+
+                    {oldBal > 0 && (paymentType === 'CASH' || paymentType === 'SPLIT') && (
+                      <div className="space-y-2 pt-1">
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPayPreviousCredit(false);
+                              setCashReceived(String(netNewDue));
+                            }}
+                            className={`py-2 px-2 rounded-xl text-[10px] font-black border transition-all cursor-pointer ${
+                              !payPreviousCredit
+                                ? 'bg-amber-500/20 border-amber-500 text-amber-200'
+                                : 'bg-black/40 border-gray-800 text-gray-400 hover:text-white'
+                            }`}
+                          >
+                            دفع الجديد فقط (يبقى الآجل)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPayPreviousCredit(true);
+                              setPreviousCreditPayAmount(oldBal);
+                              setCashReceived(String(netNewDue + oldBal));
+                            }}
+                            className={`py-2 px-2 rounded-xl text-[10px] font-black border transition-all cursor-pointer ${
+                              payPreviousCredit
+                                ? 'bg-emerald-600/25 border-emerald-500 text-emerald-300'
+                                : 'bg-black/40 border-gray-800 text-gray-400 hover:text-white'
+                            }`}
+                          >
+                            دفع الجديد + الآجل معاً 💰
+                          </button>
+                        </div>
+
+                        {payPreviousCredit ? (
+                          <div className="bg-black/50 border border-emerald-500/30 p-2.5 rounded-xl space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[10px] text-emerald-300 font-bold">المبلغ المسدد من الآجل القديم:</span>
+                              <input
+                                type="number"
+                                min={0}
+                                max={oldBal}
+                                value={previousCreditPayAmount}
+                                onChange={(e) => {
+                                  const raw = Math.max(0, Number(e.target.value) || 0);
+                                  const clamped = Math.min(oldBal, raw);
+                                  setPreviousCreditPayAmount(clamped);
+                                  setCashReceived(String(netNewDue + clamped));
+                                }}
+                                className="w-28 bg-luxury-card border border-emerald-500/50 text-emerald-300 rounded-lg py-1 px-2 text-xs text-center font-mono font-bold focus:outline-none"
+                              />
+                            </div>
+                            <div className="flex justify-between text-[10px] text-gray-300 border-t border-gray-800 pt-1.5">
+                              <span>المطلوب سداده الآن (الجديد + الآجل):</span>
+                              <span className="font-mono font-black text-emerald-400">{(netNewDue + clampedCreditPay).toLocaleString()} {settings.currency}</span>
+                            </div>
+                            <div className="flex justify-between text-[10px] text-amber-300">
+                              <span>الآجل المتبقي على العميل بعد الدفع:</span>
+                              <span className="font-mono font-bold">{Math.max(0, oldBal - clampedCreditPay).toLocaleString()} {settings.currency}</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-[10px] text-amber-300/90 bg-black/40 p-2 rounded-xl border border-amber-500/20 text-center font-bold">
+                            سيتم تحصيل الفاتورة الجديدة فقط ويظل الحساب الآجل ({oldBal.toLocaleString()} {settings.currency}) كما هو ويظهر بالفاتورة.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Conditional Inputs based on mode */}
-              {paymentType === 'CASH' && (
+              {paymentType === 'CASH' && (() => {
+                const oldBal = selectedCustomerObj && selectedCustomerObj.id !== 'c_general' ? Math.max(0, selectedCustomerObj.current_balance || 0) : 0;
+                const creditPayExtra = payPreviousCredit && oldBal > 0 ? Math.min(oldBal, Math.max(0, previousCreditPayAmount)) : 0;
+                const exactAmt = Math.max(0, cartTotals.total - walletDeductionAmount) + creditPayExtra;
+
+                return (
                 <div className="bg-luxury-bg border border-gray-900 p-4 rounded-2xl">
-                  {cartTotals.total - walletDeductionAmount === 0 ? (
+                  {exactAmt === 0 ? (
                     <div className="text-center py-2 text-gold-500 font-bold text-xs flex flex-col items-center gap-1.5 bg-gold-950/15 border border-gold-600/20 p-3 rounded-xl">
                       <Check className="w-5 h-5 text-gold-500 animate-bounce" />
                       <span>الفاتورة مدفوعة بالكامل من رصيد المحفظة!</span>
                     </div>
                   ) : (
                     <>
-                      <span className="text-[10px] text-gray-400 block mb-1">المبلغ النقدي المستلم من الزبون (ج.م)</span>
+                      <span className="text-[10px] text-gray-400 block mb-1">
+                        {creditPayExtra > 0
+                          ? `المبلغ النقدي المستلم (الفاتورة + ${creditPayExtra.toLocaleString()} آجل سابق) (${settings.currency})`
+                          : `المبلغ النقدي المستلم من الزبون (${settings.currency})`}
+                      </span>
                       <input
                         id="checkout-cash-received"
                         type="number"
@@ -2419,7 +2671,6 @@ export default function POSView({
                       {/* Giant Quick-Cash Buttons Grid for One-Handed Use */}
                       <div className="grid grid-cols-3 gap-2 mt-3">
                         {(() => {
-                          const exactAmt = cartTotals.total - walletDeductionAmount;
                           const quickBills = [exactAmt, 50, 100, 200, 500];
                           // Remove duplicates if exact is 50, 100 etc.
                           const uniqueBills = Array.from(new Set(quickBills)).filter(b => b > 0);
@@ -2438,30 +2689,47 @@ export default function POSView({
                         })()}
                       </div>
 
-                      {parseFloat(cashReceived) > (cartTotals.total - walletDeductionAmount) && (
+                      {parseFloat(cashReceived) > exactAmt && (
                         <div className="flex justify-between items-center text-xs mt-3 bg-gold-950/20 p-2.5 rounded-xl border border-gold-600/20 text-gold-500 font-bold">
                           <span>الباقي / المرتجع للزبون:</span>
-                          <span className="font-mono font-black text-sm">{(parseFloat(cashReceived) - (cartTotals.total - walletDeductionAmount)).toLocaleString()} ج.م</span>
+                          <span className="font-mono font-black text-sm">{(parseFloat(cashReceived) - exactAmt).toLocaleString()} {settings.currency}</span>
                         </div>
                       )}
                     </>
                   )}
                 </div>
-              )}
+                );
+              })()}
 
-              {paymentType === 'CREDIT' && (
+              {paymentType === 'CREDIT' && (() => {
+                const cust = customers.find(c => c.id === selectedCustomer);
+                const oldBal = cust && cust.id !== 'c_general' ? Math.max(0, cust.current_balance || 0) : 0;
+                const newAddedDebt = Math.max(0, cartTotals.total - walletDeductionAmount);
+                return (
                 <div className="bg-amber-950/15 border border-amber-900/30 p-4 rounded-2xl space-y-2">
                   <p className="text-xs text-amber-500 font-bold">⚠️ تنبيه البيع بالآجل:</p>
                   <p className="text-[10px] text-gray-400">
-                    سيتم ترحيل المبلغ المتبقي وقدره <span className="text-white font-bold">{(cartTotals.total - walletDeductionAmount).toLocaleString()} ج.م</span> كحساب مدين على العميل: <span className="text-gold-500 font-bold">{(customers.find(c => c.id === selectedCustomer))?.full_name}</span>.
+                    سيتم ترحيل مبلغ الفاتورة الجديدة وقدره <span className="text-white font-bold">{newAddedDebt.toLocaleString()} {settings.currency}</span> كحساب مدين على العميل: <span className="text-gold-500 font-bold">{cust?.full_name}</span>، ليصبح إجمالي الحساب الآجل بعد الفاتورة <span className="text-amber-400 font-bold font-mono">{(oldBal + newAddedDebt).toLocaleString()} {settings.currency}</span>.
                   </p>
                 </div>
-              )}
+                );
+              })()}
 
-              {paymentType === 'SPLIT' && (
+              {paymentType === 'SPLIT' && (() => {
+                const netInvoiceDue = Math.max(0, cartTotals.total - walletDeductionAmount);
+                const enteredCash = Math.max(0, parseFloat(cashReceived) || 0);
+                const cashTowardNew = Math.min(netInvoiceDue, enteredCash);
+                const newRemaining = Math.max(0, netInvoiceDue - cashTowardNew);
+                const oldBal = selectedCustomerObj && selectedCustomerObj.id !== 'c_general' ? Math.max(0, selectedCustomerObj.current_balance || 0) : 0;
+                const creditSettled = payPreviousCredit && oldBal > 0
+                  ? Math.min(Math.min(oldBal, previousCreditPayAmount), Math.max(0, enteredCash - cashTowardNew))
+                  : 0;
+                const totalCreditAfter = Math.max(0, oldBal - creditSettled + newRemaining);
+
+                return (
                 <div className="bg-luxury-bg border border-gray-900 p-4 rounded-2xl space-y-3">
                   <div>
-                    <span className="text-[10px] text-gray-400 block mb-1">المبلغ المسدد نقداً الآن (ج.م)</span>
+                    <span className="text-[10px] text-gray-400 block mb-1">إجمالي المبلغ المسدد نقداً الآن ({settings.currency})</span>
                     <input
                       id="split-cash-paid"
                       type="number"
@@ -2471,14 +2739,27 @@ export default function POSView({
                       className="w-full bg-luxury-card border border-gray-800 text-white rounded-xl py-2 px-3 text-sm focus:outline-none focus:border-gold-600 font-mono font-bold text-center"
                     />
                   </div>
-                  {(cartTotals.total - walletDeductionAmount - (parseFloat(cashReceived) || 0)) > 0 && (
+                  {newRemaining > 0 && (
                     <div className="flex justify-between items-center text-xs pt-1 border-t border-gray-800 text-amber-500">
-                      <span>المتبقي في ذمة العميل (بالآجل):</span>
-                      <span className="font-mono font-bold">{(cartTotals.total - walletDeductionAmount - (parseFloat(cashReceived) || 0)).toLocaleString()} ج.م</span>
+                      <span>المتبقي من الفاتورة الجديدة (آجل):</span>
+                      <span className="font-mono font-bold">{newRemaining.toLocaleString()} {settings.currency}</span>
+                    </div>
+                  )}
+                  {creditSettled > 0 && (
+                    <div className="flex justify-between items-center text-xs pt-1 border-t border-gray-800 text-emerald-400">
+                      <span>المسدد من الحساب الآجل السابق:</span>
+                      <span className="font-mono font-bold">-{creditSettled.toLocaleString()} {settings.currency}</span>
+                    </div>
+                  )}
+                  {(oldBal > 0 || newRemaining > 0) && (
+                    <div className="flex justify-between items-center text-xs pt-1 border-t border-gray-800 text-amber-300 font-bold">
+                      <span>إجمالي الحساب الآجل المتبقي بعد العملية:</span>
+                      <span className="font-mono">{totalCreditAfter.toLocaleString()} {settings.currency}</span>
                     </div>
                   )}
                 </div>
-              )}
+                );
+              })()}
 
               {/* Detailed Payment Method for CASH / SPLIT */}
               {(paymentType === 'CASH' || paymentType === 'SPLIT') && (cartTotals.total - walletDeductionAmount > 0) && (
@@ -3505,9 +3786,49 @@ export default function POSView({
                   <span>{recentInvoice.tax} ج.م</span>
                 </div>
                 <div className="flex justify-between text-black text-xs font-black pt-1.5 border-t border-dotted border-gray-300">
-                  <span>الإجمالي الكلي:</span>
+                  <span>حساب الفاتورة الجديدة:</span>
                   <span>{recentInvoice.total} ج.م</span>
                 </div>
+                {recentInvoice.previous_credit_balance !== undefined && (
+                  (recentInvoice.previous_credit_balance > 0) ||
+                  ((recentInvoice.credit_paid_with_invoice || 0) > 0) ||
+                  ((recentInvoice.remaining_credit_after_invoice || 0) > 0)
+                ) && (
+                  <div className="mt-1.5 pt-1.5 border-t border-dashed border-gray-400 space-y-1 bg-amber-50 p-2 rounded-lg border border-amber-200">
+                    <div className="flex justify-between text-amber-900">
+                      <span>الحساب الآجل السابق:</span>
+                      <span>{(recentInvoice.previous_credit_balance || 0).toLocaleString()} ج.م</span>
+                    </div>
+                    <div className="flex justify-between text-black font-black border-t border-amber-200 pt-1">
+                      <span>الإجمالي (الجديد + الآجل):</span>
+                      <span>{(recentInvoice.grand_total_with_credit ?? (recentInvoice.total + (recentInvoice.previous_credit_balance || 0))).toLocaleString()} ج.م</span>
+                    </div>
+                    <div className="flex justify-between text-emerald-800">
+                      <span>المسدد من الفاتورة الجديدة:</span>
+                      <span>{(recentInvoice.paid_amount || 0).toLocaleString()} ج.م</span>
+                    </div>
+                    {(recentInvoice.credit_paid_with_invoice || 0) > 0 && (
+                      <div className="flex justify-between text-emerald-700">
+                        <span>المسدد من الآجل السابق:</span>
+                        <span>{(recentInvoice.credit_paid_with_invoice || 0).toLocaleString()} ج.م</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-emerald-900 font-black">
+                      <span>إجمالي المدفوع الآن:</span>
+                      <span>{((recentInvoice.paid_amount || 0) + (recentInvoice.credit_paid_with_invoice || 0)).toLocaleString()} ج.م</span>
+                    </div>
+                    <div className={`flex justify-between font-black pt-1 border-t border-amber-200 ${
+                      (recentInvoice.remaining_credit_after_invoice || 0) > 0 ? 'text-red-700' : 'text-emerald-700'
+                    }`}>
+                      <span>الحساب الآجل المتبقي على العميل:</span>
+                      <span>
+                        {(recentInvoice.remaining_credit_after_invoice || 0) > 0
+                          ? `${(recentInvoice.remaining_credit_after_invoice || 0).toLocaleString()} ج.م`
+                          : '0 ج.م (تم السداد بالكامل)'}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Footer thank you and Barcode simulation */}

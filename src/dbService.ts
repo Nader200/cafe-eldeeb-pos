@@ -443,14 +443,19 @@ export const recordCreditTransactionInternal = (
 
   // Calculate previous running balance for the customer
   const customerTxs = txs.filter(t => t.customer_id === txData.customer_id);
+  const custObj = customers.find(c => c.id === txData.customer_id);
   let previous_balance = 0;
-  customerTxs.forEach(t => {
-    if (t.transaction_type === 'INVOICE') previous_balance += t.amount;
-    else if (t.transaction_type === 'PAYMENT') previous_balance -= t.amount;
-    else if (t.transaction_type === 'MANUAL_ADJUSTMENT') previous_balance += t.amount;
-    else if (t.transaction_type === 'CORRECTION') previous_balance += t.amount;
-    else if (t.transaction_type === 'REFUND') previous_balance -= t.amount;
-  });
+  if (customerTxs.length > 0) {
+    customerTxs.forEach(t => {
+      if (t.transaction_type === 'INVOICE') previous_balance += t.amount;
+      else if (t.transaction_type === 'PAYMENT') previous_balance -= t.amount;
+      else if (t.transaction_type === 'MANUAL_ADJUSTMENT') previous_balance += t.amount;
+      else if (t.transaction_type === 'CORRECTION') previous_balance += t.amount;
+      else if (t.transaction_type === 'REFUND') previous_balance -= t.amount;
+    });
+  } else if (custObj && typeof custObj.current_balance === 'number') {
+    previous_balance = custObj.current_balance;
+  }
 
   let new_balance = previous_balance;
   if (txData.transaction_type === 'INVOICE') new_balance += txData.amount;
@@ -1284,7 +1289,8 @@ export const dbService = {
     walletDeduction = 0,
     paymentNumber?: string,
     senderPhone?: string,
-    receiptImageUrl?: string
+    receiptImageUrl?: string,
+    creditSettlementAmount = 0
   ): { invoice: Invoice; items: InvoiceItem[] } => {
     const invoices = dbService.getInvoices();
     const invoiceItemsList = dbService.getInvoiceItems();
@@ -1349,6 +1355,21 @@ export const dbService = {
       appSettings.instapay_number
     );
 
+    const targetCustIdx = (customerId && customerId !== 'c_general')
+      ? customersList.findIndex(c => c.id === customerId)
+      : -1;
+    const previousCreditBalance = targetCustIdx > -1 ? Math.max(0, customersList[targetCustIdx].current_balance || 0) : 0;
+    const actualCreditPaid = (targetCustIdx > -1 && previousCreditBalance > 0 && creditSettlementAmount > 0)
+      ? Math.min(creditSettlementAmount, previousCreditBalance)
+      : 0;
+    const remainingCreditAfter = Math.max(0, previousCreditBalance - actualCreditPaid + remainingAmount);
+    const shouldAttachCreditSummary = targetCustIdx > -1 && (
+      previousCreditBalance > 0 ||
+      actualCreditPaid > 0 ||
+      remainingAmount > 0 ||
+      paymentType === 'CREDIT'
+    );
+
     const newInvoice: Invoice = {
       id: invoiceId,
       invoice_number: invoiceNum,
@@ -1383,6 +1404,12 @@ export const dbService = {
       payment_time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       created_at: invoiceDate,
       updated_at: invoiceDate,
+      ...(shouldAttachCreditSummary ? {
+        previous_credit_balance: previousCreditBalance,
+        credit_paid_with_invoice: actualCreditPaid,
+        remaining_credit_after_invoice: remainingCreditAfter,
+        grand_total_with_credit: total + previousCreditBalance,
+      } : {}),
     };
 
     const newItems: InvoiceItem[] = [];
@@ -1595,22 +1622,88 @@ export const dbService = {
       });
     }
 
-    // 4. If Credit, Update Customer Balance & credit transaction log
-    if ((paymentType === 'CREDIT' || paymentType === 'SPLIT') && customerId && customerId !== 'c_general' && remainingAmount > 0) {
-      const custIdx = customersList.findIndex(c => c.id === customerId);
-      if (custIdx > -1) {
-        const creditTxs = getLocal<CustomerCreditTransaction[]>(KEYS.CREDIT_TRANSACTIONS, []);
-        recordCreditTransactionInternal(creditTxs, customersList, {
-          customer_id: customerId,
-          customer_name: customersList[custIdx].full_name,
-          invoice_id: invoiceId,
-          transaction_type: 'INVOICE',
-          amount: remainingAmount,
-          notes: invoiceNotes ? `مبيعات بالآجل فاتورة رقم ${invoiceNum}: ${invoiceNotes}` : `مبيعات بالآجل فاتورة رقم ${invoiceNum}`,
-          created_by: cashierName
-        });
-        setLocal(KEYS.CREDIT_TRANSACTIONS, creditTxs);
+    // 4. Settle previous credit balance if paid together with this invoice
+    const creditTxs = getLocal<CustomerCreditTransaction[]>(KEYS.CREDIT_TRANSACTIONS, []);
+    let creditTxsModified = false;
+
+    if (actualCreditPaid > 0 && targetCustIdx > -1 && customerId) {
+      const creditPaymentsList = dbService.getCreditPayments();
+      const newCreditPayment: CreditPayment = {
+        id: `cp_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        customer_id: customerId,
+        amount: actualCreditPaid,
+        payment_date: invoiceDate,
+        notes: `تحصيل الحساب الآجل السابق مع الفاتورة رقم ${invoiceNum}`,
+        created_at: invoiceDate,
+        updated_at: invoiceDate,
+      };
+      creditPaymentsList.push(newCreditPayment);
+      setLocal(KEYS.CREDIT_PAYMENTS, creditPaymentsList);
+
+      recordCreditTransactionInternal(creditTxs, customersList, {
+        customer_id: customerId,
+        customer_name: customersList[targetCustIdx].full_name,
+        invoice_id: invoiceId,
+        transaction_type: 'PAYMENT',
+        amount: actualCreditPaid,
+        notes: `سداد الحساب الآجل السابق مع الفاتورة رقم ${invoiceNum}`,
+        created_by: cashierName
+      });
+      creditTxsModified = true;
+
+      // Apply payment to older unpaid credit invoices (oldest first)
+      const oldUnpaidInvoices = invoices.filter(
+        inv => inv.customer_id === customerId &&
+          inv.id !== invoiceId &&
+          inv.invoice_status !== 'CANCELLED' &&
+          inv.invoice_status !== 'OPEN' &&
+          inv.invoice_status !== 'DRAFT' &&
+          (inv.remaining_amount || 0) > 0
+      );
+      oldUnpaidInvoices.sort((a, b) => a.invoice_date.localeCompare(b.invoice_date));
+
+      let remainingOldPayment = actualCreditPaid;
+      for (const oldInv of oldUnpaidInvoices) {
+        if (remainingOldPayment <= 0) break;
+        const oldIdx = invoices.findIndex(i => i.id === oldInv.id);
+        if (oldIdx !== -1) {
+          const canPay = Math.min(invoices[oldIdx].remaining_amount, remainingOldPayment);
+          invoices[oldIdx].paid_amount += canPay;
+          invoices[oldIdx].remaining_amount -= canPay;
+          invoices[oldIdx].payment_status = dbService.determinePaymentStatus(invoices[oldIdx]);
+          invoices[oldIdx].updated_at = invoiceDate;
+          remainingOldPayment -= canPay;
+        }
       }
+
+      customersList[targetCustIdx].current_balance = Math.max(0, previousCreditBalance - actualCreditPaid);
+      customersList[targetCustIdx].updated_at = invoiceDate;
+
+      dbService.logAuditAction(
+        'CREDIT_PAYMENT_WITH_INVOICE',
+        `تم تحصيل ${actualCreditPaid} ج.م من الحساب الآجل السابق للعميل ${customersList[targetCustIdx].full_name} مع الفاتورة رقم ${invoiceNum} (المتبقي بعد السداد: ${remainingCreditAfter} ج.م)`,
+        cashierName
+      );
+    }
+
+    // 4.1 If New Invoice has Credit remaining, Update Customer Balance & credit transaction log
+    if ((paymentType === 'CREDIT' || paymentType === 'SPLIT') && targetCustIdx > -1 && customerId && remainingAmount > 0) {
+      recordCreditTransactionInternal(creditTxs, customersList, {
+        customer_id: customerId,
+        customer_name: customersList[targetCustIdx].full_name,
+        invoice_id: invoiceId,
+        transaction_type: 'INVOICE',
+        amount: remainingAmount,
+        notes: invoiceNotes ? `مبيعات بالآجل فاتورة رقم ${invoiceNum}: ${invoiceNotes}` : `مبيعات بالآجل فاتورة رقم ${invoiceNum}`,
+        created_by: cashierName
+      });
+      customersList[targetCustIdx].current_balance = remainingCreditAfter;
+      customersList[targetCustIdx].updated_at = invoiceDate;
+      creditTxsModified = true;
+    }
+
+    if (creditTxsModified) {
+      setLocal(KEYS.CREDIT_TRANSACTIONS, creditTxs);
     }
 
     // 4.5 Process Wallet Deduction if any
@@ -1651,10 +1744,16 @@ export const dbService = {
       }
     }
 
-    // 5. Update Cash Drawer Immediately (Net of Wallet Deduction to avoid double counts)
-    const netCashPaid = actualPaid - walletDeduction;
+    // 5. Update Cash Drawer Immediately (Net of Wallet Deduction + Any Previous Credit Paid)
+    const netCashPaid = Math.max(0, actualPaid - walletDeduction) + actualCreditPaid;
     if (netCashPaid > 0) {
-      dbService.logCashMovement(netCashPaid, 0, `مبيعات نقداً فاتورة رقم ${invoiceNum}`);
+      dbService.logCashMovement(
+        netCashPaid,
+        0,
+        actualCreditPaid > 0
+          ? `مبيعات نقداً فاتورة رقم ${invoiceNum} + سداد آجل سابق (${actualCreditPaid} ج.م)`
+          : `مبيعات نقداً فاتورة رقم ${invoiceNum}`
+      );
     }
 
     // Save All back to storage (Atomic Commit)
@@ -1888,7 +1987,8 @@ export const dbService = {
     walletDeduction = 0,
     paymentNumber?: string,
     senderPhone?: string,
-    receiptImageUrl?: string
+    receiptImageUrl?: string,
+    creditSettlementAmount = 0
   ): { invoice: Invoice; items: InvoiceItem[] } => {
     const invoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
     const invoiceItemsList = getLocal<InvoiceItem[]>(KEYS.INVOICE_ITEMS, []);
@@ -1954,6 +2054,21 @@ export const dbService = {
       appSettings.instapay_number
     );
 
+    const targetCustIdx = (customerId && customerId !== 'c_general')
+      ? customersList.findIndex(c => c.id === customerId)
+      : -1;
+    const previousCreditBalance = targetCustIdx > -1 ? Math.max(0, customersList[targetCustIdx].current_balance || 0) : 0;
+    const actualCreditPaid = (targetCustIdx > -1 && previousCreditBalance > 0 && creditSettlementAmount > 0)
+      ? Math.min(creditSettlementAmount, previousCreditBalance)
+      : 0;
+    const remainingCreditAfter = Math.max(0, previousCreditBalance - actualCreditPaid + remainingAmount);
+    const shouldAttachCreditSummary = targetCustIdx > -1 && (
+      previousCreditBalance > 0 ||
+      actualCreditPaid > 0 ||
+      remainingAmount > 0 ||
+      paymentType === 'CREDIT'
+    );
+
     const updatedInvoice: Invoice = {
       ...existingInvoice,
       customer_id: customerId,
@@ -1985,6 +2100,12 @@ export const dbService = {
       payment_date: dateStr.split('T')[0],
       payment_time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       updated_at: dateStr,
+      ...(shouldAttachCreditSummary ? {
+        previous_credit_balance: previousCreditBalance,
+        credit_paid_with_invoice: actualCreditPaid,
+        remaining_credit_after_invoice: remainingCreditAfter,
+        grand_total_with_credit: total + previousCreditBalance,
+      } : {}),
     };
 
     invoices[invIdx] = updatedInvoice;
@@ -2157,21 +2278,87 @@ export const dbService = {
       }
     });
 
-    if ((paymentType === 'CREDIT' || paymentType === 'SPLIT') && customerId && customerId !== 'c_general' && remainingAmount > 0) {
-      const custIdx = customersList.findIndex(c => c.id === customerId);
-      if (custIdx > -1) {
-        const creditTxs = getLocal<CustomerCreditTransaction[]>(KEYS.CREDIT_TRANSACTIONS, []);
-        recordCreditTransactionInternal(creditTxs, customersList, {
-          customer_id: customerId,
-          customer_name: customersList[custIdx].full_name,
-          invoice_id: id,
-          transaction_type: 'INVOICE',
-          amount: remainingAmount,
-          notes: invoiceNotes ? `إغلاق فاتورة مبيعات بالآجل رقم ${existingInvoice.invoice_number}: ${invoiceNotes}` : `إغلاق فاتورة مبيعات بالآجل رقم ${existingInvoice.invoice_number}`,
-          created_by: cashierName
-        });
-        setLocal(KEYS.CREDIT_TRANSACTIONS, creditTxs);
+    // Settle previous credit balance if paid together with closing this open invoice
+    const creditTxs = getLocal<CustomerCreditTransaction[]>(KEYS.CREDIT_TRANSACTIONS, []);
+    let creditTxsModified = false;
+
+    if (actualCreditPaid > 0 && targetCustIdx > -1 && customerId) {
+      const creditPaymentsList = dbService.getCreditPayments();
+      const newCreditPayment: CreditPayment = {
+        id: `cp_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        customer_id: customerId,
+        amount: actualCreditPaid,
+        payment_date: dateStr,
+        notes: `تحصيل الحساب الآجل السابق مع إغلاق الفاتورة رقم ${existingInvoice.invoice_number}`,
+        created_at: dateStr,
+        updated_at: dateStr,
+      };
+      creditPaymentsList.push(newCreditPayment);
+      setLocal(KEYS.CREDIT_PAYMENTS, creditPaymentsList);
+
+      recordCreditTransactionInternal(creditTxs, customersList, {
+        customer_id: customerId,
+        customer_name: customersList[targetCustIdx].full_name,
+        invoice_id: id,
+        transaction_type: 'PAYMENT',
+        amount: actualCreditPaid,
+        notes: `سداد الحساب الآجل السابق مع الفاتورة رقم ${existingInvoice.invoice_number}`,
+        created_by: cashierName
+      });
+      creditTxsModified = true;
+
+      // Apply payment to older unpaid credit invoices (oldest first)
+      const oldUnpaidInvoices = invoices.filter(
+        inv => inv.customer_id === customerId &&
+          inv.id !== id &&
+          inv.invoice_status !== 'CANCELLED' &&
+          inv.invoice_status !== 'OPEN' &&
+          inv.invoice_status !== 'DRAFT' &&
+          (inv.remaining_amount || 0) > 0
+      );
+      oldUnpaidInvoices.sort((a, b) => a.invoice_date.localeCompare(b.invoice_date));
+
+      let remainingOldPayment = actualCreditPaid;
+      for (const oldInv of oldUnpaidInvoices) {
+        if (remainingOldPayment <= 0) break;
+        const oldIdx = invoices.findIndex(i => i.id === oldInv.id);
+        if (oldIdx !== -1) {
+          const canPay = Math.min(invoices[oldIdx].remaining_amount, remainingOldPayment);
+          invoices[oldIdx].paid_amount += canPay;
+          invoices[oldIdx].remaining_amount -= canPay;
+          invoices[oldIdx].payment_status = dbService.determinePaymentStatus(invoices[oldIdx]);
+          invoices[oldIdx].updated_at = dateStr;
+          remainingOldPayment -= canPay;
+        }
       }
+
+      customersList[targetCustIdx].current_balance = Math.max(0, previousCreditBalance - actualCreditPaid);
+      customersList[targetCustIdx].updated_at = dateStr;
+
+      dbService.logAuditAction(
+        'CREDIT_PAYMENT_WITH_INVOICE',
+        `تم تحصيل ${actualCreditPaid} ج.م من الحساب الآجل السابق للعميل ${customersList[targetCustIdx].full_name} مع الفاتورة رقم ${existingInvoice.invoice_number} (المتبقي بعد السداد: ${remainingCreditAfter} ج.م)`,
+        cashierName
+      );
+    }
+
+    if ((paymentType === 'CREDIT' || paymentType === 'SPLIT') && targetCustIdx > -1 && customerId && remainingAmount > 0) {
+      recordCreditTransactionInternal(creditTxs, customersList, {
+        customer_id: customerId,
+        customer_name: customersList[targetCustIdx].full_name,
+        invoice_id: id,
+        transaction_type: 'INVOICE',
+        amount: remainingAmount,
+        notes: invoiceNotes ? `إغلاق فاتورة مبيعات بالآجل رقم ${existingInvoice.invoice_number}: ${invoiceNotes}` : `إغلاق فاتورة مبيعات بالآجل رقم ${existingInvoice.invoice_number}`,
+        created_by: cashierName
+      });
+      customersList[targetCustIdx].current_balance = remainingCreditAfter;
+      customersList[targetCustIdx].updated_at = dateStr;
+      creditTxsModified = true;
+    }
+
+    if (creditTxsModified) {
+      setLocal(KEYS.CREDIT_TRANSACTIONS, creditTxs);
     }
 
     // Process Wallet Deduction if any
@@ -2212,10 +2399,16 @@ export const dbService = {
       }
     }
 
-    // Update Cash Drawer Immediately (Net of Wallet Deduction to avoid double counts)
-    const netCashPaid = actualPaid - walletDeduction;
+    // Update Cash Drawer Immediately (Net of Wallet Deduction + Any Previous Credit Paid)
+    const netCashPaid = Math.max(0, actualPaid - walletDeduction) + actualCreditPaid;
     if (netCashPaid > 0) {
-      dbService.logCashMovement(netCashPaid, 0, `مبيعات نقداً فاتورة رقم ${existingInvoice.invoice_number}`);
+      dbService.logCashMovement(
+        netCashPaid,
+        0,
+        actualCreditPaid > 0
+          ? `مبيعات نقداً فاتورة رقم ${existingInvoice.invoice_number} + سداد آجل سابق (${actualCreditPaid} ج.م)`
+          : `مبيعات نقداً فاتورة رقم ${existingInvoice.invoice_number}`
+      );
     }
 
     setLocal(KEYS.INVOICES, invoices);
