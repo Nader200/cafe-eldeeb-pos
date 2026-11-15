@@ -36,13 +36,15 @@ import {
   History,
   Copy,
   Camera,
-  Upload
+  Upload,
+  Share2
 } from 'lucide-react';
 import { dbService, safeStorage } from '../dbService';
 const localStorage = safeStorage;
 import { Invoice, Customer, TableSystem, InvoiceItem } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { uploadReceiptImage } from '../lib/receiptStorage';
+import { shareInvoiceImageToWhatsApp } from '../utils/invoiceImageGenerator';
 
 interface OpenInvoicesViewProps {
   onNavigate: (tab: string) => void;
@@ -172,6 +174,32 @@ export default function OpenInvoicesView({
   // Note Edit Modal State
   const [editingNotesInvoice, setEditingNotesInvoice] = useState<Invoice | null>(null);
   const [newInvoiceNotesInput, setNewInvoiceNotesInput] = useState<string>('');
+  const [sendingWhatsAppId, setSendingWhatsAppId] = useState<string | null>(null);
+
+  const handleSendOpenInvoiceImageToWhatsApp = async (inv: Invoice) => {
+    if (!inv || sendingWhatsAppId) return;
+    setSendingWhatsAppId(inv.id);
+    try {
+      const custObj = customers.find(c => c.id === inv.customer_id) || null;
+      const custPhone = custObj ? (custObj.whatsapp || custObj.phone || '') : '';
+      const items = dbService.getInvoiceItems(inv.id);
+
+      await shareInvoiceImageToWhatsApp({
+        invoice: inv,
+        items,
+        customer: custObj,
+        settings,
+        phone: custPhone,
+        onStart: (msg) => onShowSuccessAlert(msg),
+        onSuccess: (msg) => onShowSuccessAlert(msg),
+        onError: (msg) => onShowWarningAlert(msg),
+      });
+    } catch (err: any) {
+      onShowWarningAlert(err?.message || 'تعذر تجهيز صورة الفاتورة المفتوحة عبر واتساب');
+    } finally {
+      setSendingWhatsAppId(null);
+    }
+  };
 
   const handleOpenNotesModal = (inv: Invoice) => {
     setEditingNotesInvoice(inv);
@@ -1197,6 +1225,21 @@ export default function OpenInvoicesView({
                               سجل التتبع
                             </button>
 
+                            {/* 7. إرسال الفاتورة المفتوحة كصورة عبر واتساب (قبل الدفع) */}
+                            <button
+                              type="button"
+                              disabled={sendingWhatsAppId === inv.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSendOpenInvoiceImageToWhatsApp(inv);
+                              }}
+                              className="px-2.5 py-1 bg-green-600/20 border border-green-500/40 hover:bg-green-600/35 text-green-300 text-[9px] font-extrabold rounded-lg transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                              title="إرسال الفاتورة المفتوحة للعميل قبل الدفع كصورة عبر الواتساب"
+                            >
+                              <Share2 className="w-3 h-3 text-green-400" />
+                              {sendingWhatsAppId === inv.id ? 'جاري التجهيز...' : 'إرسال واتساب'}
+                            </button>
+
                             {/* 6. إلغاء الفاتورة (Admin only) */}
                             {currentUser?.role === 'Admin' && (
                               <button
@@ -1642,10 +1685,23 @@ export default function OpenInvoicesView({
                 </div>
               )}
 
+              {/* Send Open Invoice Image via WhatsApp */}
+              <button
+                type="button"
+                disabled={sendingWhatsAppId === selectedInvoice.id}
+                onClick={() => handleSendOpenInvoiceImageToWhatsApp(selectedInvoice)}
+                className="w-full mt-4 py-2.5 bg-green-600 hover:bg-green-500 text-white font-extrabold rounded-2xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg disabled:opacity-50"
+              >
+                <Share2 className="w-4 h-4" />
+                {sendingWhatsAppId === selectedInvoice.id
+                  ? 'جاري تجهيز صورة الفاتورة...'
+                  : 'إرسال الفاتورة للعميل قبل الدفع (صورة واتساب) 📸'}
+              </button>
+
               {/* Core Resume Button */}
               <button
                 onClick={() => handleEditOpenInvoice(selectedInvoice.id)}
-                className="w-full mt-4 py-3 bg-gradient-to-r from-gold-500 to-gold-700 text-black font-extrabold rounded-2xl text-xs transition-all hover:opacity-90 flex items-center justify-center gap-2 cursor-pointer shadow-lg"
+                className="w-full mt-2 py-3 bg-gradient-to-r from-gold-500 to-gold-700 text-black font-extrabold rounded-2xl text-xs transition-all hover:opacity-90 flex items-center justify-center gap-2 cursor-pointer shadow-lg"
               >
                 <ShoppingCart className="w-4 h-4 stroke-[2.5]" />
                 متابعة وإغلاق الحساب في الكاشير
@@ -3116,6 +3172,19 @@ export default function OpenInvoicesView({
                 className="w-full bg-luxury-bg border border-gray-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-white text-xs"
               />
             </div>
+
+            {/* Send Open Invoice Image Before Payment */}
+            <button
+              type="button"
+              disabled={sendingWhatsAppId === payInvoice.id}
+              onClick={() => handleSendOpenInvoiceImageToWhatsApp(payInvoice)}
+              className="w-full py-2.5 bg-green-600/20 hover:bg-green-600/35 border border-green-500/40 text-green-300 font-extrabold rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
+            >
+              <Share2 className="w-4 h-4 text-green-400" />
+              {sendingWhatsAppId === payInvoice.id
+                ? 'جاري تجهيز صورة الفاتورة...'
+                : 'إرسال الفاتورة للعميل قبل الدفع كصورة (واتساب) 📸'}
+            </button>
 
             {/* Action Buttons */}
             <div className="flex gap-2 pt-3 border-t border-gray-900">

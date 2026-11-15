@@ -64,41 +64,55 @@ export async function createInvoiceReceiptImage({
 
   const currency = settings?.currency || 'ج.م';
   const custName = customer?.full_name || (invoice.customer_id ? 'عميل عام / نقدي' : 'عميل عام / نقدي');
-  const paymentMethodText = getPaymentMethodLabel(invoice);
-
-  const paymentStatusLabel =
-    invoice.payment_status === 'PAID'
-      ? 'مدفوعة بالكامل'
-      : invoice.payment_status === 'PARTIAL'
-      ? 'مدفوعة جزئياً'
-      : invoice.payment_status === 'UNPAID'
-      ? 'غير مدفوعة - أجل'
-      : 'ملغاة';
-
-  const paymentStatusColor =
-    invoice.payment_status === 'PAID'
-      ? '#059669'
-      : invoice.payment_status === 'PARTIAL'
-      ? '#d97706'
-      : invoice.payment_status === 'UNPAID'
-      ? '#e11d48'
-      : '#6b7280';
-
+  const isOpenOrDraft = invoice.invoice_status === 'OPEN' || invoice.invoice_status === 'DRAFT';
   const subtotal = invoice.subtotal ?? 0;
   const discount = invoice.discount ?? 0;
   const tax = invoice.tax ?? 0;
   const total = invoice.total ?? 0;
   const paidAmount = invoice.paid_amount ?? 0;
-  const remainingAmount = invoice.remaining_amount ?? 0;
-  const prevCredit = invoice.previous_credit_balance ?? 0;
+  const remainingAmount = invoice.remaining_amount ?? (isOpenOrDraft ? Math.max(0, total - paidAmount) : 0);
+
+  const paymentMethodText =
+    isOpenOrDraft && paidAmount <= 0
+      ? 'لم يتم السداد بعد (فاتورة مفتوحة)'
+      : getPaymentMethodLabel(invoice);
+
+  const paymentStatusLabel = isOpenOrDraft
+    ? invoice.invoice_status === 'DRAFT'
+      ? 'فاتورة معلقة / مسودة (قبل الدفع)'
+      : 'فاتورة مفتوحة (قبل الدفع)'
+    : invoice.payment_status === 'PAID'
+    ? 'مدفوعة بالكامل'
+    : invoice.payment_status === 'PARTIAL'
+    ? 'مدفوعة جزئياً'
+    : invoice.payment_status === 'UNPAID'
+    ? 'غير مدفوعة - أجل'
+    : 'ملغاة';
+
+  const paymentStatusColor = isOpenOrDraft
+    ? '#d97706'
+    : invoice.payment_status === 'PAID'
+    ? '#059669'
+    : invoice.payment_status === 'PARTIAL'
+    ? '#d97706'
+    : invoice.payment_status === 'UNPAID'
+    ? '#e11d48'
+    : '#6b7280';
+
+  const customerOpenDebt =
+    isOpenOrDraft && customer && customer.id !== 'c_general'
+      ? Math.max(0, customer.current_balance || 0)
+      : 0;
+  const prevCredit = invoice.previous_credit_balance ?? customerOpenDebt;
   const creditPaidWithInv = invoice.credit_paid_with_invoice ?? 0;
   const remCreditAfter =
     invoice.remaining_credit_after_invoice ??
     Math.max(0, prevCredit - creditPaidWithInv + remainingAmount);
   const grandTotalWithCredit = invoice.grand_total_with_credit ?? total + prevCredit;
   const hasCreditSummary =
-    invoice.previous_credit_balance !== undefined &&
-    (prevCredit > 0 || creditPaidWithInv > 0 || remCreditAfter > 0);
+    (invoice.previous_credit_balance !== undefined &&
+      (prevCredit > 0 || creditPaidWithInv > 0 || remCreditAfter > 0)) ||
+    (isOpenOrDraft && customerOpenDebt > 0);
 
   const itemRowsHtml =
     safeItems.length > 0
@@ -235,19 +249,32 @@ export async function createInvoiceReceiptImage({
           <span>${tax.toLocaleString()} ${escapeHtml(currency)}</span>
         </div>
         <div style="display: flex; justify-content: space-between; color: #000000; font-weight: 900; font-size: 13.5px; padding-top: 6px; margin-top: 4px; border-top: 1px dotted #d1d5db;">
-          <span>${hasCreditSummary ? 'حساب الفاتورة الجديدة:' : 'الإجمالي النهائي:'}</span>
+          <span>${hasCreditSummary ? 'حساب الفاتورة الجديدة:' : isOpenOrDraft ? 'إجمالي الفاتورة المفتوحة:' : 'الإجمالي النهائي:'}</span>
           <span>${total.toLocaleString()} ${escapeHtml(currency)}</span>
         </div>
-        <div style="display: flex; justify-content: space-between; color: #4b5563; padding-top: 4px;">
-          <span>المسدد للفاتورة:</span>
-          <span>${paidAmount.toLocaleString()} ${escapeHtml(currency)}</span>
-        </div>
-        ${remainingAmount > 0 ? `
-          <div style="display: flex; justify-content: space-between; color: #d97706; margin-top: 3px;">
-            <span>المتبقي من الفاتورة الحالية (آجل):</span>
-            <span>${remainingAmount.toLocaleString()} ${escapeHtml(currency)}</span>
+        ${isOpenOrDraft ? `
+          ${paidAmount > 0 ? `
+            <div style="display: flex; justify-content: space-between; color: #047857; padding-top: 4px;">
+              <span>المدفوع مسبقاً:</span>
+              <span>${paidAmount.toLocaleString()} ${escapeHtml(currency)}</span>
+            </div>
+          ` : ''}
+          <div style="display: flex; justify-content: space-between; color: #b45309; font-weight: 900; padding-top: 4px;">
+            <span>المطلوب سداده للفاتورة:</span>
+            <span>${Math.max(0, total - paidAmount).toLocaleString()} ${escapeHtml(currency)}</span>
           </div>
-        ` : ''}
+        ` : `
+          <div style="display: flex; justify-content: space-between; color: #4b5563; padding-top: 4px;">
+            <span>المسدد للفاتورة:</span>
+            <span>${paidAmount.toLocaleString()} ${escapeHtml(currency)}</span>
+          </div>
+          ${remainingAmount > 0 ? `
+            <div style="display: flex; justify-content: space-between; color: #d97706; margin-top: 3px;">
+              <span>المتبقي من الفاتورة الحالية (آجل):</span>
+              <span>${remainingAmount.toLocaleString()} ${escapeHtml(currency)}</span>
+            </div>
+          ` : ''}
+        `}
         ${hasCreditSummary ? `
           <div style="margin-top: 8px; padding: 8px 10px; border-top: 1px dashed #fbbf24; background-color: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; font-size: 10.5px;">
             <div style="display: flex; justify-content: space-between; color: #78350f; margin-bottom: 3px;">
@@ -377,7 +404,11 @@ export async function shareInvoiceImageToWhatsApp({
       cleanPhone = '20' + cleanPhone;
     }
 
-    const message = `مرفق إليكم صورة فاتورتكم رقم ${invoice.invoice_number}.\n\nشكراً لتعاملكم مع كافيه الديب ☕`;
+    const isOpenOrDraft = invoice.invoice_status === 'OPEN' || invoice.invoice_status === 'DRAFT';
+    const currency = settings?.currency || 'ج.م';
+    const message = isOpenOrDraft
+      ? `مرفق إليكم صورة الفاتورة المفتوحة رقم ${invoice.invoice_number} (قبل الدفع) بقيمة ${(invoice.total ?? 0).toLocaleString()} ${currency}.\n\nشكراً لتعاملكم مع كافيه الديب ☕`
+      : `مرفق إليكم صورة فاتورتكم رقم ${invoice.invoice_number}.\n\nشكراً لتعاملكم مع كافيه الديب ☕`;
     const encodedText = encodeURIComponent(message);
     const whatsappUrl = cleanPhone
       ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedText}`
