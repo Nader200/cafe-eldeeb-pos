@@ -218,9 +218,17 @@ export default function OpenInvoicesView({
 
   useEffect(() => {
     loadData();
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadData();
+      }
+    };
     window.addEventListener('cafe_db_synced_remote', loadData);
     window.addEventListener('open_invoices_updated', loadData);
     window.addEventListener('open_invoice_created', loadData);
+    window.addEventListener('storage', loadData);
+    window.addEventListener('focus', loadData);
+    document.addEventListener('visibilitychange', handleVisibility);
     // Refresh live timers every 10 seconds
     const interval = setInterval(() => {
       setTicks(prev => prev + 1);
@@ -229,6 +237,9 @@ export default function OpenInvoicesView({
       window.removeEventListener('cafe_db_synced_remote', loadData);
       window.removeEventListener('open_invoices_updated', loadData);
       window.removeEventListener('open_invoice_created', loadData);
+      window.removeEventListener('storage', loadData);
+      window.removeEventListener('focus', loadData);
+      document.removeEventListener('visibilitychange', handleVisibility);
       clearInterval(interval);
     };
   }, []);

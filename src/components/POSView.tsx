@@ -330,7 +330,18 @@ export default function POSView({
     return dbService.hasRegisteredRawMaterialsForToday();
   }, []);
   
-  const [activeInvoiceId, setActiveInvoiceId] = useState<string | undefined>(() => reopenedInvoiceId || initialSavedDraft?.activeInvoiceId);
+  const [activeInvoiceId, setActiveInvoiceId] = useState<string | undefined>(() => {
+    if (reopenedInvoiceId) return reopenedInvoiceId;
+    if (initialSavedDraft?.activeInvoiceId) {
+      const existing = dbService.getInvoiceById(initialSavedDraft.activeInvoiceId);
+      const st = String(existing?.invoice?.invoice_status || '').toUpperCase().trim();
+      if (existing && (st === 'OPEN' || st === 'DRAFT')) {
+        return initialSavedDraft.activeInvoiceId;
+      }
+    }
+    return undefined;
+  });
+  const prevReopenedInvoiceIdRef = useRef<string | undefined>(reopenedInvoiceId);
 
   // Auto-persist active in-progress cart state so switching screens or app reloads never lose items
   useEffect(() => {
@@ -373,6 +384,9 @@ export default function POSView({
 
   // Load reopened invoice details if provided
   useEffect(() => {
+    const prevId = prevReopenedInvoiceIdRef.current;
+    prevReopenedInvoiceIdRef.current = reopenedInvoiceId;
+
     if (reopenedInvoiceId) {
       setActiveInvoiceId(reopenedInvoiceId);
       const details = dbService.getInvoiceById(reopenedInvoiceId);
@@ -401,7 +415,7 @@ export default function POSView({
           return {
             product,
             quantity: item.quantity,
-            notes: '',
+            notes: item.notes || '',
             kitchen_notes: '',
             custom_price: item.is_price_edited ? item.unit_price : undefined,
             is_price_edited: item.is_price_edited,
@@ -431,7 +445,7 @@ export default function POSView({
         
         onShowSuccessAlert(`تم تحميل الفاتورة المفتوحة رقم ${invoice.invoice_number} للمتابعة والتعديل.`);
       }
-    } else {
+    } else if (prevId) {
       setActiveInvoiceId(undefined);
     }
   }, [reopenedInvoiceId]);
@@ -463,7 +477,7 @@ export default function POSView({
         return {
           product,
           quantity: item.quantity,
-          notes: '',
+          notes: item.notes || '',
           kitchen_notes: '',
           custom_price: item.is_price_edited ? item.unit_price : undefined,
           is_price_edited: item.is_price_edited,
@@ -2847,7 +2861,7 @@ export default function POSView({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const nextSeq = String(dbService.getInvoices().length + 1).padStart(5, '0');
+                                  const nextSeq = String(dbService.getInvoices(true).length + 1).padStart(5, '0');
                                   const nextInvoiceNum = `INV-${new Date().getFullYear()}-${nextSeq}`;
                                   const shareText = `كافيه الديب\nتحويل فودافون كاش\nالرقم: ${settings.vodafone_cash_number}\nالمطلوب: ${cartTotals.total.toLocaleString()} ج.م\nرقم الفاتورة: ${nextInvoiceNum}`;
                                   navigator.clipboard.writeText(shareText);
@@ -2890,7 +2904,7 @@ export default function POSView({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const nextSeq = String(dbService.getInvoices().length + 1).padStart(5, '0');
+                                  const nextSeq = String(dbService.getInvoices(true).length + 1).padStart(5, '0');
                                   const nextInvoiceNum = `INV-${new Date().getFullYear()}-${nextSeq}`;
                                   const shareText = `كافيه الديب\nتحويل إنستا باي (InstaPay)\nالرقم: ${settings.instapay_number}\nالمطلوب: ${cartTotals.total.toLocaleString()} ج.م\nرقم الفاتورة: ${nextInvoiceNum}`;
                                   navigator.clipboard.writeText(shareText);

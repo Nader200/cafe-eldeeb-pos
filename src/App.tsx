@@ -319,6 +319,7 @@ function AppContent() {
       setActiveDrawer(dbService.getActiveDrawer());
       setHasStartedRawMaterials(dbService.hasRegisteredRawMaterialsForToday());
       setIsDbLoaded(true);
+      window.dispatchEvent(new CustomEvent('open_invoices_updated'));
 
       // Automatic update check on app startup if enabled
       if (loadedSettings.auto_update_checks_enabled !== false) {

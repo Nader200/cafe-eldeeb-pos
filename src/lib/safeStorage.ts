@@ -91,14 +91,20 @@ export const safeStorage = (() => {
               'cafe_inventory_batch_logs',
               'cafe_batch_consumptions'
             ];
+            const protectedVaultKeys = new Set([
+              'cafe_open_invoices_vault',
+              'cafe_open_invoice_items_vault',
+              'cafe_deleted_records',
+              'cafe_settings'
+            ]);
             keysToTrim.forEach(k => {
-              if (k !== key) {
+              if (k !== key && !protectedVaultKeys.has(k)) {
                 try { window.localStorage.removeItem(k); } catch (err) {}
               }
             });
             for (let i = window.localStorage.length - 1; i >= 0; i--) {
               const existingKey = window.localStorage.key(i);
-              if (existingKey && existingKey !== key && (
+              if (existingKey && existingKey !== key && !protectedVaultKeys.has(existingKey) && (
                 existingKey.startsWith('firestore_') ||
                 existingKey.startsWith('cafe_backup_content_') ||
                 existingKey.startsWith('gdrive_file_data_')

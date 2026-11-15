@@ -134,17 +134,335 @@ export function isServiceOrNonInventoryProduct(prod: any): boolean {
 
 import { firebaseSyncService } from './lib/firebaseSyncService';
 
-const setLocal = <T>(key: string, value: T): void => {
+const OPEN_VAULT_KEY = 'cafe_open_invoices_vault';
+const OPEN_ITEMS_VAULT_KEY = 'cafe_open_invoice_items_vault';
+const OPEN_VAULT_IDB_NAME = 'cafe_eldeeb_open_vault_db';
+const OPEN_VAULT_IDB_STORE = 'vault_store';
+
+let isResettingDatabase = false;
+const explicitlyDeletingInvoiceIds = new Set<string>();
+
+const isOpenOrDraftStatus = (status: any): boolean => {
+  const st = String(status || '').toUpperCase().trim();
+  return st === 'OPEN' || st === 'DRAFT';
+};
+
+const parseInvTs = (val: any): number => {
+  if (!val) return 0;
+  if (typeof val === 'number' && !isNaN(val)) return val;
+  if (typeof val === 'string') {
+    const num = Number(val);
+    if (!isNaN(num) && num > 1000000000000) return num;
+    const parsed = Date.parse(val);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+};
+
+const getInvTs = (inv: any): number => {
+  if (!inv || typeof inv !== 'object') return 0;
+  return Math.max(
+    parseInvTs(inv.updated_at),
+    parseInvTs(inv.created_at),
+    parseInvTs(inv.invoice_date)
+  );
+};
+
+const getDeletedTombstones = (): Record<string, number> => {
   try {
-    localStorage.setItem(key, JSON.stringify(value));
+    const raw = localStorage.getItem('cafe_deleted_records');
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const getNextInvoiceNumber = (invoices: Invoice[], offset = 1): string => {
+  const year = new Date().getFullYear();
+  let maxSeq = 0;
+  const seqRegex = new RegExp(`INV-${year}-(\\d+)`);
+  (invoices || []).forEach(inv => {
+    const m = String(inv?.invoice_number || '').match(seqRegex);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (!isNaN(n) && n > maxSeq) maxSeq = n;
+    }
+  });
+  const base = Math.max(maxSeq, (invoices || []).length);
+  return `INV-${year}-${String(base + offset).padStart(5, '0')}`;
+};
+
+const saveVaultToIDB = (invoices: Invoice[], items: InvoiceItem[]): void => {
+  if (typeof window === 'undefined' || !window.indexedDB) return;
+  try {
+    const req = window.indexedDB.open(OPEN_VAULT_IDB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(OPEN_VAULT_IDB_STORE)) {
+        db.createObjectStore(OPEN_VAULT_IDB_STORE);
+      }
+    };
+    req.onsuccess = () => {
+      try {
+        const db = req.result;
+        const tx = db.transaction(OPEN_VAULT_IDB_STORE, 'readwrite');
+        const store = tx.objectStore(OPEN_VAULT_IDB_STORE);
+        store.put(invoices, OPEN_VAULT_KEY);
+        store.put(items, OPEN_ITEMS_VAULT_KEY);
+        tx.oncomplete = () => db.close();
+      } catch {}
+    };
+  } catch {}
+};
+
+const restoreVaultFromIDBIfNeeded = (): Promise<void> => {
+  if (typeof window === 'undefined' || !window.indexedDB) return Promise.resolve();
+  return new Promise((resolve) => {
+    try {
+      const req = window.indexedDB.open(OPEN_VAULT_IDB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(OPEN_VAULT_IDB_STORE)) {
+          db.createObjectStore(OPEN_VAULT_IDB_STORE);
+        }
+      };
+      req.onerror = () => resolve();
+      req.onsuccess = () => {
+        try {
+          const db = req.result;
+          const tx = db.transaction(OPEN_VAULT_IDB_STORE, 'readonly');
+          const store = tx.objectStore(OPEN_VAULT_IDB_STORE);
+          const getInv = store.get(OPEN_VAULT_KEY);
+          const getItems = store.get(OPEN_ITEMS_VAULT_KEY);
+          tx.oncomplete = () => {
+            try {
+              const idbInvs = Array.isArray(getInv.result) ? (getInv.result as Invoice[]) : [];
+              const idbItems = Array.isArray(getItems.result) ? (getItems.result as InvoiceItem[]) : [];
+              if (idbInvs.length > 0) {
+                const existingVault = getLocal<Invoice[]>(OPEN_VAULT_KEY, []);
+                const existingItemsVault = getLocal<InvoiceItem[]>(OPEN_ITEMS_VAULT_KEY, []);
+                const deletedMap = getDeletedTombstones();
+                const mergedMap = new Map<string, Invoice>();
+                [...existingVault, ...idbInvs].forEach(inv => {
+                  if (!inv || !inv.id || !isOpenOrDraftStatus(inv.invoice_status)) return;
+                  const delTs = Math.max(
+                    deletedMap[`cafe_invoices::${inv.id}`] || 0,
+                    deletedMap[`${OPEN_VAULT_KEY}::${inv.id}`] || 0
+                  );
+                  if (delTs > 0 && delTs >= getInvTs(inv)) return;
+                  const cur = mergedMap.get(inv.id);
+                  if (!cur || getInvTs(inv) > getInvTs(cur)) mergedMap.set(inv.id, inv);
+                });
+                const mergedInvs = Array.from(mergedMap.values());
+                const mergedIds = new Set(mergedInvs.map(i => i.id));
+                const itemMap = new Map<string, InvoiceItem>();
+                [...existingItemsVault, ...idbItems].forEach(it => {
+                  if (!it || !it.id || !mergedIds.has(it.invoice_id)) return;
+                  const cur = itemMap.get(it.id);
+                  if (!cur || getInvTs(it) > getInvTs(cur)) itemMap.set(it.id, it);
+                });
+                if (mergedInvs.length > existingVault.length) {
+                  localStorage.setItem(OPEN_VAULT_KEY, JSON.stringify(mergedInvs));
+                  localStorage.setItem(OPEN_ITEMS_VAULT_KEY, JSON.stringify(Array.from(itemMap.values())));
+                }
+              }
+            } catch {}
+            db.close();
+            resolve();
+          };
+          tx.onerror = () => { db.close(); resolve(); };
+        } catch {
+          resolve();
+        }
+      };
+    } catch {
+      resolve();
+    }
+  });
+};
+
+const syncOpenInvoicesVaultState = (allInvoices: Invoice[], allItems?: InvoiceItem[], pushToCloud = true): void => {
+  const openInvoices = (allInvoices || []).filter(inv => inv && inv.id && isOpenOrDraftStatus(inv.invoice_status));
+  const openIds = new Set(openInvoices.map(i => i.id));
+  const itemsSource = allItems || getLocal<InvoiceItem[]>('cafe_invoice_items', []);
+  const openItems = (itemsSource || []).filter(it => it && openIds.has(it.invoice_id));
+
+  try {
+    localStorage.setItem(OPEN_VAULT_KEY, JSON.stringify(openInvoices));
+    localStorage.setItem(OPEN_ITEMS_VAULT_KEY, JSON.stringify(openItems));
+  } catch {}
+  saveVaultToIDB(openInvoices, openItems);
+
+  if (pushToCloud) {
+    try {
+      firebaseSyncService.pushKeyToCloud(OPEN_VAULT_KEY, openInvoices);
+      firebaseSyncService.pushKeyToCloud(OPEN_ITEMS_VAULT_KEY, openItems);
+    } catch {}
+  }
+};
+
+let isReconcilingVault = false;
+const reconcileOpenInvoicesWithVault = (): void => {
+  if (isReconcilingVault || isResettingDatabase) return;
+  isReconcilingVault = true;
+  try {
+    const mainInvoices = getLocal<Invoice[]>('cafe_invoices', []);
+    const mainItems = getLocal<InvoiceItem[]>('cafe_invoice_items', []);
+    const vaultInvoices = getLocal<Invoice[]>(OPEN_VAULT_KEY, []);
+    const vaultItems = getLocal<InvoiceItem[]>(OPEN_ITEMS_VAULT_KEY, []);
+
+    if (vaultInvoices.length === 0 && mainInvoices.every(i => !isOpenOrDraftStatus(i?.invoice_status))) {
+      return;
+    }
+
+    const deletedMap = getDeletedTombstones();
+    const mainById = new Map<string, Invoice>();
+    mainInvoices.forEach(inv => {
+      if (!inv || !inv.id) return;
+      const prev = mainById.get(inv.id);
+      if (!prev || getInvTs(inv) >= getInvTs(prev)) {
+        mainById.set(inv.id, inv);
+      }
+    });
+
+    let mainChanged = false;
+    let vaultChanged = false;
+    let itemsChanged = false;
+    const cleanVault: Invoice[] = [];
+    const restoredInvoiceIds = new Set<string>();
+
+    for (const vInv of vaultInvoices) {
+      if (!vInv || !vInv.id || !isOpenOrDraftStatus(vInv.invoice_status)) {
+        vaultChanged = true;
+        continue;
+      }
+      const delTs = Math.max(
+        deletedMap[`cafe_invoices::${vInv.id}`] || 0,
+        deletedMap[`${OPEN_VAULT_KEY}::${vInv.id}`] || 0
+      );
+      if (delTs > 0 && delTs >= getInvTs(vInv)) {
+        vaultChanged = true;
+        continue;
+      }
+
+      const mainInv = mainById.get(vInv.id);
+      if (!mainInv) {
+        // Missing from main cafe_invoices -> restore automatically from vault!
+        mainById.set(vInv.id, vInv);
+        cleanVault.push(vInv);
+        restoredInvoiceIds.add(vInv.id);
+        mainChanged = true;
+      } else if (!isOpenOrDraftStatus(mainInv.invoice_status) && getInvTs(mainInv) >= getInvTs(vInv)) {
+        // Invoice was legitimately closed/cancelled more recently or at same timestamp -> prune from vault
+        vaultChanged = true;
+      } else if (getInvTs(vInv) > getInvTs(mainInv)) {
+        mainById.set(vInv.id, vInv);
+        cleanVault.push(vInv);
+        restoredInvoiceIds.add(vInv.id);
+        mainChanged = true;
+      } else {
+        cleanVault.push(mainInv);
+      }
+    }
+
+    // Ensure every active OPEN/DRAFT invoice in main is also mirrored in vault
+    const cleanVaultIds = new Set(cleanVault.map(i => i.id));
+    for (const mInv of mainById.values()) {
+      if (isOpenOrDraftStatus(mInv.invoice_status) && !cleanVaultIds.has(mInv.id)) {
+        cleanVault.push(mInv);
+        cleanVaultIds.add(mInv.id);
+        vaultChanged = true;
+      }
+    }
+
+    let nextItems = [...mainItems];
+    if (restoredInvoiceIds.size > 0) {
+      const existingItemIds = new Set(nextItems.map(it => it.id));
+      for (const vItem of vaultItems) {
+        if (!vItem || !restoredInvoiceIds.has(vItem.invoice_id)) continue;
+        const alreadyHasItemsForInv = nextItems.some(it => it.invoice_id === vItem.invoice_id);
+        if (!alreadyHasItemsForInv || !existingItemIds.has(vItem.id)) {
+          if (!existingItemIds.has(vItem.id)) {
+            nextItems.push(vItem);
+            existingItemIds.add(vItem.id);
+            itemsChanged = true;
+          }
+        }
+      }
+    }
+
+    if (mainChanged) {
+      const updatedMain = Array.from(mainById.values());
+      localStorage.setItem('cafe_invoices', JSON.stringify(updatedMain));
+      try { firebaseSyncService.pushKeyToCloud('cafe_invoices', updatedMain); } catch {}
+    }
+    if (itemsChanged) {
+      localStorage.setItem('cafe_invoice_items', JSON.stringify(nextItems));
+      try { firebaseSyncService.pushKeyToCloud('cafe_invoice_items', nextItems); } catch {}
+    }
+    if (vaultChanged || mainChanged || itemsChanged) {
+      const latestInvoices = mainChanged ? Array.from(mainById.values()) : mainInvoices;
+      syncOpenInvoicesVaultState(latestInvoices, nextItems, vaultChanged);
+    }
+  } finally {
+    isReconcilingVault = false;
+  }
+};
+
+const setLocal = <T>(key: string, value: T): void => {
+  let finalValue: any = value;
+
+  // Structural guard: NEVER allow writing KEYS.INVOICES to silently drop active OPEN/DRAFT invoices
+  if (key === 'cafe_invoices' && Array.isArray(value) && !isResettingDatabase) {
+    const incoming = value as Invoice[];
+    const incomingIds = new Set(incoming.map(i => i?.id).filter(Boolean));
+    const prevInvoices = getLocal<Invoice[]>('cafe_invoices', []);
+    const vaultInvoices = getLocal<Invoice[]>(OPEN_VAULT_KEY, []);
+    const deletedMap = getDeletedTombstones();
+
+    const candidatesMap = new Map<string, Invoice>();
+    [...prevInvoices, ...vaultInvoices].forEach(inv => {
+      if (!inv || !inv.id || !isOpenOrDraftStatus(inv.invoice_status)) return;
+      const cur = candidatesMap.get(inv.id);
+      if (!cur || getInvTs(inv) > getInvTs(cur)) candidatesMap.set(inv.id, inv);
+    });
+
+    const preservedOpenDraft: Invoice[] = [];
+    for (const inv of candidatesMap.values()) {
+      if (incomingIds.has(inv.id)) continue;
+      if (explicitlyDeletingInvoiceIds.has(inv.id)) continue;
+      const delTs = Math.max(
+        deletedMap[`cafe_invoices::${inv.id}`] || 0,
+        deletedMap[`${OPEN_VAULT_KEY}::${inv.id}`] || 0
+      );
+      if (delTs > 0 && delTs >= getInvTs(inv)) continue;
+      preservedOpenDraft.push(inv);
+    }
+
+    if (preservedOpenDraft.length > 0) {
+      finalValue = [...incoming, ...preservedOpenDraft];
+    }
+  }
+
+  try {
+    localStorage.setItem(key, JSON.stringify(finalValue));
   } catch (err: any) {
     console.error('localStorage.setItem failed:', err);
+  }
+
+  if (key === 'cafe_invoices' && Array.isArray(finalValue) && !isResettingDatabase) {
+    syncOpenInvoicesVaultState(finalValue as Invoice[], undefined, true);
+  } else if (key === 'cafe_invoice_items' && Array.isArray(finalValue) && !isResettingDatabase) {
+    const currInvs = getLocal<Invoice[]>('cafe_invoices', []);
+    syncOpenInvoicesVaultState(currInvs, finalValue as InvoiceItem[], true);
   }
 
   syncToServer();
 
   try {
-    firebaseSyncService.pushKeyToCloud(key, value);
+    firebaseSyncService.pushKeyToCloud(key, finalValue);
   } catch (err: any) {
     console.error('pushKeyToCloud Exception in setLocal:', err);
   }
@@ -158,6 +476,8 @@ const KEYS = {
   SUPPLIERS: 'cafe_suppliers',
   INVOICES: 'cafe_invoices',
   INVOICE_ITEMS: 'cafe_invoice_items',
+  OPEN_INVOICES_VAULT: OPEN_VAULT_KEY,
+  OPEN_INVOICE_ITEMS_VAULT: OPEN_ITEMS_VAULT_KEY,
   EXPENSES: 'cafe_expenses',
   INVENTORY_TRANSACTIONS: 'cafe_inventory_transactions',
   CREDIT_PAYMENTS: 'cafe_credit_payments',
@@ -387,13 +707,16 @@ export const clearDatabase = (preserveSettings = true): void => {
   });
 
   // Clear IndexedDB if any
-  if (typeof window !== 'undefined' && window.indexedDB && window.indexedDB.databases) {
+  if (typeof window !== 'undefined' && window.indexedDB) {
     try {
-      window.indexedDB.databases().then(dbs => {
-        dbs.forEach(db => {
-          if (db.name) window.indexedDB.deleteDatabase(db.name);
-        });
-      }).catch(() => {});
+      window.indexedDB.deleteDatabase(OPEN_VAULT_IDB_NAME);
+      if (window.indexedDB.databases) {
+        window.indexedDB.databases().then(dbs => {
+          dbs.forEach(db => {
+            if (db.name) window.indexedDB.deleteDatabase(db.name);
+          });
+        }).catch(() => {});
+      }
     } catch (e) {}
   }
 };
@@ -725,13 +1048,16 @@ export const dbService = {
   },
 
   loadFromServer: async (): Promise<boolean> => {
+    await restoreVaultFromIDBIfNeeded();
     if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+      reconcileOpenInvoicesWithVault();
       isDatabaseLoadedFromServer = true;
       return true;
     }
     try {
       const res = await fetch('/api/db');
       if (!res.ok) {
+        reconcileOpenInvoicesWithVault();
         isDatabaseLoadedFromServer = true;
         return false;
       }
@@ -759,14 +1085,17 @@ export const dbService = {
             }
           }
         });
+        reconcileOpenInvoicesWithVault();
         isDatabaseLoadedFromServer = true;
         return true;
       } else {
+        reconcileOpenInvoicesWithVault();
         isDatabaseLoadedFromServer = true;
         return false;
       }
     } catch (e: any) {
       console.warn('Server database load notice:', e?.message || e);
+      reconcileOpenInvoicesWithVault();
       isDatabaseLoadedFromServer = true;
       return false;
     }
@@ -964,8 +1293,16 @@ export const dbService = {
     // 4. Remove all related invoices (safety cleanup)
     const allInvoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
     const removedInvoiceIds = allInvoices.filter(inv => inv.customer_id === id).map(inv => inv.id);
-    if (removedInvoiceIds.length > 0) firebaseSyncService.recordDeletions(KEYS.INVOICES, removedInvoiceIds);
-    setLocal(KEYS.INVOICES, allInvoices.filter(inv => inv.customer_id !== id));
+    if (removedInvoiceIds.length > 0) {
+      firebaseSyncService.recordDeletions(KEYS.INVOICES, removedInvoiceIds);
+      firebaseSyncService.recordDeletions(KEYS.OPEN_INVOICES_VAULT, removedInvoiceIds);
+      removedInvoiceIds.forEach(remId => explicitlyDeletingInvoiceIds.add(remId));
+    }
+    try {
+      setLocal(KEYS.INVOICES, allInvoices.filter(inv => inv.customer_id !== id));
+    } finally {
+      removedInvoiceIds.forEach(remId => explicitlyDeletingInvoiceIds.delete(remId));
+    }
 
     // Cleanup wallet, notes, visits
     const allWallet = getLocal<any[]>(KEYS.WALLET_TRANSACTIONS, []);
@@ -1209,6 +1546,9 @@ export const dbService = {
   },
 
   getInvoices: (includeOpen = false): Invoice[] => {
+    if (includeOpen) {
+      reconcileOpenInvoicesWithVault();
+    }
     const list = getLocal<Invoice[]>(KEYS.INVOICES, []);
     const mapped = list.map(inv => {
       if (!inv.payment_status) {
@@ -1222,15 +1562,15 @@ export const dbService = {
     if (includeOpen) {
       return mapped;
     }
-    return mapped.filter(inv => inv.invoice_status !== 'OPEN' && inv.invoice_status !== 'DRAFT');
+    return mapped.filter(inv => !isOpenOrDraftStatus(inv.invoice_status));
   },
   getOpenInvoices: (): Invoice[] => {
+    reconcileOpenInvoicesWithVault();
     const list = getLocal<Invoice[]>(KEYS.INVOICES, []);
     return list
       .filter(inv => {
         if (!inv) return false;
-        const st = String(inv.invoice_status || '').toUpperCase().trim();
-        return st === 'OPEN' || st === 'DRAFT';
+        return isOpenOrDraftStatus(inv.invoice_status);
       })
       .map(inv => {
         const st = String(inv.invoice_status || '').toUpperCase().trim() as InvoiceStatus;
@@ -1249,6 +1589,7 @@ export const dbService = {
       });
   },
   getInvoiceById: (id: string): { invoice: Invoice; items: InvoiceItem[] } | null => {
+    reconcileOpenInvoicesWithVault();
     const list = getLocal<Invoice[]>(KEYS.INVOICES, []);
     const inv = list.find(i => i.id === id);
     if (!inv) return null;
@@ -1264,14 +1605,19 @@ export const dbService = {
       throw new Error('رمز الأمان PIN للمسؤول غير صحيح!');
     }
     const invoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
-    const updated = invoices.map(inv => ({ ...inv, is_archived: true }));
+    const updated = invoices.map(inv =>
+      isOpenOrDraftStatus(inv.invoice_status) ? inv : { ...inv, is_archived: true }
+    );
     setLocal(KEYS.INVOICES, updated);
     return true;
   },
   getInvoiceItems: (invoiceId?: string): InvoiceItem[] => {
     const items = getLocal<InvoiceItem[]>(KEYS.INVOICE_ITEMS, []);
     if (invoiceId) {
-      return items.filter(it => it.invoice_id === invoiceId);
+      const matched = items.filter(it => it.invoice_id === invoiceId);
+      if (matched.length > 0) return matched;
+      const vaultItems = getLocal<InvoiceItem[]>(KEYS.OPEN_INVOICE_ITEMS_VAULT, []);
+      return vaultItems.filter(it => it.invoice_id === invoiceId);
     }
     return items;
   },
@@ -1303,7 +1649,7 @@ export const dbService = {
     receiptImageUrl?: string,
     creditSettlementAmount = 0
   ): { invoice: Invoice; items: InvoiceItem[] } => {
-    const invoices = dbService.getInvoices();
+    const invoices = dbService.getInvoices(true);
     const invoiceItemsList = dbService.getInvoiceItems();
     const products = dbService.getProducts();
     const rawMaterialsList = dbService.getRawMaterials();
@@ -1347,10 +1693,8 @@ export const dbService = {
       status = 'PAID';
     }
 
-    // 2. Generate Invoice Number (Format: INV-2026-XXXX)
-    const year = new Date().getFullYear();
-    const seq = String(invoices.length + 1).padStart(5, '0');
-    const invoiceNum = `INV-${year}-${seq}`;
+    // 2. Generate Invoice Number (Format: INV-2026-XXXXX) safely across ALL invoices
+    const invoiceNum = getNextInvoiceNumber(invoices, 1);
 
     const invoiceId = `inv_${Date.now()}`;
     const invoiceDate = new Date().toISOString();
@@ -2561,7 +2905,7 @@ export const dbService = {
    * - Marks status as CANCELLED
    */
   cancelInvoice: (invoiceId: string, cashierName: string): Invoice | null => {
-    const invoices = dbService.getInvoices();
+    const invoices = dbService.getInvoices(true);
     const invIdx = invoices.findIndex(i => i.id === invoiceId);
     if (invIdx === -1) return null;
 
@@ -2851,9 +3195,7 @@ export const dbService = {
     let splitTax = Math.round(splitSubtotal * 0.14);
     let splitTotal = splitSubtotal + splitTax;
     
-    const year = new Date().getFullYear();
-    const seq = String(invoices.length + 1).padStart(5, '0');
-    const newInvoiceNum = `INV-${year}-${seq}`;
+    const newInvoiceNum = getNextInvoiceNumber(invoices, 1);
     
     const newInvoice: Invoice = {
       id: newInvoiceId,
@@ -3174,9 +3516,7 @@ export const dbService = {
     
     for (let p = 1; p <= parts; p++) {
       const newId = `inv_${Date.now()}_p${p}`;
-      const year = new Date().getFullYear();
-      const seq = String(invoices.length + p).padStart(5, '0');
-      const newNum = `INV-${year}-${seq}`;
+      const newNum = getNextInvoiceNumber(invoices, p);
       
       const subtotal = Math.round(originalInvoice.subtotal / parts);
       const discount = Math.round(originalInvoice.discount / parts);
@@ -3536,10 +3876,11 @@ export const dbService = {
     setLocal(KEYS.CUSTOMERS, customersList);
 
     // Update individual credit invoices (oldest first)
-    const invoices = dbService.getInvoices();
+    const invoices = dbService.getInvoices(true);
     const custInvoices = invoices.filter(
       inv => inv.customer_id === customerId &&
       inv.invoice_status !== 'CANCELLED' &&
+      !isOpenOrDraftStatus(inv.invoice_status) &&
       inv.remaining_amount > 0
     );
 
@@ -5037,15 +5378,23 @@ export const dbService = {
       }
 
       // Restore all keys to localStorage
-      Object.entries(rawDataObj).forEach(([k, val]) => {
-        if (val !== undefined && val !== null) {
-          if (typeof val === 'object') {
-            localStorage.setItem(k, JSON.stringify(val));
-          } else {
-            localStorage.setItem(k, String(val));
+      isResettingDatabase = true;
+      try {
+        Object.entries(rawDataObj).forEach(([k, val]) => {
+          if (val !== undefined && val !== null) {
+            if (typeof val === 'object') {
+              localStorage.setItem(k, JSON.stringify(val));
+            } else {
+              localStorage.setItem(k, String(val));
+            }
           }
-        }
-      });
+        });
+      } finally {
+        isResettingDatabase = false;
+      }
+
+      reconcileOpenInvoicesWithVault();
+      syncOpenInvoicesVaultState(getLocal<Invoice[]>(KEYS.INVOICES, []), getLocal<InvoiceItem[]>(KEYS.INVOICE_ITEMS, []), true);
 
       // Force sync to server database
       try {
@@ -5518,8 +5867,16 @@ export const dbService = {
     setLocal(KEYS.CUSTOMERS, updatedCustomers);
 
     // 2. Clear ONLY demo invoices, expenses, payments, reports, and stats/logs
-    setLocal(KEYS.INVOICES, []);
-    setLocal(KEYS.INVOICE_ITEMS, []);
+    isResettingDatabase = true;
+    try {
+      setLocal(KEYS.INVOICES, []);
+      setLocal(KEYS.INVOICE_ITEMS, []);
+      setLocal(KEYS.OPEN_INVOICES_VAULT, []);
+      setLocal(KEYS.OPEN_INVOICE_ITEMS_VAULT, []);
+      saveVaultToIDB([], []);
+    } finally {
+      isResettingDatabase = false;
+    }
     setLocal(KEYS.EXPENSES, []);
     setLocal(KEYS.CREDIT_PAYMENTS, []);
     setLocal(KEYS.CREDIT_TRANSACTIONS, []);
@@ -6922,12 +7279,19 @@ export const dbService = {
     const filteredItems = allItems.filter(it => it.invoice_id !== invoiceId);
 
     firebaseSyncService.recordDeletion(KEYS.INVOICES, invoiceId);
+    firebaseSyncService.recordDeletion(KEYS.OPEN_INVOICES_VAULT, invoiceId);
     if (deletedItemIds.length > 0) {
       firebaseSyncService.recordDeletions(KEYS.INVOICE_ITEMS, deletedItemIds);
+      firebaseSyncService.recordDeletions(KEYS.OPEN_INVOICE_ITEMS_VAULT, deletedItemIds);
     }
 
-    setLocal(KEYS.INVOICES, filtered);
-    setLocal(KEYS.INVOICE_ITEMS, filteredItems);
+    explicitlyDeletingInvoiceIds.add(invoiceId);
+    try {
+      setLocal(KEYS.INVOICES, filtered);
+      setLocal(KEYS.INVOICE_ITEMS, filteredItems);
+    } finally {
+      explicitlyDeletingInvoiceIds.delete(invoiceId);
+    }
 
     dbService.logAuditAction(
       'CANCEL_OPEN_INVOICE',

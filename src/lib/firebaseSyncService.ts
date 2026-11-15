@@ -33,7 +33,8 @@ const ALL_SYNC_KEYS: string[] = [
   'cafe_deleted_records',
   'cafe_categories', 'cafe_products', 'cafe_customers', 'cafe_suppliers',
   'cafe_supplier_purchases', 'cafe_supplier_payments',
-  'cafe_invoices', 'cafe_invoice_items', 'cafe_expenses', 'cafe_inventory_transactions',
+  'cafe_invoices', 'cafe_invoice_items', 'cafe_open_invoices_vault', 'cafe_open_invoice_items_vault',
+  'cafe_expenses', 'cafe_inventory_transactions',
   'cafe_credit_payments', 'cafe_cash_drawers', 'cafe_daily_closes', 'cafe_settings',
   'cafe_backup_logs', 'cafe_communication_logs', 'cafe_audit_logs', 'cafe_item_modifications',
   'cafe_returns_list', 'cafe_credit_adjustments', 'cafe_cash_history', 'cafe_wallet_transactions',
@@ -49,7 +50,8 @@ const ALL_SYNC_KEYS: string[] = [
 const MERGEABLE_ARRAY_KEYS = new Set<string>([
   'cafe_categories', 'cafe_products', 'cafe_customers', 'cafe_suppliers',
   'cafe_supplier_purchases', 'cafe_supplier_payments',
-  'cafe_invoices', 'cafe_invoice_items', 'cafe_expenses', 'cafe_inventory_transactions',
+  'cafe_invoices', 'cafe_invoice_items', 'cafe_open_invoices_vault', 'cafe_open_invoice_items_vault',
+  'cafe_expenses', 'cafe_inventory_transactions',
   'cafe_credit_payments', 'cafe_cash_drawers', 'cafe_daily_closes',
   'cafe_credit_adjustments', 'cafe_cash_history', 'cafe_wallet_transactions',
   'cafe_customer_notes', 'cafe_customer_visits', 'cafe_credit_transactions_system',
@@ -205,6 +207,19 @@ class FirebaseSyncService {
         this.syncAllLocalToCloud().catch(() => {});
       }, 500);
     }
+
+    // Periodic safety retry for dirty keys so pending local writes never get stuck indefinitely
+    setInterval(() => {
+      if (
+        typeof navigator !== 'undefined' &&
+        navigator.onLine &&
+        this.hasPendingDirtyKeys() &&
+        this.activePushes.size === 0 &&
+        this.debounceTimers.size === 0
+      ) {
+        this.syncAllLocalToCloud().catch(() => {});
+      }
+    }, 12000);
   }
 
   private handleForeground() {
@@ -847,6 +862,20 @@ class FirebaseSyncService {
               }
               compact[c.idx] = copy;
               payloadSizeBytes = measure(compact);
+            }
+
+            // 3. If still over Firestore limit (e.g. huge invoice count), strip verbose timeline arrays on oldest closed invoices while always keeping OPEN/DRAFT intact
+            if (payloadSizeBytes > FIRESTORE_SAFE_LIMIT_BYTES) {
+              const timelineCandidates = indexed
+                .filter(e => !e.isOpenOrDraft && Array.isArray(compact[e.idx]?.timeline) && compact[e.idx].timeline.length > 0)
+                .sort((a, b) => a.ts - b.ts);
+              for (const c of timelineCandidates) {
+                if (payloadSizeBytes <= FIRESTORE_SAFE_LIMIT_BYTES) break;
+                const copy = { ...compact[c.idx] };
+                delete copy.timeline;
+                compact[c.idx] = copy;
+                payloadSizeBytes = measure(compact);
+              }
             }
           }
           sanitizedData = compact;
