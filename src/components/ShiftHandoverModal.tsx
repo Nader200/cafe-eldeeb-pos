@@ -16,10 +16,13 @@ import {
   KeyRound,
   Eye,
   EyeOff,
-  Clock
+  Clock,
+  RotateCcw
 } from 'lucide-react';
 import { Shift, ShiftType } from '../types';
 import { dbService } from '../dbService';
+import { useAuth } from '../contexts/AuthContext';
+import ResetCashDrawerModal from './ResetCashDrawerModal';
 
 interface ShiftHandoverModalProps {
   isOpen: boolean;
@@ -53,6 +56,11 @@ export default function ShiftHandoverModal({
   // Receive State (Admin)
   const [actualReceivedCash, setActualReceivedCash] = useState<string>('');
   const [discrepancyReason, setDiscrepancyReason] = useState<string>('');
+
+  // Admin-only Reset Cash Drawer modal
+  const { currentUser } = useAuth();
+  const isAdmin = currentUser?.role === 'Admin';
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -341,6 +349,22 @@ export default function ShiftHandoverModal({
                   <span className="text-xs font-black text-gold-300 font-mono">{currentMetrics.expected_cash} ج.م</span>
                 </div>
               </div>
+
+              {isAdmin && (
+                <div className="mt-3 pt-3 border-t border-gray-800/80 flex items-center justify-between gap-2">
+                  <span className="text-[10px] text-gray-400 font-bold">
+                    في حال وجود خطأ حسابي بالدرج أو الرصيد الافتتاحي:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsResetModalOpen(true)}
+                    className="px-3 py-1.5 bg-red-950/60 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/40 rounded-xl text-[11px] font-black transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>تصفير حساب الدرج (أدمن)</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Declared Cash Input */}
@@ -460,6 +484,22 @@ export default function ShiftHandoverModal({
                   </span>
                 </div>
               </div>
+
+              {isAdmin && (
+                <div className="mt-2 pt-2 border-t border-amber-500/20 flex items-center justify-between gap-2">
+                  <span className="text-[10px] text-amber-200/80 font-bold">
+                    وجود خطأ بالوردية المعلقة؟
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsResetModalOpen(true)}
+                    className="px-3 py-1.5 bg-red-950/60 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/40 rounded-xl text-[11px] font-black transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>تصفير حساب الدرج (أدمن)</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Actual Received Input */}
@@ -526,6 +566,15 @@ export default function ShiftHandoverModal({
           </form>
         )}
       </div>
+
+      <ResetCashDrawerModal
+        isOpen={isResetModalOpen}
+        onClose={() => setIsResetModalOpen(false)}
+        onSuccess={() => {
+          setSuccessMsg('تم تصفير حساب الدرج والوردية الحالية إلى 0 ج.م بنجاح ✅');
+          onShiftUpdated();
+        }}
+      />
     </div>
   );
 }

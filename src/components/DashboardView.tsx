@@ -44,7 +44,10 @@ import {
   Calculator,
   Sun,
   Moon,
-  ArrowLeftRight
+  ArrowLeftRight,
+  RotateCcw,
+  ShieldCheck,
+  Lock
 } from 'lucide-react';
 import {
   AreaChart,
@@ -64,6 +67,8 @@ import { AppSettings, Customer, Invoice, Expense, AuditLog, Shift } from '../typ
 import SyncStatusIndicator from './SyncStatusIndicator';
 import { EldeebLogoFull } from './EldeebLogo';
 import ShiftHandoverModal from './ShiftHandoverModal';
+import ResetCashDrawerModal from './ResetCashDrawerModal';
+import { useAuth } from '../contexts/AuthContext';
 
 interface DashboardViewProps {
   settings: AppSettings;
@@ -89,9 +94,12 @@ export default function DashboardView({
   onApproveRawMaterials
 }: DashboardViewProps) {
   // 1. Reactive Datasets
+  const { currentUser } = useAuth();
+  const isAdmin = currentUser?.role === 'Admin';
   const [tick, setTick] = useState(0);
   const [activeShift, setActiveShift] = useState<Shift | null>(() => dbService.getActiveShift());
   const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
+  const [showResetDrawerModal, setShowResetDrawerModal] = useState(false);
 
   const refreshShiftState = () => {
     setActiveShift(dbService.getActiveShift());
@@ -105,10 +113,12 @@ export default function DashboardView({
     refreshShiftState();
     window.addEventListener('cafe_db_synced_remote', handleSync);
     window.addEventListener('shift_updated', handleSync);
+    window.addEventListener('safe_updated', handleSync);
     window.addEventListener('storage', handleSync);
     return () => {
       window.removeEventListener('cafe_db_synced_remote', handleSync);
       window.removeEventListener('shift_updated', handleSync);
+      window.removeEventListener('safe_updated', handleSync);
       window.removeEventListener('storage', handleSync);
     };
   }, []);
@@ -117,6 +127,8 @@ export default function DashboardView({
   const expenses = useMemo(() => dbService.getExpenses(), [tick]);
   const customers = useMemo(() => dbService.getCustomers(), [tick]);
   const cashDrawer = useMemo(() => dbService.getActiveDrawer(), [tick]);
+  const mainSafeBalance = useMemo(() => dbService.getSafeBalance('MAIN_SAFE'), [tick]);
+  const privateSafeBalance = useMemo(() => dbService.getSafeBalance('PRIVATE_SAFE'), [tick]);
   const auditLogs = useMemo(() => {
     const logs = dbService.getAuditLogs ? dbService.getAuditLogs() : [];
     return [...logs].reverse().slice(0, 5);
@@ -939,7 +951,7 @@ export default function DashboardView({
             )}
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
             {activeShift && (
               <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border ${
                 activeShift.status === 'OPEN'
@@ -948,6 +960,18 @@ export default function DashboardView({
               }`}>
                 {activeShift.status === 'OPEN' ? 'مفتوحة 🟢' : 'معلقة ⏳'}
               </span>
+            )}
+
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setShowResetDrawerModal(true)}
+                className="px-2.5 py-1 bg-red-950/50 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/40 rounded-lg font-black text-[10px] transition-all cursor-pointer flex items-center gap-1 active:scale-95"
+                title="تصفير حساب الدرج (خاص بالأدمن فقط)"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>تصفير الدرج</span>
+              </button>
             )}
 
             <button
@@ -961,6 +985,56 @@ export default function DashboardView({
           </div>
         </div>
       </div>
+
+      {/* ==================================================
+          3.6. ADMIN-ONLY TWO-SAFE TREASURY WIDGET (الخزنة الرئيسية والخاصة)
+          ================================================== */}
+      {isAdmin && (
+        <div className="w-full max-w-lg mx-auto bg-gradient-to-r from-[#0a0d0a] via-[#0d0c09] to-[#110e06] border border-[#D4AF37]/35 rounded-2xl p-3.5 shadow-lg flex flex-col gap-2.5 select-none">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-[#D4AF37]/15 border border-[#D4AF37]/40 text-[#D4AF37] flex items-center justify-center shrink-0">
+                <ShieldCheck className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="text-[11px] font-black text-white">الخزنة الرئيسية والخزنة الخاصة 🔐</h4>
+                <p className="text-[9px] text-gray-400">ترحيل الباقي تلقائياً بنهاية اليوم</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigate('safes')}
+              className="px-3 py-1.5 bg-[#D4AF37] hover:bg-[#FFECA1] text-black rounded-xl text-[10px] font-black cursor-pointer transition-all active:scale-95 shrink-0"
+            >
+              إدارة الخزن والمبلغ اليومي
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2.5">
+            <div
+              onClick={() => onNavigate('safes')}
+              className="bg-black/60 border border-emerald-500/30 hover:border-emerald-400 rounded-xl p-2.5 cursor-pointer transition-all"
+            >
+              <span className="text-[9px] font-bold text-emerald-400 block">الخزنة الرئيسية (اليومية)</span>
+              <span className="text-sm font-black font-mono text-white">
+                {mainSafeBalance.toLocaleString('ar-EG')} <span className="text-[10px] text-emerald-400 font-sans">ج.م</span>
+              </span>
+            </div>
+            <div
+              onClick={() => onNavigate('safes')}
+              className="bg-black/60 border border-[#D4AF37]/35 hover:border-[#D4AF37] rounded-xl p-2.5 cursor-pointer transition-all"
+            >
+              <span className="text-[9px] font-bold text-[#D4AF37] flex items-center gap-1">
+                <Lock className="w-2.5 h-2.5" />
+                الخزنة الخاصة (للأدمن)
+              </span>
+              <span className="text-sm font-black font-mono text-white">
+                {privateSafeBalance.toLocaleString('ar-EG')} <span className="text-[10px] text-[#D4AF37] font-sans">ج.م</span>
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ==================================================
           4. CORE 3D GLASS CIRCLES CONTROL BOARD (SYMMETRICAL, BALANCED)
@@ -1184,11 +1258,25 @@ export default function DashboardView({
                     setShowMoreModal(false);
                     setShowDrawerModal(true);
                   }}
-                  className="col-span-2 flex items-center justify-center gap-2 p-3 bg-zinc-950 border border-zinc-900 rounded-2xl hover:border-[#D4AF37]/50 transition-all text-center cursor-pointer"
+                  className={`${isAdmin ? '' : 'col-span-2 '}flex items-center justify-center gap-2 p-3 bg-zinc-950 border border-zinc-900 rounded-2xl hover:border-[#D4AF37]/50 transition-all text-center cursor-pointer`}
                 >
                   <Wallet className="w-5 h-5 text-emerald-400" />
-                  <span className="text-xs font-black text-white">التحكم بالدرج المالي</span>
+                  <span className="text-xs font-black text-white">التحكم بالدرج</span>
                 </button>
+
+                {/* 3.5 الخزنة الرئيسية والخاصة (أدمن فقط) */}
+                {isAdmin && (
+                  <button
+                    onClick={() => {
+                      setShowMoreModal(false);
+                      onNavigate('safes');
+                    }}
+                    className="flex items-center justify-center gap-2 p-3 bg-zinc-950 border border-[#D4AF37]/30 rounded-2xl hover:border-[#D4AF37] transition-all text-center cursor-pointer"
+                  >
+                    <ShieldCheck className="w-5 h-5 text-[#D4AF37]" />
+                    <span className="text-xs font-black text-[#D4AF37]">الخزن (الرئيسية والخاصة)</span>
+                  </button>
+                )}
 
                 {/* 4. النسخ الاحتياطي */}
                 <button
@@ -1372,6 +1460,20 @@ export default function DashboardView({
                   </div>
                 )}
 
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowDrawerModal(false);
+                      setShowResetDrawerModal(true);
+                    }}
+                    className="w-full py-2.5 bg-red-950/60 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/40 font-black text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span>تصفير حساب الدرج (خاص بالأدمن فقط)</span>
+                  </button>
+                )}
+
                 <button
                   onClick={() => setShowDrawerModal(false)}
                   className="w-full py-2.5 bg-gradient-to-r from-zinc-850 to-zinc-950 hover:from-zinc-800 hover:to-zinc-900 text-white font-bold text-xs rounded-xl transition-all cursor-pointer text-center block border border-zinc-800"
@@ -1393,7 +1495,17 @@ export default function DashboardView({
           refreshShiftState();
           setTick(t => t + 1);
         }}
-        cashierName="الأدمن"
+        cashierName={currentUser?.name || 'الأدمن'}
+      />
+
+      {/* Admin-Only Reset Cash Drawer Modal */}
+      <ResetCashDrawerModal
+        isOpen={showResetDrawerModal}
+        onClose={() => setShowResetDrawerModal(false)}
+        onSuccess={() => {
+          refreshShiftState();
+          setTick(t => t + 1);
+        }}
       />
 
     </div>

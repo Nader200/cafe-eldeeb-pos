@@ -258,6 +258,10 @@ export interface DailyClose {
   net_profit: number;
   opening_cash: number;
   closing_cash: number;
+  transferred_to_private_safe?: number;
+  drawer_transferred?: number;
+  main_safe_transferred?: number;
+  notes?: string;
   created_at: string;
   updated_at: string;
 }
@@ -322,6 +326,9 @@ export interface AppSettings {
   last_installed_version?: string;
   force_update_enabled?: boolean;
   client_platform?: 'web' | 'android';
+  // --- Two-Safe Treasury Settings ---
+  safe_auto_transfer_enabled?: boolean;
+  safe_auto_transfer_source?: 'BOTH' | 'DRAWER_ONLY' | 'MAIN_SAFE_ONLY';
 }
 
 export interface UpdateLog {
@@ -448,7 +455,7 @@ export interface CreditAdjustment {
 export interface CashMovement {
   id: string;
   previous_balance: number;
-  transaction_type: 'OPENING_CASH' | 'CASH_SALE' | 'CUSTOMER_PAYMENT' | 'EXPENSE' | 'CASH_WITHDRAWAL' | 'ADD_CASH' | 'CASH_ADJUSTMENT_ADD' | 'CASH_ADJUSTMENT_SUB' | 'MANUAL_ADD' | 'MANUAL_SUB';
+  transaction_type: 'OPENING_CASH' | 'CASH_SALE' | 'CUSTOMER_PAYMENT' | 'EXPENSE' | 'CASH_WITHDRAWAL' | 'ADD_CASH' | 'CASH_ADJUSTMENT_ADD' | 'CASH_ADJUSTMENT_SUB' | 'MANUAL_ADD' | 'MANUAL_SUB' | 'DRAWER_RESET';
   amount: number;
   new_balance: number;
   date: string; // YYYY-MM-DD
@@ -715,6 +722,7 @@ export interface Shift {
   discrepancy?: number;
   discrepancy_reason?: string;
   started_at: string;
+  last_reset_at?: string;
   ended_at?: string;
   created_at: string;
   updated_at: string;
@@ -734,6 +742,30 @@ export interface ShiftHandover {
   created_at: string;
 }
 
+// Two-Safe Treasury System Types (الخزنة الرئيسية والخزنة الخاصة)
+export type SafeType = 'MAIN_SAFE' | 'PRIVATE_SAFE';
 
+export type SafeTransactionType =
+  | 'DAILY_DEPOSIT'         // إضافة مبلغ يومي في الخزنة الرئيسية
+  | 'DEPOSIT'               // إيداع يدوي
+  | 'WITHDRAWAL'            // سحب من الخزنة (أدمن فقط)
+  | 'TRANSFER_TO_DRAWER'    // تغذية درج الكاشير من الخزنة الرئيسية
+  | 'TRANSFER_FROM_DRAWER'  // توريد من درج الكاشير للخزنة
+  | 'TRANSFER_TO_PRIVATE'   // ترحيل يدوي من الخزنة الرئيسية للخزنة الخاصة
+  | 'AUTO_DAILY_TRANSFER';  // ترحيل الباقي تلقائياً في نهاية اليوم إلى الخزنة الخاصة
 
-
+export interface SafeTransaction {
+  id: string;
+  safe_type: SafeType;
+  transaction_type: SafeTransactionType;
+  amount: number;
+  previous_balance: number;
+  new_balance: number;
+  date: string;       // YYYY-MM-DD
+  time: string;       // HH:MM:SS
+  operator: string;
+  notes: string;
+  related_safe?: SafeType;
+  daily_close_id?: string;
+  created_at: string; // ISO string
+}

@@ -44,7 +44,9 @@ import {
   Briefcase,
   User,
   Calculator,
-  BookOpen
+  BookOpen,
+  ShieldCheck,
+  RotateCcw
 } from 'lucide-react';
 import { dbService, seedDatabase } from './dbService';
 import { AppSettings, CashDrawer } from './types';
@@ -81,12 +83,14 @@ import CalculatorModal from './components/CalculatorModal';
 import UpdateModal from './components/UpdateModal';
 import UserManualView from './components/UserManualView';
 import AdminReauthModal from './components/AdminReauthModal';
+import SafesView from './components/SafesView';
+import ResetCashDrawerModal from './components/ResetCashDrawerModal';
 import { checkForUpdates } from './services/updateService';
 import { UpdateCheckResult } from './config/version';
 
-type TabType = 'dashboard' | 'pos' | 'open-invoices' | 'invoices' | 'invoice-history' | 'products' | 'customers' | 'suppliers' | 'expenses' | 'reports' | 'settings' | 'cash_drawer' | 'employees' | 'playstation' | 'raw_materials' | 'production_batches' | 'partner_drawings' | 'user_manual';
+type TabType = 'dashboard' | 'pos' | 'open-invoices' | 'invoices' | 'invoice-history' | 'products' | 'customers' | 'suppliers' | 'expenses' | 'reports' | 'settings' | 'cash_drawer' | 'safes' | 'employees' | 'playstation' | 'raw_materials' | 'production_batches' | 'partner_drawings' | 'user_manual';
 
-const PROTECTED_TABS: TabType[] = ['settings', 'employees', 'reports', 'partner_drawings', 'expenses', 'suppliers', 'products'];
+const PROTECTED_TABS: TabType[] = ['settings', 'employees', 'reports', 'partner_drawings', 'expenses', 'suppliers', 'products', 'safes'];
 
 const TAB_LABELS: Record<string, string> = {
   settings: 'الإعدادات وقفل الأمان',
@@ -96,6 +100,7 @@ const TAB_LABELS: Record<string, string> = {
   expenses: 'المصروفات والنفقات العامة',
   suppliers: 'إدارة الموردين والمشتريات',
   products: 'المنيو وإدارة التصنيفات',
+  safes: 'الخزنة الرئيسية والخزنة الخاصة',
 };
 
 const getTabFromPathname = (pathname: string): TabType | null => {
@@ -112,6 +117,7 @@ const getTabFromPathname = (pathname: string): TabType | null => {
   if (clean === 'reports' || clean === 'analytics') return 'reports';
   if (clean === 'settings' || clean === 'backup' || clean === 'restore') return 'settings';
   if (clean === 'cash_drawer' || clean === 'cash-drawer') return 'cash_drawer';
+  if (clean === 'safes' || clean === 'treasury' || clean === 'safe') return 'safes';
   if (clean === 'employees') return 'employees';
   if (clean === 'playstation') return 'playstation';
   if (clean === 'raw_materials' || clean === 'raw-materials') return 'raw_materials';
@@ -222,6 +228,7 @@ function AppContent() {
     return () => window.removeEventListener('open_calculator_modal', handleOpenCalc);
   }, []);
   const [showCloseShiftModal, setShowCloseShiftModal] = useState<boolean>(false);
+  const [showResetDrawerModal, setShowResetDrawerModal] = useState<boolean>(false);
   const [shiftClosingBalance, setShiftClosingBalance] = useState<number>(1500);
   const [shiftClosingNotes, setShiftClosingNotes] = useState<string>('');
 
@@ -504,8 +511,16 @@ function AppContent() {
     }
 
     try {
-      const closedRecord = dbService.performDailyClose('أدمن النظام / نادر الديب');
-      showSuccessAlert(`تم تسجيل إغلاق الوردية واليومية بنجاح! الرصيد المغلق للغد هو ${closedRecord.closing_cash} ج.م.`);
+      const operatorName = currentUser?.name || 'أدمن النظام / نادر الديب';
+      const closedRecord = dbService.performDailyClose(operatorName, {
+        actualCashCounted: shiftClosingBalance,
+        notes: shiftClosingNotes
+      });
+      const transferredMsg =
+        (closedRecord.transferred_to_private_safe || 0) > 0
+          ? ` وتم ترحيل المتبقي (${closedRecord.transferred_to_private_safe?.toLocaleString('ar-EG')} ج.م) تلقائياً إلى الخزنة الخاصة 🔐`
+          : '';
+      showSuccessAlert(`تم تسجيل إغلاق الوردية واليومية بنجاح!${transferredMsg}`);
       setShowCloseShiftModal(false);
       handleRefreshSettingsAndDrawer();
       setActiveTab('dashboard');
@@ -727,6 +742,9 @@ function AppContent() {
             { id: 'expenses', label: 'المصروفات والنفقات العامة', icon: <TrendingDown className="w-4 h-4" /> },
             { id: 'partner_drawings', label: '🤝 مسحوبات الشركاء', icon: <Coins className="w-4 h-4 text-amber-400" /> },
             { id: 'cash_drawer', label: 'إدارة درج النقدية والتسويات', icon: <Wallet className="w-4 h-4" /> },
+            ...(currentUser?.role === 'Admin'
+              ? [{ id: 'safes', label: '🔐 الخزنة الرئيسية والخاصة', icon: <ShieldCheck className="w-4 h-4 text-gold-400" /> }]
+              : []),
             { id: 'employees', label: '👨‍💼 شؤون الموظفين والرواتب', icon: <Users className="w-4 h-4 text-amber-500" /> },
             { id: 'playstation', label: '🎮 ألعاب صالة البلايستيشن', icon: <Gamepad2 className="w-4 h-4 text-gold-500" /> },
             { id: 'reports', label: 'التقارير المالية والأرباح', icon: <BarChart3 className="w-4 h-4" /> },
@@ -960,6 +978,7 @@ function AppContent() {
                   activeTab === 'expenses' ? 'المصروفات والنفقات العامة' :
                   activeTab === 'partner_drawings' ? 'مسحوبات الشركاء المحاسبية' :
                   activeTab === 'cash_drawer' ? 'إدارة النقدية والوردية' :
+                  activeTab === 'safes' ? 'الخزنة الرئيسية والخزنة الخاصة' :
                   activeTab === 'reports' ? 'التقارير والأرباح المالية' :
                   activeTab === 'employees' ? 'شؤون الموظفين والرواتب' :
                   activeTab === 'playstation' ? '🎮 صالات البلايستيشن' :
@@ -1125,6 +1144,15 @@ function AppContent() {
               settings={settings}
               onShowSuccessAlert={showSuccessAlert}
               onShowWarningAlert={showWarningAlert}
+            />
+          )}
+
+          {activeTab === 'safes' && hasPermission('safes') && currentUser?.role === 'Admin' && (
+            <SafesView
+              settings={settings}
+              onShowSuccessAlert={showSuccessAlert}
+              onShowWarningAlert={showWarningAlert}
+              onSettingsChanged={handleRefreshSettingsAndDrawer}
             />
           )}
 
@@ -1294,6 +1322,27 @@ function AppContent() {
                 />
               </div>
 
+              {settings?.safe_auto_transfer_enabled !== false && (
+                <div className="p-3 bg-gold-500/10 border border-gold-500/30 rounded-xl space-y-1 text-[10px]">
+                  <span className="font-black text-gold-400 block">🔐 الترحيل التلقائي للخزنة الخاصة بنهاية اليوم:</span>
+                  <div className="flex justify-between text-gray-300">
+                    <span>رصيد الخزنة الرئيسية الحالي:</span>
+                    <span className="font-mono font-bold text-emerald-400">{dbService.getSafeBalance('MAIN_SAFE').toLocaleString('ar-EG')} ج.م</span>
+                  </div>
+                  <div className="flex justify-between text-gold-300 font-black pt-1 border-t border-gold-500/20">
+                    <span>سيتم ترحيله تلقائياً للخزنة الخاصة:</span>
+                    <span className="font-mono">
+                      {(() => {
+                        const src = settings?.safe_auto_transfer_source || 'BOTH';
+                        const fromD = (src === 'BOTH' || src === 'DRAWER_ONLY') ? Math.max(0, Number(shiftClosingBalance) || 0) : 0;
+                        const fromM = (src === 'BOTH' || src === 'MAIN_SAFE_ONLY') ? Math.max(0, dbService.getSafeBalance('MAIN_SAFE')) : 0;
+                        return (fromD + fromM).toLocaleString('ar-EG');
+                      })()} ج.م
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="text-xs text-gray-400 font-bold block mb-1.5">ملاحظات ومراجعة العجز أو الزيادة</label>
                 <input
@@ -1325,9 +1374,31 @@ function AppContent() {
                 إلغاء التراجع
               </button>
             </div>
+
+            {currentUser?.role === 'Admin' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCloseShiftModal(false);
+                  setShowResetDrawerModal(true);
+                }}
+                className="w-full mt-3 py-2 bg-red-950/50 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/40 rounded-xl text-[11px] font-black transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>تصفير حساب الدرج بدون إغلاق اليوم (أدمن فقط)</span>
+              </button>
+            )}
           </form>
         </div>
       )}
+
+      <ResetCashDrawerModal
+        isOpen={showResetDrawerModal}
+        onClose={() => setShowResetDrawerModal(false)}
+        onSuccess={() => handleRefreshSettingsAndDrawer()}
+        onShowSuccessAlert={showSuccessAlert}
+        onShowWarningAlert={showWarningAlert}
+      />
 
       {showExitModal && (
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4 animate-fade-in" dir="rtl">

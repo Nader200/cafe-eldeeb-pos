@@ -16,11 +16,16 @@ import {
   Clock,
   Coins,
   ShieldAlert,
-  Printer
+  Printer,
+  RotateCcw,
+  ShieldCheck
 } from 'lucide-react';
 import { dbService } from '../dbService';
 import { getEldeebLogoDataUrl } from '../lib/logoSvg';
 import { AppSettings, CashDrawer, CashMovement } from '../types';
+import { useAuth } from '../contexts/AuthContext';
+import ResetCashDrawerModal from './ResetCashDrawerModal';
+import SafesView from './SafesView';
 
 interface CashDrawerViewProps {
   settings: AppSettings;
@@ -33,8 +38,12 @@ export default function CashDrawerView({
   onShowSuccessAlert,
   onShowWarningAlert
 }: CashDrawerViewProps) {
+  const { currentUser } = useAuth();
+  const isAdmin = currentUser?.role === 'Admin';
+  const [showResetDrawerModal, setShowResetDrawerModal] = useState(false);
+
   // Navigation tabs
-  const [activeSubTab, setActiveSubTab] = useState<'control' | 'count' | 'history' | 'report'>('control');
+  const [activeSubTab, setActiveSubTab] = useState<'control' | 'count' | 'history' | 'report' | 'safes'>('control');
 
   // Common states
   const [activeDrawer, setActiveDrawer] = useState<CashDrawer>(() => dbService.getActiveDrawer());
@@ -233,6 +242,8 @@ export default function CashDrawerView({
         return { label: 'تسوية (زيادة نقدية)', color: 'bg-amber-950/40 text-amber-400 border-amber-950/30' };
       case 'CASH_ADJUSTMENT_SUB':
         return { label: 'تسوية (عجز وسحب)', color: 'bg-orange-950/40 text-orange-400 border-orange-950/30' };
+      case 'DRAWER_RESET':
+        return { label: 'تصفير الدرج (أدمن)', color: 'bg-red-950/60 text-red-300 border-red-700/40' };
       default:
         return { label: 'قيد نقدية يدوية', color: 'bg-gray-900 text-gray-400 border-gray-800' };
     }
@@ -339,13 +350,27 @@ export default function CashDrawerView({
           <p className="text-gray-400 text-xs">مراقبة دقيقة لكافة التدفقات النقدية والتحصيلات والمصروفات بالصندوق على مدار اليوم</p>
         </div>
 
-        {/* Dynamic Live Status Card */}
-        <div className="bg-luxury-bg border border-gray-900 rounded-2xl px-5 py-3 text-right flex items-center gap-4">
-          <div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-ping"></div>
-          <div>
-            <span className="text-[10px] text-gray-500 block mb-0.5">الرصيد الدفتري الحالي بالدرج</span>
-            <span className="text-lg font-black font-mono text-gold-500">{expectedCash.toLocaleString()} ج.م</span>
+        {/* Dynamic Live Status Card + Admin Reset Button */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="bg-luxury-bg border border-gray-900 rounded-2xl px-5 py-3 text-right flex items-center gap-4">
+            <div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-ping"></div>
+            <div>
+              <span className="text-[10px] text-gray-500 block mb-0.5">الرصيد الدفتري الحالي بالدرج</span>
+              <span className="text-lg font-black font-mono text-gold-500">{expectedCash.toLocaleString()} ج.م</span>
+            </div>
           </div>
+
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setShowResetDrawerModal(true)}
+              className="px-4 py-3 bg-red-950/60 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/40 rounded-2xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shadow-md active:scale-95"
+              title="تصفير حساب الدرج والوردية الحالية (للأدمن فقط)"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>تصفير حساب الدرج (للأدمن فقط)</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -391,6 +416,19 @@ export default function CashDrawerView({
         >
           📑 التقرير اليومي للخزينة
         </button>
+        {isAdmin && (
+          <button
+            onClick={() => setActiveSubTab('safes')}
+            className={`flex-1 py-2.5 px-4 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+              activeSubTab === 'safes'
+                ? 'bg-gold-600 text-black font-extrabold shadow-md'
+                : 'text-gold-400 hover:text-white hover:bg-gray-900/60 border border-gold-500/20'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4" />
+            <span>الخزنة الرئيسية والخاصة</span>
+          </button>
+        )}
       </div>
 
       {/* Tab 1: Control (Opening Cash & Adjustments) */}
@@ -959,6 +997,24 @@ export default function CashDrawerView({
           )}
         </div>
       )}
+
+      {/* Tab 5: Two-Safe Treasury System (Admin Only) */}
+      {activeSubTab === 'safes' && isAdmin && (
+        <SafesView
+          settings={settings}
+          onShowSuccessAlert={onShowSuccessAlert}
+          onShowWarningAlert={onShowWarningAlert}
+          embedded
+        />
+      )}
+
+      <ResetCashDrawerModal
+        isOpen={showResetDrawerModal}
+        onClose={() => setShowResetDrawerModal(false)}
+        onSuccess={() => refreshData()}
+        onShowSuccessAlert={onShowSuccessAlert}
+        onShowWarningAlert={onShowWarningAlert}
+      />
     </div>
   );
 }
