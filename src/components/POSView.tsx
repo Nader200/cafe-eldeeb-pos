@@ -51,7 +51,7 @@ import { dbService, safeStorage, getItemCategoryIcon } from '../dbService';
 const localStorage = safeStorage;
 import { Product, Category, Customer, CartItem, PaymentType, Invoice, Shift } from '../types';
 import { safeHtml2Canvas } from '../utils/html2canvasHelper';
-import { shareInvoicePDFToWhatsApp } from '../utils/pdfInvoiceGenerator';
+import { shareInvoiceImageToWhatsApp } from '../utils/invoiceImageGenerator';
 import { useAuth } from '../contexts/AuthContext';
 import SyncStatusIndicator from './SyncStatusIndicator';
 import { uploadReceiptImage } from '../lib/receiptStorage';
@@ -1307,7 +1307,7 @@ export default function POSView({
     try {
       const items = dbService.getInvoiceItems(recentInvoice.id);
 
-      await shareInvoicePDFToWhatsApp({
+      await shareInvoiceImageToWhatsApp({
         invoice: recentInvoice,
         items,
         customer: custObj,
@@ -1319,7 +1319,7 @@ export default function POSView({
       });
     } catch (err: any) {
       console.error('Error in handleShareInvoiceAsPDFToWhatsApp:', err);
-      onShowWarningAlert(err?.message || 'عفواً، حدث خطأ أثناء معالجة الفاتورة عبر الواتساب');
+      onShowWarningAlert(err?.message || 'عفواً، حدث خطأ أثناء معالجة صورة الفاتورة عبر الواتساب');
     }
   };
 

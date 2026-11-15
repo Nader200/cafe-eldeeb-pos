@@ -34,7 +34,8 @@ import {
 } from 'lucide-react';
 import { dbService } from '../dbService';
 import { Invoice, InvoiceItem, Customer, AppSettings, PaymentType, ReturnTransaction } from '../types';
-import { createInvoicePDF, shareInvoicePDFToWhatsApp } from '../utils/pdfInvoiceGenerator';
+import { createInvoicePDF } from '../utils/pdfInvoiceGenerator';
+import { shareInvoiceImageToWhatsApp } from '../utils/invoiceImageGenerator';
 import { getPaymentMethodLabel, getPaymentMethodBadgeClass } from '../utils/paymentUtils';
 
 interface InvoiceHistoryViewProps {
@@ -749,12 +750,14 @@ export default function InvoiceHistoryView({
     try {
       const cust = customers.find(c => c.id === selectedInvoice.customer_id);
       const items = dbService.getInvoiceItems(selectedInvoice.id);
+      const invReturns = dbService.getReturnTransactions().filter(r => r.original_invoice_id === selectedInvoice.id);
 
-      await shareInvoicePDFToWhatsApp({
+      await shareInvoiceImageToWhatsApp({
         invoice: selectedInvoice,
         items,
         customer: cust,
         settings,
+        returns: invReturns,
         phone: whatsAppPhone,
         onStart: (msg) => onShowSuccessAlert(msg),
         onSuccess: (msg) => {
@@ -765,7 +768,7 @@ export default function InvoiceHistoryView({
       });
     } catch (err: any) {
       console.error('Error in handleSendWhatsAppMessage:', err);
-      onShowWarningAlert(err?.message || 'تعذر إرسال الفاتورة عبر الواتساب');
+      onShowWarningAlert(err?.message || 'تعذر إرسال صورة الفاتورة عبر الواتساب');
     }
   };
 
@@ -776,12 +779,14 @@ export default function InvoiceHistoryView({
       const cust = customers.find(c => c.id === invoice.customer_id);
       const custPhone = cust ? (cust.phone || cust.whatsapp || '') : '';
       const items = dbService.getInvoiceItems(invoice.id);
+      const invReturns = dbService.getReturnTransactions().filter(r => r.original_invoice_id === invoice.id);
 
-      await shareInvoicePDFToWhatsApp({
+      await shareInvoiceImageToWhatsApp({
         invoice,
         items,
         customer: cust,
         settings,
+        returns: invReturns,
         phone: custPhone,
         onStart: (msg) => onShowSuccessAlert(msg),
         onSuccess: (msg) => onShowSuccessAlert(msg),
@@ -789,7 +794,7 @@ export default function InvoiceHistoryView({
       });
     } catch (err: any) {
       console.error('Error in handleShareHistoryInvoicePDF:', err);
-      onShowWarningAlert(err?.message || 'تعذر مشاركة الفاتورة عبر الواتساب');
+      onShowWarningAlert(err?.message || 'تعذر مشاركة صورة الفاتورة عبر الواتساب');
     }
   };
 
@@ -1669,7 +1674,7 @@ export default function InvoiceHistoryView({
             </h4>
             
             <p className="text-[10px] text-gray-400 mb-4 leading-relaxed">
-              أدخل رقم هاتف العميل ليتم توجيهك مباشرة لدردشة واتساب ومشاركة الفاتورة المنسقة ملوكيّاً.
+              أدخل رقم هاتف العميل ليتم تجهيز وإرسال صورة إيصال الفاتورة مباشرة عبر واتساب.
             </p>
 
             <div className="space-y-4">
