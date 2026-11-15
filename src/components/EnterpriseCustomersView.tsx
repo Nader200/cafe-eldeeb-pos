@@ -8,10 +8,15 @@ import {
   Users, UserCheck, Search, Star, Wallet, CreditCard, Calendar, TrendingUp, History, 
   QrCode, Plus, Edit, Archive, RotateCcw, FileText, CheckCircle, Clock, ArrowUpRight, 
   ArrowDownLeft, X, ChevronLeft, Trash, PlusCircle, DollarSign, Camera, User, MapPin, Phone, MessageSquare,
-  Printer, Download, AlertTriangle, Lock, ShieldCheck, Eye, EyeOff
+  Printer, Download, AlertTriangle, Lock, ShieldCheck, Eye, EyeOff, Share2
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { isAdminSecurityPasswordSet } from '../lib/securityService';
+import {
+  buildCustomerStatementData,
+  createCustomerStatementImage,
+  shareCustomerStatementImageToWhatsApp,
+} from '../utils/invoiceImageGenerator';
 
 interface EnterpriseCustomersViewProps {
   onShowSuccessAlert: (msg: string) => void;
@@ -78,6 +83,8 @@ export default function EnterpriseCustomersView({
   const [creditAdjustLoading, setCreditAdjustLoading] = useState(false);
 
   const [showStatementModal, setShowStatementModal] = useState(false);
+  const [statementPhone, setStatementPhone] = useState('');
+  const [statementBusy, setStatementBusy] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
 
   // Custom Confirmation Modal State (Safe for iframe and web previews)
@@ -1223,63 +1230,103 @@ export default function EnterpriseCustomersView({
     loadData();
   };
 
-  // Print Customer Statement Layout
+  const selectedStatementData = useMemo(() => {
+    if (!selectedCustomer) return null;
+    return buildCustomerStatementData({
+      customer: selectedCustomer,
+      invoices,
+      creditPayments,
+      creditTransactions,
+    });
+  }, [selectedCustomer, invoices, creditPayments, creditTransactions]);
+
+  // Open in-app Statement Modal (Preview + Send as Image + Download PNG + Print)
   const handlePrintStatement = () => {
+    if (!selectedCustomer) return;
+    setStatementPhone(selectedCustomer.whatsapp || selectedCustomer.phone || '');
+    setShowStatementModal(true);
+  };
+
+  // Send Customer Statement directly as a PNG Image via WhatsApp (NOT PDF)
+  const handleSendStatementImageToWhatsApp = async (targetPhone?: string) => {
+    if (!selectedCustomer || statementBusy) return;
+    setStatementBusy(true);
+    try {
+      const settings = dbService.getSettings();
+      await shareCustomerStatementImageToWhatsApp({
+        customer: selectedCustomer,
+        invoices,
+        creditPayments,
+        creditTransactions,
+        settings,
+        phone: targetPhone !== undefined ? targetPhone : (selectedCustomer.whatsapp || selectedCustomer.phone || ''),
+        onStart: (msg) => onShowSuccessAlert(msg),
+        onSuccess: (msg) => onShowSuccessAlert(msg),
+        onError: (msg) => onShowWarningAlert(msg),
+      });
+    } finally {
+      setStatementBusy(false);
+    }
+  };
+
+  // Save Customer Statement as PNG Image locally
+  const handleDownloadStatementImage = async () => {
+    if (!selectedCustomer || statementBusy) return;
+    setStatementBusy(true);
+    try {
+      onShowSuccessAlert('جاري تجهيز صورة كشف الحساب للحفظ... 📸');
+      const settings = dbService.getSettings();
+      const { dataUrl, imageFileName } = await createCustomerStatementImage({
+        customer: selectedCustomer,
+        invoices,
+        creditPayments,
+        creditTransactions,
+        settings,
+      });
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      link.download = imageFileName;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      onShowSuccessAlert(`تم حفظ صورة كشف الحساب (${imageFileName}) بنجاح 📸`);
+    } catch (err: any) {
+      onShowWarningAlert(err?.message || 'تعذر حفظ صورة كشف الحساب');
+    } finally {
+      setStatementBusy(false);
+    }
+  };
+
+  // Optional desktop paper print layout
+  const handlePaperPrintStatement = () => {
     const printWindow = window.open('', '_blank');
-    if (!printWindow || !selectedCustomer || !selectedCustomerStats) return;
+    if (!printWindow || !selectedCustomer || !selectedStatementData) return;
 
     const todayStr = new Date().toLocaleDateString('ar-EG');
-    const custInvoices = invoices.filter(inv => inv.customer_id === selectedCustomer.id && inv.invoice_status !== 'VOID');
-    const custPayments = creditPayments.filter(p => p.customer_id === selectedCustomer.id);
+    const { rows, startingBalance, totalDebits, totalCredits, endingBalance } = selectedStatementData;
 
     let statementRows = '';
-    
-    // Combine invoices & payments chronologically
-    const currentRecords = [
-      ...custInvoices.map(inv => ({
-        date: inv.created_at.substring(0, 10),
-        desc: `فاتورة مبيعات #${inv.invoice_number}`,
-        debit: inv.total, // customer owes
-        credit: 0, // do not use inv.paid_amount to prevent double-counting with payments
-      })),
-      ...custPayments.map(p => ({
-        date: p.created_at.substring(0, 10),
-        desc: `دفعة سداد نقدية - ${p.notes || ''}`,
-        debit: 0,
-        credit: p.amount,
-      }))
-    ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    if (startingBalance !== 0 || rows.length === 0) {
+      statementRows += `
+        <tr style="background-color: #fcf8e3; font-weight: bold;">
+          <td>-</td>
+          <td style="color: #666;">الرصيد السابق المستحق (رصيد مرحل)</td>
+          <td>${startingBalance > 0 ? startingBalance + ' ج.م' : '-'}</td>
+          <td>${startingBalance < 0 ? Math.abs(startingBalance) + ' ج.م' : '-'}</td>
+          <td style="color: #111; font-weight: 800;">${startingBalance} ج.م</td>
+        </tr>
+      `;
+    }
 
-    // Calculate total debits and credits of listed transactions
-    const totalDebits = currentRecords.reduce((sum, r) => sum + r.debit, 0);
-    const totalCredits = currentRecords.reduce((sum, r) => sum + r.credit, 0);
-
-    // Calculate starting balance based on actual current balance of customer
-    const endingBalance = selectedCustomer.current_balance;
-    const startingBalance = endingBalance - totalDebits + totalCredits;
-
-    let runningBal = startingBalance;
-
-    // Prepend the starting balance row
-    statementRows += `
-      <tr style="background-color: #fcf8e3; font-weight: bold;">
-        <td>-</td>
-        <td style="color: #666;">الرصيد السابق المستحق (رصيد مرحل)</td>
-        <td>${startingBalance > 0 ? startingBalance + ' ج.م' : '-'}</td>
-        <td>${startingBalance < 0 ? Math.abs(startingBalance) + ' ج.م' : '-'}</td>
-        <td style="color: #111; font-weight: 800;">${startingBalance} ج.م</td>
-      </tr>
-    `;
-
-    currentRecords.forEach(rec => {
-      runningBal += (rec.debit - rec.credit);
+    rows.forEach(rec => {
       statementRows += `
         <tr>
           <td>${rec.date}</td>
           <td>${rec.desc}</td>
           <td>${rec.debit > 0 ? rec.debit + ' ج.م' : '-'}</td>
           <td>${rec.credit > 0 ? rec.credit + ' ج.م' : '-'}</td>
-          <td style="font-weight: bold;">${runningBal} ج.م</td>
+          <td style="font-weight: bold;">${rec.balance} ج.م</td>
         </tr>
       `;
     });
@@ -1310,7 +1357,7 @@ export default function EnterpriseCustomersView({
       </head>
       <body>
         <div class="header">
-          <img src="${getEldeebLogoDataUrl(400, false, 'gold')}" alt="Cafe Eldeeb Logo" style="height: 250px; width: auto; margin: 0 auto 15px; display: block; filter: contrast(155%) brightness(92%) saturate(135%) drop-shadow(0 4px 15px rgba(0,0,0,0.35)); -webkit-filter: contrast(155%) brightness(92%) saturate(135%) drop-shadow(0 4px 15px rgba(0,0,0,0.35)); image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges;" />
+          <img src="${getEldeebLogoDataUrl(400, false, 'gold')}" alt="Cafe Eldeeb Logo" style="height: 200px; width: auto; margin: 0 auto 12px; display: block;" />
           <h1>كافيه الديب POS • Cafe Eldeeb</h1>
           <p>كشف مديونيات وحسابات العملاء الآجل والذمم المالية</p>
           <p>تاريخ الاستخراج: ${todayStr}</p>
@@ -1829,12 +1876,23 @@ export default function EnterpriseCustomersView({
                     <span className="text-sm font-bold text-emerald-400 font-mono">
                       {selectedCustomerStats?.totalPurchases || 0} ج.م
                     </span>
-                    <div className="mt-2 text-left">
+                    <div className="flex flex-wrap gap-1.5 mt-2 justify-end">
                       <button
+                        type="button"
                         onClick={handlePrintStatement}
                         className="px-2.5 py-1 bg-emerald-950/40 hover:bg-emerald-900/40 text-emerald-400 rounded-lg text-[9px] font-bold transition-all cursor-pointer"
                       >
-                        🖨️ كشف حساب ملوكي
+                        📋 كشف حساب ملوكي
+                      </button>
+                      <button
+                        type="button"
+                        disabled={statementBusy}
+                        onClick={() => handleSendStatementImageToWhatsApp()}
+                        className="px-2.5 py-1 bg-green-600/20 hover:bg-green-600/35 border border-green-500/40 text-green-300 rounded-lg text-[9px] font-black transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1"
+                        title="إرسال كشف الحساب كصورة مباشرة عبر واتساب"
+                      >
+                        <Share2 className="w-2.5 h-2.5" />
+                        <span>إرسال صورة واتساب</span>
                       </button>
                     </div>
                   </div>
@@ -3309,6 +3367,189 @@ export default function EnterpriseCustomersView({
               >
                 {confirmModalState.confirmText}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- Customer Account Statement Preview & Image Share Modal --- */}
+      {showStatementModal && selectedCustomer && selectedStatementData && (
+        <div
+          className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 animate-fade-in overflow-y-auto"
+          dir="rtl"
+          onClick={() => setShowStatementModal(false)}
+        >
+          <div
+            className="bg-[#0b0b0b] border border-gray-800 rounded-3xl w-full max-w-lg p-4 sm:p-6 relative my-auto shadow-2xl flex flex-col gap-4 max-h-[94vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setShowStatementModal(false)}
+              className="absolute top-4 left-4 text-gray-400 hover:text-white cursor-pointer p-1 rounded-lg hover:bg-gray-900 transition-all"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className="text-sm font-black text-white flex items-center justify-center gap-2 border-b border-gray-800 pb-3">
+              <FileText className="w-4 h-4 text-gold-500" />
+              كشف حساب العميل الملوكي (صورة للمشاركة)
+            </h3>
+
+            {/* Live White Statement Card Preview */}
+            <div className="bg-white text-gray-900 rounded-2xl p-4 sm:p-5 overflow-y-auto max-h-[52vh] shadow-inner text-right leading-relaxed space-y-3">
+              <div className="text-center border-b-2 border-dashed border-amber-400 pb-3">
+                <img
+                  src={getEldeebLogoDataUrl(300, false, 'gold')}
+                  alt="Cafe Eldeeb"
+                  className="w-32 h-auto mx-auto mb-1.5 object-contain"
+                />
+                <p className="text-sm font-black text-gray-900">كشف حساب عميل تفصيلي</p>
+                <p className="text-[10px] text-gray-500">
+                  تاريخ الاستخراج: {new Date().toLocaleDateString('ar-EG')}
+                </p>
+              </div>
+
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-gray-600 font-bold">اسم العميل:</span>
+                  <span className="font-black text-gray-900">
+                    {selectedCustomer.full_name} {selectedCustomer.is_vip ? '⭐' : ''}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600 font-bold">رقم الهاتف:</span>
+                  <span className="font-mono font-bold text-gray-800">
+                    {selectedCustomer.phone || selectedCustomer.whatsapp || 'غير مدخل'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600 font-bold">رصيد المحفظة:</span>
+                  <span className="font-bold text-amber-700">
+                    {(selectedCustomer.wallet_balance || 0).toLocaleString()} ج.م
+                  </span>
+                </div>
+                <div className="flex justify-between pt-1.5 border-t border-dashed border-gray-300 font-black text-sm">
+                  <span>المديونية الحالية المستحقة:</span>
+                  <span className={selectedStatementData.endingBalance > 0 ? 'text-red-600' : 'text-emerald-600'}>
+                    {selectedStatementData.endingBalance.toLocaleString()} ج.م
+                  </span>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-[10px] sm:text-[11px]">
+                  <thead>
+                    <tr className="bg-gray-900 text-white">
+                      <th className="p-1.5 border border-gray-900 text-center">التاريخ</th>
+                      <th className="p-1.5 border border-gray-900 text-right">البيان</th>
+                      <th className="p-1.5 border border-gray-900 text-center">عليه (+)</th>
+                      <th className="p-1.5 border border-gray-900 text-center">له (-)</th>
+                      <th className="p-1.5 border border-gray-900 text-center">الرصيد</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(selectedStatementData.startingBalance !== 0 || selectedStatementData.rows.length === 0) && (
+                      <tr className="bg-amber-50 font-bold">
+                        <td className="p-1.5 border border-gray-200 text-center text-gray-500">-</td>
+                        <td className="p-1.5 border border-gray-200 text-amber-900">الرصيد السابق / المرحل</td>
+                        <td className="p-1.5 border border-gray-200 text-center text-red-700">
+                          {selectedStatementData.startingBalance > 0 ? `${selectedStatementData.startingBalance.toLocaleString()} ج.م` : '-'}
+                        </td>
+                        <td className="p-1.5 border border-gray-200 text-center text-emerald-700">
+                          {selectedStatementData.startingBalance < 0 ? `${Math.abs(selectedStatementData.startingBalance).toLocaleString()} ج.م` : '-'}
+                        </td>
+                        <td className="p-1.5 border border-gray-200 text-center font-black">
+                          {selectedStatementData.startingBalance.toLocaleString()} ج.م
+                        </td>
+                      </tr>
+                    )}
+                    {selectedStatementData.rows.map((rec, idx) => (
+                      <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                        <td className="p-1.5 border border-gray-200 text-center font-mono text-gray-600 whitespace-nowrap">{rec.date}</td>
+                        <td className="p-1.5 border border-gray-200 font-semibold text-gray-900">{rec.desc}</td>
+                        <td className="p-1.5 border border-gray-200 text-center font-bold text-red-700 whitespace-nowrap">
+                          {rec.debit > 0 ? `${rec.debit.toLocaleString()} ج.م` : '-'}
+                        </td>
+                        <td className="p-1.5 border border-gray-200 text-center font-bold text-emerald-700 whitespace-nowrap">
+                          {rec.credit > 0 ? `${rec.credit.toLocaleString()} ج.م` : '-'}
+                        </td>
+                        <td className="p-1.5 border border-gray-200 text-center font-extrabold text-gray-900 whitespace-nowrap">
+                          {rec.balance.toLocaleString()} ج.م
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 text-xs space-y-1">
+                <div className="flex justify-between text-amber-900 font-bold">
+                  <span>إجمالي المشتريات / الإضافات الآجلة:</span>
+                  <span>{selectedStatementData.totalDebits.toLocaleString()} ج.م</span>
+                </div>
+                <div className="flex justify-between text-emerald-700 font-bold">
+                  <span>إجمالي المبالغ المسددة:</span>
+                  <span>{selectedStatementData.totalCredits.toLocaleString()} ج.م</span>
+                </div>
+                <div className="flex justify-between pt-1.5 border-t border-dashed border-amber-400 font-black text-sm">
+                  <span>صافي المديونية المستحقة:</span>
+                  <span className={selectedStatementData.endingBalance > 0 ? 'text-red-700' : 'text-emerald-700'}>
+                    {selectedStatementData.endingBalance.toLocaleString()} ج.م
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Target WhatsApp Phone Input */}
+            <div className="bg-luxury-bg border border-gray-800 rounded-2xl p-3 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-bold text-gray-400">رقم الواتساب لإرسال صورة كشف الحساب</label>
+                <ContactPickerButton
+                  onSelect={({ phone }) => setStatementPhone(phone)}
+                  buttonText="سجل الأسماء"
+                />
+              </div>
+              <input
+                type="text"
+                value={statementPhone}
+                onChange={(e) => setStatementPhone(e.target.value)}
+                placeholder="مثال: 01012345678"
+                className="w-full bg-luxury-card border border-gray-700 text-white rounded-xl py-2 px-3 text-xs font-mono font-bold text-center focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+
+            {/* Modal Action Buttons */}
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                disabled={statementBusy}
+                onClick={() => handleSendStatementImageToWhatsApp(statementPhone)}
+                className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl flex items-center justify-center gap-2 shadow-lg cursor-pointer transition-all active:scale-95 disabled:opacity-50"
+              >
+                <Share2 className="w-4 h-4" />
+                <span>{statementBusy ? 'جاري تجهيز الصورة...' : 'إرسال كشف الحساب عبر واتساب (صورة) 📸'}</span>
+              </button>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={statementBusy}
+                  onClick={handleDownloadStatementImage}
+                  className="py-2.5 bg-luxury-bg border border-gray-800 hover:bg-gray-900 text-gold-400 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>حفظ كصورة PNG</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePaperPrintStatement}
+                  className="py-2.5 bg-luxury-bg border border-gray-800 hover:bg-gray-900 text-gray-300 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>طباعة ورقية</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

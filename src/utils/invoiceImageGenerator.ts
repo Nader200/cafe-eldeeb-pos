@@ -1,5 +1,13 @@
 import { safeHtml2Canvas } from './html2canvasHelper';
-import { Invoice, InvoiceItem, Customer, AppSettings, ReturnTransaction } from '../types';
+import {
+  Invoice,
+  InvoiceItem,
+  Customer,
+  AppSettings,
+  ReturnTransaction,
+  CreditPayment,
+  CustomerCreditTransaction,
+} from '../types';
 import { getEldeebLogoDataUrl } from '../lib/logoSvg';
 import { getPaymentMethodLabel } from './paymentUtils';
 import { getCleanInvoiceNumber } from './pdfInvoiceGenerator';
@@ -447,5 +455,492 @@ export async function shareInvoiceImageToWhatsApp({
   } catch (err: any) {
     console.error('Unhandled error in shareInvoiceImageToWhatsApp:', err);
     if (onError) onError(err?.message || 'حدث خطأ أثناء تحويل الفاتورة إلى صورة لإرسالها عبر الواتساب');
+  }
+}
+
+export interface StatementLedgerRow {
+  date: string;
+  desc: string;
+  debit: number;
+  credit: number;
+  balance: number;
+}
+
+export interface BuiltCustomerStatementData {
+  rows: StatementLedgerRow[];
+  startingBalance: number;
+  totalDebits: number;
+  totalCredits: number;
+  endingBalance: number;
+}
+
+/**
+ * Builds chronological customer statement rows using CustomerCreditTransaction ledger when available,
+ * falling back to credit invoices & credit payments while staying synchronized with current_balance.
+ */
+export function buildCustomerStatementData({
+  customer,
+  invoices,
+  creditPayments,
+  creditTransactions = [],
+}: {
+  customer: Customer;
+  invoices: Invoice[];
+  creditPayments: CreditPayment[];
+  creditTransactions?: CustomerCreditTransaction[];
+}): BuiltCustomerStatementData {
+  const endingBalance = Number(customer.current_balance) || 0;
+  const custCreditTxs = (creditTransactions || [])
+    .filter((tx) => tx.customer_id === customer.id)
+    .sort((a, b) => new Date(a.created_at || a.date).getTime() - new Date(b.created_at || b.date).getTime());
+
+  if (custCreditTxs.length > 0) {
+    let totalDebits = 0;
+    let totalCredits = 0;
+    const rows: StatementLedgerRow[] = custCreditTxs.map((tx) => {
+      const dateStr = (tx.date || tx.created_at || '').substring(0, 10) || '-';
+      let debit = 0;
+      let credit = 0;
+      let desc = tx.notes || '';
+
+      if (tx.transaction_type === 'INVOICE') {
+        debit = Number(tx.amount) || 0;
+        desc = tx.notes || (tx.invoice_id ? `فاتورة مبيعات آجل` : 'مبيعات آجل');
+      } else if (tx.transaction_type === 'PAYMENT') {
+        credit = Number(tx.amount) || 0;
+        desc = tx.notes || 'دفعة سداد نقدية';
+      } else if (tx.transaction_type === 'REFUND') {
+        credit = Number(tx.amount) || 0;
+        desc = tx.notes || 'مرتجع / خصم مديونية';
+      } else {
+        const delta = (Number(tx.new_balance) || 0) - (Number(tx.previous_balance) || 0);
+        if (delta >= 0) {
+          debit = delta;
+          desc = tx.notes || 'تعديل / إضافة مديونية إداري';
+        } else {
+          credit = Math.abs(delta);
+          desc = tx.notes || 'تسوية / خصم مديونية إداري';
+        }
+      }
+
+      totalDebits += debit;
+      totalCredits += credit;
+
+      return {
+        date: dateStr,
+        desc,
+        debit,
+        credit,
+        balance: Number(tx.new_balance) || 0,
+      };
+    });
+
+    const startingBalance = Number(custCreditTxs[0].previous_balance) || 0;
+    return {
+      rows,
+      startingBalance,
+      totalDebits,
+      totalCredits,
+      endingBalance,
+    };
+  }
+
+  // Fallback for customers without credit_transactions history
+  const custInvoices = (invoices || []).filter(
+    (inv) =>
+      inv.customer_id === customer.id &&
+      inv.invoice_status !== 'CANCELLED' &&
+      inv.invoice_status !== 'OPEN' &&
+      inv.invoice_status !== 'DRAFT' &&
+      (inv.payment_type === 'CREDIT' || inv.payment_type === 'SPLIT' || (inv.remaining_amount || 0) > 0)
+  );
+  const custPayments = (creditPayments || []).filter((p) => p.customer_id === customer.id);
+
+  const combined = [
+    ...custInvoices.map((inv) => ({
+      rawDate: inv.created_at || inv.invoice_date,
+      date: (inv.created_at || inv.invoice_date || '').substring(0, 10),
+      desc: `فاتورة مبيعات #${inv.invoice_number}`,
+      debit: inv.remaining_amount > 0 ? inv.remaining_amount : inv.total,
+      credit: 0,
+    })),
+    ...custPayments.map((p) => ({
+      rawDate: p.created_at || p.payment_date,
+      date: (p.created_at || p.payment_date || '').substring(0, 10),
+      desc: `دفعة سداد نقدية${p.notes ? ` - ${p.notes}` : ''}`,
+      debit: 0,
+      credit: p.amount || 0,
+    })),
+  ].sort((a, b) => new Date(a.rawDate).getTime() - new Date(b.rawDate).getTime());
+
+  const totalDebits = combined.reduce((sum, r) => sum + r.debit, 0);
+  const totalCredits = combined.reduce((sum, r) => sum + r.credit, 0);
+  const startingBalance = endingBalance - totalDebits + totalCredits;
+
+  let running = startingBalance;
+  const rows: StatementLedgerRow[] = combined.map((rec) => {
+    running += rec.debit - rec.credit;
+    return {
+      date: rec.date || '-',
+      desc: rec.desc,
+      debit: rec.debit,
+      credit: rec.credit,
+      balance: running,
+    };
+  });
+
+  return {
+    rows,
+    startingBalance,
+    totalDebits,
+    totalCredits,
+    endingBalance,
+  };
+}
+
+export interface ShareCustomerStatementImageOptions {
+  customer: Customer;
+  invoices: Invoice[];
+  creditPayments: CreditPayment[];
+  creditTransactions?: CustomerCreditTransaction[];
+  settings: AppSettings;
+  phone?: string;
+  onStart?: (msg: string) => void;
+  onSuccess?: (msg: string) => void;
+  onError?: (msg: string) => void;
+}
+
+/**
+ * Renders the customer account statement as a high-resolution PNG image card (never PDF).
+ */
+export async function createCustomerStatementImage({
+  customer,
+  invoices,
+  creditPayments,
+  creditTransactions = [],
+  settings,
+}: {
+  customer: Customer;
+  invoices: Invoice[];
+  creditPayments: CreditPayment[];
+  creditTransactions?: CustomerCreditTransaction[];
+  settings: AppSettings;
+}): Promise<{ imageBlob: Blob; imageFile: File; imageFileName: string; dataUrl: string }> {
+  if (!customer) {
+    throw new Error('بيانات العميل غير متاحة لإنشاء كشف الحساب.');
+  }
+
+  const currency = settings?.currency || 'ج.م';
+  const cafeName =
+    settings?.cafe_name && settings.cafe_name.trim().length > 0
+      ? settings.cafe_name.trim()
+      : 'كافيه الديب';
+  const dateObj = new Date();
+  const todayStr = dateObj.toLocaleDateString('ar-EG');
+  const timeStr = dateObj.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+  const safeNameForFile = (customer.full_name || 'customer')
+    .replace(/[^\w\u0600-\u06FF-]+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'customer';
+  const imageFileName = `Statement-${safeNameForFile}-${dateObj.toISOString().split('T')[0]}.png`;
+
+  const { rows, startingBalance, totalDebits, totalCredits, endingBalance } =
+    buildCustomerStatementData({
+      customer,
+      invoices,
+      creditPayments,
+      creditTransactions,
+    });
+
+  let rowsHtml = '';
+  if (startingBalance !== 0 || rows.length === 0) {
+    rowsHtml += `
+      <tr style="background-color: #fffbeb; font-weight: 700;">
+        <td style="padding: 8px 6px; border: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 10.5px;">-</td>
+        <td style="padding: 8px 8px; border: 1px solid #e5e7eb; text-align: right; color: #92400e; font-size: 11px;">الرصيد السابق / المرحل</td>
+        <td style="padding: 8px 6px; border: 1px solid #e5e7eb; text-align: center; color: #b91c1c; font-size: 11px;">${startingBalance > 0 ? `${startingBalance.toLocaleString()} ${escapeHtml(currency)}` : '-'}</td>
+        <td style="padding: 8px 6px; border: 1px solid #e5e7eb; text-align: center; color: #047857; font-size: 11px;">${startingBalance < 0 ? `${Math.abs(startingBalance).toLocaleString()} ${escapeHtml(currency)}` : '-'}</td>
+        <td style="padding: 8px 6px; border: 1px solid #e5e7eb; text-align: center; color: #111827; font-weight: 800; font-size: 11px;">${startingBalance.toLocaleString()} ${escapeHtml(currency)}</td>
+      </tr>
+    `;
+  }
+
+  rowsHtml += rows
+    .map(
+      (rec, idx) => `
+      <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f9fafb'};">
+        <td style="padding: 8px 6px; border: 1px solid #e5e7eb; text-align: center; color: #4b5563; font-size: 10px; font-family: monospace; white-space: nowrap;">${escapeHtml(rec.date)}</td>
+        <td style="padding: 8px 8px; border: 1px solid #e5e7eb; text-align: right; color: #111827; font-weight: 600; font-size: 11px; word-break: break-word;">${escapeHtml(rec.desc)}</td>
+        <td style="padding: 8px 6px; border: 1px solid #e5e7eb; text-align: center; color: #b91c1c; font-weight: 700; font-size: 11px; white-space: nowrap;">${rec.debit > 0 ? `${rec.debit.toLocaleString()} ${escapeHtml(currency)}` : '-'}</td>
+        <td style="padding: 8px 6px; border: 1px solid #e5e7eb; text-align: center; color: #047857; font-weight: 700; font-size: 11px; white-space: nowrap;">${rec.credit > 0 ? `${rec.credit.toLocaleString()} ${escapeHtml(currency)}` : '-'}</td>
+        <td style="padding: 8px 6px; border: 1px solid #e5e7eb; text-align: center; color: #111827; font-weight: 800; font-size: 11px; white-space: nowrap;">${rec.balance.toLocaleString()} ${escapeHtml(currency)}</td>
+      </tr>
+    `
+    )
+    .join('');
+
+  const renderDiv = document.createElement('div');
+  renderDiv.style.position = 'fixed';
+  renderDiv.style.top = '-99999px';
+  renderDiv.style.left = '-99999px';
+  renderDiv.style.width = '560px';
+  renderDiv.style.backgroundColor = '#ffffff';
+  renderDiv.style.color = '#111827';
+  renderDiv.style.padding = '24px 22px';
+  renderDiv.style.boxSizing = 'border-box';
+  renderDiv.style.direction = 'rtl';
+  renderDiv.style.letterSpacing = 'normal';
+  renderDiv.style.fontFamily = "'Cairo', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
+  renderDiv.id = 'customer-statement-image-render-container';
+
+  renderDiv.innerHTML = `
+    <div style="background: #ffffff; color: #111827; width: 100%; box-sizing: border-box; font-family: 'Cairo', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; direction: rtl; letter-spacing: normal; line-height: 1.55;">
+      
+      <!-- Header -->
+      <div style="text-align: center; border-bottom: 2px dashed #d4af37; padding-bottom: 14px; margin-bottom: 14px;">
+        <img
+          src="${getEldeebLogoDataUrl(300, false, 'gold')}"
+          alt="Cafe Eldeeb"
+          style="width: 170px; height: auto; display: block; margin: 0 auto 8px; object-fit: contain;"
+        />
+        <h1 style="margin: 0; font-size: 20px; font-weight: 900; color: #111827;">${escapeHtml(cafeName)}</h1>
+        <p style="margin: 3px 0 0; font-size: 13px; font-weight: 800; color: #b45309;">كشف حساب عميل تفصيلي (الآجل والذمم المالية)</p>
+        ${settings?.address ? `<p style="margin: 3px 0 0; font-size: 11px; color: #4b5563;">${escapeHtml(settings.address)}</p>` : ''}
+        ${settings?.phone ? `<p style="margin: 2px 0 0; font-size: 11px; color: #4b5563;">هاتف: ${escapeHtml(settings.phone)}</p>` : ''}
+        <p style="margin: 4px 0 0; font-size: 10.5px; color: #6b7280;">تاريخ الاستخراج: ${escapeHtml(todayStr)} - ${escapeHtml(timeStr)}</p>
+      </div>
+
+      <!-- Customer Summary Card -->
+      <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px 14px; margin-bottom: 14px; font-size: 12px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+          <span style="color: #4b5563; font-weight: 700;">اسم العميل:</span>
+          <span style="color: #111827; font-weight: 900;">${escapeHtml(customer.full_name)} ${customer.is_vip ? '⭐' : ''}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+          <span style="color: #4b5563; font-weight: 700;">رقم الهاتف:</span>
+          <span style="color: #111827; font-weight: 700; font-family: monospace;">${escapeHtml(customer.phone || customer.whatsapp || 'غير مدخل')}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+          <span style="color: #4b5563; font-weight: 700;">رصيد المحفظة:</span>
+          <span style="color: #b45309; font-weight: 800;">${(customer.wallet_balance || 0).toLocaleString()} ${escapeHtml(currency)}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; padding-top: 6px; margin-top: 6px; border-top: 1px dashed #d1d5db; font-size: 13.5px;">
+          <span style="color: #111827; font-weight: 900;">المديونية الحالية المستحقة:</span>
+          <span style="color: ${endingBalance > 0 ? '#dc2626' : '#059669'}; font-weight: 900;">${endingBalance.toLocaleString()} ${escapeHtml(currency)}</span>
+        </div>
+      </div>
+
+      <!-- Ledger Table -->
+      <h3 style="margin: 0 0 8px; font-size: 13px; font-weight: 800; color: #111827; border-right: 4px solid #d4af37; padding-right: 8px;">سجل الحركات التفصيلي</h3>
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 14px;">
+        <thead>
+          <tr style="background-color: #111827; color: #ffffff; font-size: 11px;">
+            <th style="padding: 8px 6px; border: 1px solid #111827; text-align: center;">التاريخ</th>
+            <th style="padding: 8px 8px; border: 1px solid #111827; text-align: right;">البيان / العملية</th>
+            <th style="padding: 8px 6px; border: 1px solid #111827; text-align: center;">عليه (+)</th>
+            <th style="padding: 8px 6px; border: 1px solid #111827; text-align: center;">له (-)</th>
+            <th style="padding: 8px 6px; border: 1px solid #111827; text-align: center;">الرصيد</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+
+      <!-- Totals Box -->
+      <div style="background: #fffbeb; border: 1.5px solid #fcd34d; border-radius: 12px; padding: 12px 14px; font-size: 12px; margin-bottom: 14px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 4px; color: #78350f; font-weight: 700;">
+          <span>الرصيد السابق:</span>
+          <span>${startingBalance.toLocaleString()} ${escapeHtml(currency)}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 4px; color: #b91c1c; font-weight: 700;">
+          <span>إجمالي المشتريات / الإضافات الآجلة:</span>
+          <span>${totalDebits.toLocaleString()} ${escapeHtml(currency)}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 6px; color: #047857; font-weight: 700;">
+          <span>إجمالي المبالغ المسددة:</span>
+          <span>${totalCredits.toLocaleString()} ${escapeHtml(currency)}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; padding-top: 8px; border-top: 1.5px dashed #f59e0b; font-size: 15px; font-weight: 900; color: ${endingBalance > 0 ? '#b91c1c' : '#047857'};">
+          <span>صافي المديونية النهائية المستحقة:</span>
+          <span>${endingBalance.toLocaleString()} ${escapeHtml(currency)}</span>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div style="text-align: center; border-top: 1px dashed #9ca3af; padding-top: 10px; font-size: 10.5px; color: #6b7280; font-weight: 700;">
+        <p style="margin: 0 0 3px;">${escapeHtml(settings?.statement_footer || 'هذا الكشف صادر آلياً من نظام كافيه الديب POS الملوكي ولا يحتاج لتوقيع.')}</p>
+        <p style="margin: 0; color: #374151;">شكراً لتعاملكم الراقي معنا ☕</p>
+      </div>
+
+    </div>
+  `;
+
+  document.body.appendChild(renderDiv);
+
+  try {
+    if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+      try {
+        await document.fonts.ready;
+      } catch {}
+    }
+
+    const imgs = Array.from(renderDiv.querySelectorAll('img'));
+    await Promise.all(
+      imgs.map((img) =>
+        typeof img.decode === 'function' ? img.decode().catch(() => {}) : Promise.resolve()
+      )
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    const canvas = await safeHtml2Canvas(renderDiv, {
+      useCORS: true,
+      allowTaint: false,
+      backgroundColor: '#ffffff',
+      scale: 2.2,
+    });
+
+    const imageBlob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((blob) => resolve(blob), 'image/png', 1.0)
+    );
+
+    if (!imageBlob || imageBlob.size === 0) {
+      throw new Error('فشل إنشاء صورة كشف الحساب (الملف فارغ).');
+    }
+
+    const imageFile = new File([imageBlob], imageFileName, { type: 'image/png' });
+    const dataUrl = canvas.toDataURL('image/png', 1.0);
+
+    return { imageBlob, imageFile, imageFileName, dataUrl };
+  } catch (err: any) {
+    console.error('Error in createCustomerStatementImage:', err);
+    throw new Error(`تعذر إنشاء صورة كشف الحساب: ${err?.message || 'خطأ غير معروف'}`);
+  } finally {
+    if (document.body.contains(renderDiv)) {
+      document.body.removeChild(renderDiv);
+    }
+  }
+}
+
+/**
+ * Generates the customer's account statement as a PNG image and shares it to WhatsApp (never PDF).
+ */
+export async function shareCustomerStatementImageToWhatsApp({
+  customer,
+  invoices,
+  creditPayments,
+  creditTransactions = [],
+  settings,
+  phone,
+  onStart,
+  onSuccess,
+  onError,
+}: ShareCustomerStatementImageOptions): Promise<void> {
+  try {
+    if (onStart) onStart('جاري تجهيز كشف الحساب كصورة للإرسال عبر واتساب... 📸');
+
+    const { imageBlob, imageFile, imageFileName, dataUrl } = await createCustomerStatementImage({
+      customer,
+      invoices,
+      creditPayments,
+      creditTransactions,
+      settings,
+    });
+
+    const targetPhone = phone ?? customer.whatsapp ?? customer.phone ?? '';
+    let cleanPhone = (targetPhone || '').replace(/\D/g, '');
+    if (cleanPhone.startsWith('01')) {
+      cleanPhone = '2' + cleanPhone;
+    } else if (cleanPhone && !cleanPhone.startsWith('20') && cleanPhone.length === 10) {
+      cleanPhone = '20' + cleanPhone;
+    }
+
+    const currency = settings?.currency || 'ج.م';
+    const remainingText = `${(customer.current_balance || 0).toLocaleString()} ${currency}`;
+    const tpl =
+      settings?.whatsapp_template_statement ||
+      'السلام عليكم أستاذ / {CustomerName}\nتجدون مرفقاً صورة كشف الحساب التفصيلي الخاص بكم لدى كافيه الديب.\nإجمالي الرصيد المستحق: {RemainingBalance}.\nنشكركم لثقتكم الغالية 🌹';
+    const message = tpl
+      .replace(/\{CustomerName\}/g, customer.full_name || 'العميل')
+      .replace(/\{RemainingBalance\}/g, (customer.current_balance || 0).toLocaleString())
+      .replace(/\s+ج\.م\s+ج\.م/g, ` ${currency}`);
+
+    const encodedText = encodeURIComponent(message);
+    const whatsappUrl = cleanPhone
+      ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedText}`
+      : `https://api.whatsapp.com/send?text=${encodedText}`;
+
+    // 1. Native Web Share API (Android attaches PNG image directly to WhatsApp)
+    if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [imageFile] })) {
+      try {
+        await navigator.share({
+          title: imageFileName,
+          text: `${message}\n(${remainingText})`,
+          files: [imageFile],
+        });
+        if (onSuccess) onSuccess('تمت مشاركة كشف الحساب كصورة بنجاح عبر الواتساب! 📸');
+        return;
+      } catch (shareErr: any) {
+        if (shareErr?.name === 'AbortError') {
+          return;
+        }
+        console.log('Native statement image share unavailable/failed, falling back:', shareErr);
+      }
+    }
+
+    // 2. Fallback: Download PNG
+    try {
+      const downloadLink = document.createElement('a');
+      downloadLink.href = dataUrl;
+      downloadLink.download = imageFileName;
+      downloadLink.style.display = 'none';
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+    } catch (dlErr) {
+      console.warn('Statement PNG download failed:', dlErr);
+    }
+
+    // 3. Fallback: Copy PNG to clipboard
+    try {
+      if (navigator.clipboard && typeof window !== 'undefined' && (window as any).ClipboardItem) {
+        await navigator.clipboard.write([
+          new (window as any).ClipboardItem({ 'image/png': imageBlob }),
+        ]);
+      }
+    } catch (clipErr) {
+      console.warn('Clipboard statement image write failed:', clipErr);
+    }
+
+    // 4. Open WhatsApp safely
+    let windowOpened = false;
+    try {
+      const win = window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+      if (win) windowOpened = true;
+    } catch (winErr) {
+      console.warn('window.open failed for WhatsApp link:', winErr);
+    }
+
+    if (!windowOpened) {
+      try {
+        const waLink = document.createElement('a');
+        waLink.href = whatsappUrl;
+        waLink.target = '_blank';
+        waLink.rel = 'noopener noreferrer';
+        waLink.style.display = 'none';
+        document.body.appendChild(waLink);
+        waLink.click();
+        document.body.removeChild(waLink);
+      } catch (waErr) {
+        console.warn('WhatsApp anchor link click failed:', waErr);
+      }
+    }
+
+    if (onSuccess) {
+      onSuccess(`📸 تم حفظ صورة كشف الحساب (${imageFileName}) ونسخها للحافظة وجاري فتح الواتساب لإرسالها!`);
+    }
+  } catch (err: any) {
+    console.error('Unhandled error in shareCustomerStatementImageToWhatsApp:', err);
+    if (onError) onError(err?.message || 'حدث خطأ أثناء تحويل كشف الحساب إلى صورة لإرسالها عبر الواتساب');
   }
 }
