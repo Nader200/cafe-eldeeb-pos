@@ -8,8 +8,10 @@ import {
   Users, UserCheck, Search, Star, Wallet, CreditCard, Calendar, TrendingUp, History, 
   QrCode, Plus, Edit, Archive, RotateCcw, FileText, CheckCircle, Clock, ArrowUpRight, 
   ArrowDownLeft, X, ChevronLeft, Trash, PlusCircle, DollarSign, Camera, User, MapPin, Phone, MessageSquare,
-  Printer, Download, AlertTriangle
+  Printer, Download, AlertTriangle, Lock, ShieldCheck, Eye, EyeOff
 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { isAdminSecurityPasswordSet } from '../lib/securityService';
 
 interface EnterpriseCustomersViewProps {
   onShowSuccessAlert: (msg: string) => void;
@@ -25,6 +27,10 @@ export default function EnterpriseCustomersView({
   onShowWarningAlert,
   initialTab = 'active'
 }: EnterpriseCustomersViewProps) {
+  const { currentUser } = useAuth();
+  const isAdmin = currentUser?.role === 'Admin';
+  const hasSecPass = isAdminSecurityPasswordSet();
+
   // --- States ---
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -62,11 +68,14 @@ export default function EnterpriseCustomersView({
   const [creditPayAmount, setCreditPayAmount] = useState<number>(0);
   const [creditNotes, setCreditNotes] = useState('');
 
-  // Manual Credit Adjustment Modal States
+  // Admin-Only Credit Adjustment Modal States (تعديل مديونية العميل للأدمن فقط)
   const [showCreditAdjustModal, setShowCreditAdjustModal] = useState(false);
-  const [creditAdjustType, setCreditAdjustType] = useState<'MANUAL_ADJUSTMENT' | 'CORRECTION' | 'REFUND'>('MANUAL_ADJUSTMENT');
+  const [creditAdjustMode, setCreditAdjustMode] = useState<'SET' | 'DECREASE' | 'INCREASE'>('SET');
   const [creditAdjustAmount, setCreditAdjustAmount] = useState<number>(0);
   const [creditAdjustNotes, setCreditAdjustNotes] = useState('');
+  const [creditAdjustCred, setCreditAdjustCred] = useState('');
+  const [showCreditAdjustCred, setShowCreditAdjustCred] = useState(false);
+  const [creditAdjustLoading, setCreditAdjustLoading] = useState(false);
 
   const [showStatementModal, setShowStatementModal] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
@@ -124,9 +133,11 @@ export default function EnterpriseCustomersView({
     loadData();
     const handleSync = () => loadData();
     window.addEventListener('cafe_db_synced_remote', handleSync);
+    window.addEventListener('customer_credit_updated', handleSync);
     window.addEventListener('storage', handleSync);
     return () => {
       window.removeEventListener('cafe_db_synced_remote', handleSync);
+      window.removeEventListener('customer_credit_updated', handleSync);
       window.removeEventListener('storage', handleSync);
     };
   }, []);
@@ -267,6 +278,24 @@ export default function EnterpriseCustomersView({
       });
     });
 
+    // 3.5. Admin Credit Debt Adjustments / Corrections
+    const custCreditCorrections = creditTransactions.filter(
+      tx =>
+        tx.customer_id === selectedCustomer.id &&
+        (tx.transaction_type === 'CORRECTION' || tx.transaction_type === 'MANUAL_ADJUSTMENT' || tx.transaction_type === 'REFUND')
+    );
+    custCreditCorrections.forEach(tx => {
+      timeline.push({
+        id: `timeline_ctx_corr_${tx.id}`,
+        type: 'UPDATE',
+        title: `تعديل وتصحيح المديونية (أدمن) 🔧`,
+        description: `من ${tx.previous_balance} ج.م إلى ${tx.new_balance} ج.م • ${tx.notes || ''} • بواسطة: ${tx.created_by || 'الأدمن'}`,
+        amount: tx.amount,
+        date: tx.created_at.replace('T', ' ').substring(0, 16),
+        rawDate: tx.created_at
+      });
+    });
+
     // 4. Custom manual visits
     const custVisits = dbService.getCustomerVisits(selectedCustomer.id);
     custVisits.forEach(v => {
@@ -294,7 +323,7 @@ export default function EnterpriseCustomersView({
 
     // Sort descending by date
     return timeline.sort((a, b) => new Date(b.rawDate).getTime() - new Date(a.rawDate).getTime());
-  }, [selectedCustomer, invoices, walletTransactions, creditPayments]);
+  }, [selectedCustomer, invoices, walletTransactions, creditPayments, creditTransactions]);
 
   // Load custom notes for selected customer
   const customerNotes = useMemo(() => {
@@ -871,31 +900,50 @@ export default function EnterpriseCustomersView({
     onShowSuccessAlert(cust.is_vip ? 'تم إزالة التقييم الذهبي للعميل' : 'تم منح العميل النجمة الذهبية لكبار الشخصيات VIP ⭐');
   };
 
-  // Credit Manual Adjustment Handler
-  const handleCreditAdjust = (e: React.FormEvent) => {
+  // Admin-Only Credit Debt Adjustment Handler (تعديل مديونية العميل في حالة وجود خطأ في الآجل)
+  const handleCreditAdjust = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCustomer) return;
-    if (creditAdjustAmount <= 0) {
-      onShowWarningAlert('يرجى إدخال مبلغ مالي صالح أكبر من الصفر لإجراء التسوية');
+    if (!isAdmin) {
+      onShowWarningAlert('تعديل مديونية العميل متاح لحساب الأدمن فقط!');
+      return;
+    }
+    if (creditAdjustMode === 'SET' ? creditAdjustAmount < 0 : creditAdjustAmount <= 0) {
+      onShowWarningAlert('يرجى إدخال قيمة مالية صالحة');
+      return;
+    }
+    if (!creditAdjustNotes.trim()) {
+      onShowWarningAlert('يرجى كتابة سبب تعديل المديونية (مثال: تصحيح خطأ في مبلغ الآجل)');
+      return;
+    }
+    if (!creditAdjustCred.trim()) {
+      onShowWarningAlert(hasSecPass ? 'يرجى إدخال كلمة مرور حماية الشاشات الحساسة' : 'يرجى إدخال رمز الأمان PIN للمسؤول');
       return;
     }
 
-    const tx = dbService.addManualCreditAdjustment(
-      selectedCustomer.id,
-      creditAdjustType,
-      creditAdjustAmount,
-      creditAdjustNotes.trim() || 'تسوية وتعديل يدوي إداري على حساب المديونية الآجل',
-      cashierName
-    );
+    setCreditAdjustLoading(true);
+    try {
+      const result = await dbService.adjustCustomerDebtAdmin({
+        customerId: selectedCustomer.id,
+        mode: creditAdjustMode,
+        amount: creditAdjustAmount,
+        reason: creditAdjustNotes.trim(),
+        adminCredential: creditAdjustCred.trim(),
+        operatorName: currentUser?.name || cashierName || 'أدمن النظام'
+      });
 
-    if (tx) {
-      onShowSuccessAlert('تم تسجيل حركة التسوية اليدوية للمديونية بنجاح وتحديث الحساب الجاري ملوكي!');
+      setCreditAdjustLoading(false);
+      onShowSuccessAlert(
+        `تم تعديل مديونية العميل "${selectedCustomer.full_name}" من ${result.adjustment.previous_balance.toLocaleString('ar-EG')} ج.م إلى ${result.adjustment.new_balance.toLocaleString('ar-EG')} ج.م بنجاح ✅`
+      );
       setShowCreditAdjustModal(false);
       setCreditAdjustAmount(0);
       setCreditAdjustNotes('');
+      setCreditAdjustCred('');
       loadData();
-    } else {
-      onShowWarningAlert('حدث خطأ أثناء إجراء التسوية اليدوية للعميل.');
+    } catch (err: any) {
+      setCreditAdjustLoading(false);
+      onShowWarningAlert(err?.message || 'تعذر تعديل مديونية العميل.');
     }
   };
 
@@ -1718,13 +1766,31 @@ export default function EnterpriseCustomersView({
                       >
                         خصم من المحفظة
                       </button>
-                      <button
-                        onClick={() => { setCreditAdjustAmount(0); setShowCreditAdjustModal(true); }}
-                        className="px-2 py-1 bg-purple-950/40 hover:bg-purple-900/40 text-purple-400 rounded-lg text-[9px] font-bold transition-all cursor-pointer"
-                        title="إجراء تسوية يدوية إدارية، تصحيح رصيد، أو استرداد مديونية"
-                      >
-                        ⚙️ تسوية يدوية
-                      </button>
+                      {isAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCreditAdjustMode('SET');
+                            setCreditAdjustAmount(selectedCustomer.current_balance || 0);
+                            setCreditAdjustNotes('');
+                            setCreditAdjustCred('');
+                            setShowCreditAdjustModal(true);
+                          }}
+                          className="px-2.5 py-1 bg-amber-950/50 hover:bg-amber-500 text-amber-300 hover:text-black border border-amber-500/40 rounded-lg text-[9px] font-black transition-all cursor-pointer flex items-center gap-1"
+                          title="تعديل مديونية العميل في حالة وجود خطأ في مبلغ الآجل (للأدمن فقط)"
+                        >
+                          <Edit className="w-2.5 h-2.5" />
+                          <span>تعديل المديونية (أدمن)</span>
+                        </button>
+                      ) : (
+                        <span
+                          className="px-2 py-1 bg-gray-900/70 border border-gray-800 text-gray-500 rounded-lg text-[9px] font-bold flex items-center gap-1"
+                          title="تعديل المديونية متاح للأدمن فقط"
+                        >
+                          <Lock className="w-2.5 h-2.5" />
+                          <span>التعديل للأدمن فقط</span>
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -2862,72 +2928,169 @@ export default function EnterpriseCustomersView({
       )}
 
       {/* ============================================== */}
-      {/* --- CREDIT ADJUSTMENTS MODAL --- */}
-      {showCreditAdjustModal && selectedCustomer && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 animate-fade-in overflow-y-auto" dir="rtl">
-          <div className="bg-luxury-card border border-luxury-border rounded-3xl p-4 sm:p-6 w-full max-w-sm shadow-2xl relative max-h-[90vh] overflow-y-auto my-auto">
+      {/* --- ADMIN-ONLY CREDIT DEBT ADJUSTMENT MODAL --- */}
+      {showCreditAdjustModal && selectedCustomer && isAdmin && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 animate-fade-in overflow-y-auto" dir="rtl">
+          <div className="bg-luxury-card border-2 border-amber-500/40 rounded-3xl p-4 sm:p-6 w-full max-w-md shadow-2xl relative max-h-[92vh] overflow-y-auto my-auto">
             
-            <button 
+            <button
+              type="button"
               onClick={() => setShowCreditAdjustModal(false)}
               className="absolute left-4 top-4 text-gray-400 hover:text-white transition-all cursor-pointer z-20"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <h3 className="text-sm font-extrabold text-gold-500 flex items-center gap-2 mb-4 border-b border-luxury-border pb-3">
-              <DollarSign className="w-5 h-5" />
-              تسوية وتصحيح رصيد الحساب الجاري
+            <h3 className="text-sm font-extrabold text-amber-400 flex items-center gap-2 mb-4 border-b border-luxury-border pb-3">
+              <ShieldCheck className="w-5 h-5" />
+              تعديل مديونية العميل الآجل (للأدمن فقط)
             </h3>
 
-            <div className="bg-luxury-bg border border-luxury-border p-3.5 rounded-2xl mb-4 text-right">
-              <span className="text-[10px] text-gray-500 font-bold block mb-1">اسم العميل والمديونية الحالية:</span>
-              <span className="text-xs font-bold text-white block">{selectedCustomer.full_name}</span>
-              <span className="text-sm font-extrabold text-red-400 block mt-1 font-mono">{selectedCustomer.current_balance} ج.م</span>
+            <div className="bg-luxury-bg border border-luxury-border p-3.5 rounded-2xl mb-4 space-y-1.5 text-right">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-gray-400 font-bold">اسم العميل:</span>
+                <span className="text-xs font-black text-white">{selectedCustomer.full_name}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-gray-400 font-bold">المديونية المسجلة حالياً:</span>
+                <span className="text-sm font-extrabold text-red-400 font-mono">
+                  {(selectedCustomer.current_balance || 0).toLocaleString('ar-EG')} ج.م
+                </span>
+              </div>
+              {(() => {
+                const cur = Math.max(0, Number(selectedCustomer.current_balance) || 0);
+                const val = Number(creditAdjustAmount) || 0;
+                const preview =
+                  creditAdjustMode === 'SET'
+                    ? Math.max(0, val)
+                    : creditAdjustMode === 'DECREASE'
+                      ? Math.max(0, cur - val)
+                      : cur + val;
+                const diff = Math.round((preview - cur) * 100) / 100;
+                return (
+                  <div className="flex items-center justify-between pt-1.5 border-t border-gray-800/80">
+                    <span className="text-[10px] text-amber-300 font-bold">المديونية بعد التعديل:</span>
+                    <span className="text-sm font-black font-mono text-emerald-400">
+                      {preview.toLocaleString('ar-EG')} ج.م{' '}
+                      <span className="text-[10px] text-gray-400">
+                        ({diff > 0 ? `+${diff}` : diff} ج.م)
+                      </span>
+                    </span>
+                  </div>
+                );
+              })()}
             </div>
 
-            <form onSubmit={handleCreditAdjust} className="flex flex-col gap-4">
-              
+            <form onSubmit={handleCreditAdjust} className="flex flex-col gap-3.5">
+              {/* Mode Selector */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-gray-400">نوع التسوية اليدوية</label>
-                <select
-                  value={creditAdjustType}
-                  onChange={(e) => setCreditAdjustType(e.target.value as any)}
-                  className="w-full bg-luxury-bg border border-luxury-border text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-500 font-medium cursor-pointer text-right"
-                >
-                  <option value="MANUAL_ADJUSTMENT">تسوية مديونية يدوية إدارية ⚙️</option>
-                  <option value="CORRECTION">تصحيح وتعديل رصيد 🔧</option>
-                  <option value="REFUND">استرداد مديونية (مرتجع) 🔄</option>
-                </select>
+                <label className="text-[10px] font-bold text-gray-400">طريقة تعديل المديونية</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreditAdjustMode('SET');
+                      setCreditAdjustAmount(selectedCustomer.current_balance || 0);
+                    }}
+                    className={`py-2 px-2 rounded-xl text-[10px] font-black border transition-all cursor-pointer ${
+                      creditAdjustMode === 'SET'
+                        ? 'bg-amber-500 text-black border-amber-400'
+                        : 'bg-luxury-bg border-gray-800 text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    تحديد المبلغ الصحيح
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreditAdjustMode('DECREASE');
+                      setCreditAdjustAmount(0);
+                    }}
+                    className={`py-2 px-2 rounded-xl text-[10px] font-black border transition-all cursor-pointer ${
+                      creditAdjustMode === 'DECREASE'
+                        ? 'bg-emerald-600 text-white border-emerald-500'
+                        : 'bg-luxury-bg border-gray-800 text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    خصم / إنقاص (-)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreditAdjustMode('INCREASE');
+                      setCreditAdjustAmount(0);
+                    }}
+                    className={`py-2 px-2 rounded-xl text-[10px] font-black border transition-all cursor-pointer ${
+                      creditAdjustMode === 'INCREASE'
+                        ? 'bg-red-600 text-white border-red-500'
+                        : 'bg-luxury-bg border-gray-800 text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    إضافة / زيادة (+)
+                  </button>
+                </div>
               </div>
 
+              {/* Amount */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-gray-400">القيمة المالية للتسوية (ج.م) *</label>
+                <label className="text-[10px] font-bold text-gray-300">
+                  {creditAdjustMode === 'SET'
+                    ? 'إجمالي مديونية العميل الصحيحة بعد التصحيح (ج.م) *'
+                    : creditAdjustMode === 'DECREASE'
+                      ? 'المبلغ المراد خصمه من المديونية (ج.م) *'
+                      : 'المبلغ المراد إضافته للمديونية (ج.م) *'}
+                </label>
                 <input
                   type="number"
-                  min="0.01"
-                  step="0.01"
+                  min={creditAdjustMode === 'SET' ? '0' : '0.5'}
+                  step="0.5"
                   required
                   placeholder="0.00"
-                  value={creditAdjustAmount || ''}
-                  onChange={(e) => setCreditAdjustAmount(Number(e.target.value))}
-                  className="w-full bg-luxury-bg border border-luxury-border text-white rounded-xl py-2.5 px-3 text-xs focus:outline-none focus:border-gold-500 text-right font-mono"
+                  value={creditAdjustAmount === 0 && creditAdjustMode !== 'SET' ? '' : creditAdjustAmount}
+                  onChange={(e) => setCreditAdjustAmount(Math.max(0, Number(e.target.value) || 0))}
+                  className="w-full bg-luxury-bg border border-amber-500/40 text-amber-300 rounded-xl py-2.5 px-3 text-base font-black focus:outline-none focus:border-amber-400 text-center font-mono"
                 />
               </div>
 
+              {/* Reason / Notes */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-gray-400">ملاحظات وسبب التسوية الإدارية</label>
+                <label className="text-[10px] font-bold text-gray-300">سبب التعديل / الخطأ المحاسبي *</label>
                 <input
                   type="text"
                   required
-                  placeholder="مثال: تسوية وتصفير مديونيات بناءً على مراجعة الفواتير..."
+                  placeholder="مثال: تصحيح خطأ إدخال مبلغ الآجل في الفاتورة..."
                   value={creditAdjustNotes}
                   onChange={(e) => setCreditAdjustNotes(e.target.value)}
-                  className="w-full bg-luxury-bg border border-luxury-border text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-500 text-right"
+                  className="w-full bg-luxury-bg border border-luxury-border text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-amber-500 text-right"
                 />
               </div>
 
-              <p className="text-[9px] text-gray-500 leading-relaxed bg-luxury-bg/50 p-2.5 rounded-lg border border-luxury-border">
-                ⚠️ تنبيه مالي: هذه العملية ستُسجل بصفة دائمة كحركة تسوية رسمية في الدفتر الملوكي كأثر رجعي، وستعدل رصيد مديونية الزبون مباشرة دون التأثير على صندوق الكاش اليومي بشكل مباشر.
+              {/* Admin Security Credential */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-bold text-amber-300">
+                  {hasSecPass ? 'كلمة مرور الشاشات الحساسة (Admin Security Password) *' : 'رمز الأمان PIN للمسؤول *'}
+                </label>
+                <div className="relative">
+                  <input
+                    type={showCreditAdjustCred ? 'text' : 'password'}
+                    required
+                    value={creditAdjustCred}
+                    onChange={(e) => setCreditAdjustCred(e.target.value)}
+                    placeholder={hasSecPass ? 'أدخل Admin Security Password...' : '••••'}
+                    className="w-full bg-luxury-bg border border-luxury-border text-white rounded-xl py-2 pr-3 pl-10 text-xs font-mono focus:outline-none focus:border-amber-500 text-right"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCreditAdjustCred(!showCreditAdjustCred)}
+                    className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400 hover:text-amber-400 cursor-pointer"
+                  >
+                    {showCreditAdjustCred ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <p className="text-[9px] text-gray-400 leading-relaxed bg-luxury-bg/60 p-2.5 rounded-xl border border-luxury-border">
+                🔒 هذا الإجراء متاح للأدمن فقط ويُصحح رصيد الآجل للعميل مع توثيق العملية في سجل التدقيق دون التأثير على رصيد درج النقدية الفعلي.
               </p>
 
               {/* Action buttons */}
@@ -2935,15 +3098,16 @@ export default function EnterpriseCustomersView({
                 <button
                   type="button"
                   onClick={() => setShowCreditAdjustModal(false)}
-                  className="w-1/2 py-2 bg-luxury-bg border border-luxury-border hover:bg-luxury-card text-gray-300 rounded-xl transition-all cursor-pointer"
+                  className="w-1/2 py-2.5 bg-luxury-bg border border-luxury-border hover:bg-luxury-card text-gray-300 rounded-xl transition-all cursor-pointer"
                 >
                   إلغاء التراجع
                 </button>
                 <button
                   type="submit"
-                  className="w-1/2 py-2 bg-gradient-to-r from-gold-600 to-gold-700 text-black font-extrabold rounded-xl hover:opacity-90 active:scale-95 transition-all shadow-md cursor-pointer"
+                  disabled={creditAdjustLoading}
+                  className="w-1/2 py-2.5 bg-gradient-to-r from-amber-500 to-gold-600 text-black font-black rounded-xl hover:opacity-95 active:scale-95 transition-all shadow-md cursor-pointer disabled:opacity-50"
                 >
-                  تأكيد وحفظ التسوية
+                  {creditAdjustLoading ? 'جاري الحفظ...' : 'حفظ تعديل المديونية'}
                 </button>
               </div>
 

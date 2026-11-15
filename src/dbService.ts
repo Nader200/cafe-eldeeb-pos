@@ -451,11 +451,13 @@ export const recordCreditTransactionInternal = (
   const todayStr = now.toISOString().split('T')[0];
   const timeStr = now.toTimeString().split(' ')[0];
 
-  // Calculate previous running balance for the customer
+  // Always anchor previous_balance on the customer's authoritative live current_balance when available
   const customerTxs = txs.filter(t => t.customer_id === txData.customer_id);
   const custObj = customers.find(c => c.id === txData.customer_id);
   let previous_balance = 0;
-  if (customerTxs.length > 0) {
+  if (custObj && typeof custObj.current_balance === 'number') {
+    previous_balance = Math.max(0, Math.round((Number(custObj.current_balance) || 0) * 100) / 100);
+  } else if (customerTxs.length > 0) {
     customerTxs.forEach(t => {
       if (t.transaction_type === 'INVOICE') previous_balance += t.amount;
       else if (t.transaction_type === 'PAYMENT') previous_balance -= t.amount;
@@ -463,8 +465,6 @@ export const recordCreditTransactionInternal = (
       else if (t.transaction_type === 'CORRECTION') previous_balance += t.amount;
       else if (t.transaction_type === 'REFUND') previous_balance -= t.amount;
     });
-  } else if (custObj && typeof custObj.current_balance === 'number') {
-    previous_balance = custObj.current_balance;
   }
 
   let new_balance = previous_balance;
@@ -473,6 +473,7 @@ export const recordCreditTransactionInternal = (
   else if (txData.transaction_type === 'MANUAL_ADJUSTMENT') new_balance += txData.amount;
   else if (txData.transaction_type === 'CORRECTION') new_balance += txData.amount;
   else if (txData.transaction_type === 'REFUND') new_balance -= txData.amount;
+  new_balance = Math.max(0, Math.round(new_balance * 100) / 100);
 
   const newTx: CustomerCreditTransaction = {
     id: `ctx_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
@@ -3344,6 +3345,10 @@ export const dbService = {
     notes: string,
     operator: string
   ): CustomerCreditTransaction | null => {
+    const cu = dbService.getCurrentUser();
+    if (cu && cu.role !== 'Admin') {
+      throw new Error('تعديل مديونية العميل متاح للأدمن فقط!');
+    }
     const customersList = dbService.getCustomers();
     const custIdx = customersList.findIndex(c => c.id === customerId);
     if (custIdx === -1) return null;
@@ -3370,7 +3375,130 @@ export const dbService = {
       operator
     );
 
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('customer_credit_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
     return newTx;
+  },
+
+  // Admin-Only Customer Debt Correction (تعديل مديونية العميل في حالة وجود خطأ في مبلغ الآجل - للأدمن فقط)
+  adjustCustomerDebtAdmin: async (params: {
+    customerId: string;
+    mode: 'SET' | 'DECREASE' | 'INCREASE';
+    amount: number;
+    reason: string;
+    notes?: string;
+    adminCredential: string;
+    operatorName?: string;
+  }): Promise<{ customer: Customer; transaction: CustomerCreditTransaction; adjustment: CreditAdjustment }> => {
+    const cu = dbService.getCurrentUser();
+    if (cu && cu.role !== 'Admin') {
+      throw new Error('تعديل مديونية العميل متاح للأدمن فقط!');
+    }
+
+    const isValid = await dbService.verifyAdminActionCredential(params.adminCredential);
+    if (!isValid) {
+      throw new Error(
+        isAdminSecurityPasswordSet()
+          ? 'كلمة مرور حماية الشاشات الحساسة (Admin Security Password) غير صحيحة!'
+          : 'رمز الأمان PIN للمسؤول غير صحيح!'
+      );
+    }
+
+    const customersList = dbService.getCustomers();
+    const custIdx = customersList.findIndex(c => c.id === params.customerId);
+    if (custIdx === -1) {
+      throw new Error('العميل غير موجود!');
+    }
+
+    const cleanAmt = Math.round((Number(params.amount) || 0) * 100) / 100;
+    if (params.mode === 'SET') {
+      if (isNaN(cleanAmt) || cleanAmt < 0) {
+        throw new Error('يرجى إدخال قيمة مديونية صحيحة (0 أو أكثر)');
+      }
+    } else if (isNaN(cleanAmt) || cleanAmt <= 0) {
+      throw new Error('يرجى إدخال مبلغ تعديل صحيح أكبر من صفر');
+    }
+
+    const customer = customersList[custIdx];
+    const prevBalance = Math.max(0, Math.round((Number(customer.current_balance) || 0) * 100) / 100);
+    let newBalance = prevBalance;
+
+    if (params.mode === 'SET') {
+      newBalance = cleanAmt;
+    } else if (params.mode === 'DECREASE') {
+      newBalance = Math.max(0, Math.round((prevBalance - cleanAmt) * 100) / 100);
+    } else if (params.mode === 'INCREASE') {
+      newBalance = Math.round((prevBalance + cleanAmt) * 100) / 100;
+    }
+
+    const difference = Math.round((newBalance - prevBalance) * 100) / 100;
+    if (difference === 0) {
+      throw new Error('المبلغ الجديد مطابق لمديونية العميل الحالية بالفعل!');
+    }
+
+    const op = params.operatorName || cu?.name || 'أدمن النظام';
+    const cleanReason = params.reason?.trim() || 'تصحيح خطأ في مبلغ الآجل';
+    const fullNote = params.notes?.trim()
+      ? `[تعديل أدمن] ${cleanReason} - ${params.notes.trim()}`
+      : `[تعديل أدمن] ${cleanReason} (من ${prevBalance} إلى ${newBalance} ج.م)`;
+
+    const creditTxs = getLocal<CustomerCreditTransaction[]>(KEYS.CREDIT_TRANSACTIONS, []);
+    const newTx = recordCreditTransactionInternal(creditTxs, customersList, {
+      customer_id: params.customerId,
+      customer_name: customer.full_name,
+      transaction_type: 'CORRECTION',
+      amount: difference,
+      notes: fullNote,
+      created_by: op
+    });
+
+    // Ensure authoritative balance matches exact calculation
+    customersList[custIdx].current_balance = newBalance;
+    customersList[custIdx].updated_at = new Date().toISOString();
+
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const adjustments = getLocal<CreditAdjustment[]>(KEYS.CREDIT_ADJUSTMENTS, []);
+    const newAdj: CreditAdjustment = {
+      id: `adj_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      date: dateStr,
+      time: timeStr,
+      user: op,
+      customer_id: params.customerId,
+      customer_name: customer.full_name,
+      previous_balance: prevBalance,
+      new_balance: newBalance,
+      difference,
+      reason: cleanReason,
+      notes: fullNote,
+      created_at: now.toISOString()
+    };
+    adjustments.push(newAdj);
+
+    setLocal(KEYS.CREDIT_TRANSACTIONS, creditTxs);
+    setLocal(KEYS.CREDIT_ADJUSTMENTS, adjustments);
+    setLocal(KEYS.CUSTOMERS, customersList);
+
+    dbService.logAuditAction(
+      'ADMIN_DEBT_ADJUSTMENT',
+      `قام الأدمن (${op}) بتعديل مديونية العميل "${customer.full_name}" من ${prevBalance} ج.م إلى ${newBalance} ج.م (الفارق: ${difference > 0 ? `+${difference}` : difference} ج.م). السبب: ${cleanReason}`,
+      op
+    );
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('customer_credit_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
+    return {
+      customer: customersList[custIdx],
+      transaction: newTx,
+      adjustment: newAdj
+    };
   },
 
   // --- Credit Payments ---
@@ -5180,6 +5308,10 @@ export const dbService = {
     adminPin: string,
     cashierName = 'Administrator'
   ): CreditAdjustment => {
+    const cu = dbService.getCurrentUser();
+    if (cu && cu.role !== 'Admin') {
+      throw new Error('تعديل مديونية العميل متاح للأدمن فقط!');
+    }
     const settings = dbService.getSettings();
     if (adminPin !== settings.pin_code) {
       throw new Error('رمز الأمان PIN للمسؤول غير صحيح!');
