@@ -49,7 +49,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import { dbService, seedDatabase } from './dbService';
-import { AppSettings, CashDrawer } from './types';
+import { AppSettings, CashDrawer, ShortageTargetAccount } from './types';
 import { safeStorage } from './lib/safeStorage';
 import { uploadUnifiedCloudBackup } from './lib/cloudBackupUnifiedService';
 import { checkAndExpirePSSessions, ExpiredSessionNotification } from './lib/playstationNotifier';
@@ -231,6 +231,8 @@ function AppContent() {
   const [showResetDrawerModal, setShowResetDrawerModal] = useState<boolean>(false);
   const [shiftClosingBalance, setShiftClosingBalance] = useState<number>(1500);
   const [shiftClosingNotes, setShiftClosingNotes] = useState<string>('');
+  const [dailyShortageAmount, setDailyShortageAmount] = useState<number>(0);
+  const [shortageTargetAccount, setShortageTargetAccount] = useState<ShortageTargetAccount>('PRIVATE_SAFE');
 
   const [hasStartedRawMaterials, setHasStartedRawMaterials] = useState<boolean>(() => {
     return dbService.hasRegisteredRawMaterialsForToday();
@@ -514,13 +516,19 @@ function AppContent() {
       const operatorName = currentUser?.name || 'أدمن النظام / نادر الديب';
       const closedRecord = dbService.performDailyClose(operatorName, {
         actualCashCounted: shiftClosingBalance,
-        notes: shiftClosingNotes
+        notes: shiftClosingNotes,
+        shortageAmount: dailyShortageAmount,
+        shortageTargetAccount
       });
       const transferredMsg =
         (closedRecord.transferred_to_private_safe || 0) > 0
           ? ` وتم ترحيل المتبقي (${closedRecord.transferred_to_private_safe?.toLocaleString('ar-EG')} ج.م) تلقائياً إلى الخزنة الخاصة 🔐`
           : '';
-      showSuccessAlert(`تم تسجيل إغلاق الوردية واليومية بنجاح!${transferredMsg}`);
+      const shortageMsg =
+        (closedRecord.shortage_amount || 0) > 0
+          ? ` | وتم تسجيل عجز بقيمة ${closedRecord.shortage_amount?.toLocaleString('ar-EG')} ج.م في خانة العجز ⚠️`
+          : '';
+      showSuccessAlert(`تم تسجيل إغلاق الوردية واليومية بنجاح!${transferredMsg}${shortageMsg}`);
       setShowCloseShiftModal(false);
       handleRefreshSettingsAndDrawer();
       setActiveTab('dashboard');
@@ -837,6 +845,8 @@ function AppContent() {
               onClick={() => {
                 setShiftClosingBalance(drawerBalance);
                 setShiftClosingNotes('');
+                setDailyShortageAmount(0);
+                setShortageTargetAccount(settings?.safe_auto_transfer_enabled !== false ? 'PRIVATE_SAFE' : 'DRAWER');
                 setShowCloseShiftModal(true);
               }}
               className="bg-gold-600 hover:bg-gold-500 text-black px-3.5 py-1.5 rounded-xl text-[10px] font-black tracking-tight shadow-md cursor-pointer transition-all active:scale-95 shrink-0"
@@ -1051,6 +1061,8 @@ function AppContent() {
               onCloseShift={() => {
                 setShiftClosingBalance(drawerBalance);
                 setShiftClosingNotes('');
+                setDailyShortageAmount(0);
+                setShortageTargetAccount(settings?.safe_auto_transfer_enabled !== false ? 'PRIVATE_SAFE' : 'DRAWER');
                 setShowCloseShiftModal(true);
               }}
               onToggleSidebar={() => {
@@ -1317,9 +1329,56 @@ function AppContent() {
                   min="0"
                   required
                   value={shiftClosingBalance}
-                  onChange={(e) => setShiftClosingBalance(parseFloat(e.target.value) || 0)}
+                  onChange={(e) => {
+                    const nextVal = parseFloat(e.target.value) || 0;
+                    setShiftClosingBalance(nextVal);
+                    if (nextVal < drawerBalance) {
+                      setDailyShortageAmount(Math.round((drawerBalance - nextVal) * 100) / 100);
+                    } else {
+                      setDailyShortageAmount(0);
+                    }
+                  }}
                   className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-sm focus:outline-none focus:border-gold-600 text-center font-mono font-extrabold text-gold-500"
                 />
+              </div>
+
+              {/* Daily Shortage Box (خانة العجز في نهاية اليوم) */}
+              <div className="p-3 bg-red-950/15 border border-red-500/35 rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black text-red-300 flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+                    <span>خانة العجز في نهاية اليوم (ج.م)</span>
+                  </label>
+                  <span className="text-[10px] text-gray-400">
+                    {dailyShortageAmount > 0 ? 'يُحفظ لسداده لاحقاً' : 'لا يوجد عجز'}
+                  </span>
+                </div>
+                <input
+                  id="daily-shortage-amount"
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={dailyShortageAmount}
+                  onChange={(e) => setDailyShortageAmount(Math.max(0, parseFloat(e.target.value) || 0))}
+                  placeholder="0.00"
+                  className="w-full bg-luxury-bg border border-red-500/40 text-red-400 rounded-xl py-2 px-3 text-sm font-mono font-black text-center focus:outline-none focus:border-red-500"
+                />
+                {dailyShortageAmount > 0 && (
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-300 block">
+                      الحساب الذي يُضاف إليه العجز تلقائياً عند تسويته:
+                    </label>
+                    <select
+                      value={shortageTargetAccount}
+                      onChange={(e) => setShortageTargetAccount(e.target.value as ShortageTargetAccount)}
+                      className="w-full bg-luxury-bg border border-gray-800 text-white rounded-lg py-1.5 px-2.5 text-[11px] font-bold focus:outline-none"
+                    >
+                      <option value="PRIVATE_SAFE">الخزنة الخاصة</option>
+                      <option value="MAIN_SAFE">الخزنة الرئيسية</option>
+                      <option value="DRAWER">درج النقدية</option>
+                    </select>
+                  </div>
+                )}
               </div>
 
               {settings?.safe_auto_transfer_enabled !== false && (

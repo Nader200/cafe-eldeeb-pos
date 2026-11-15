@@ -114,11 +114,13 @@ export default function DashboardView({
     window.addEventListener('cafe_db_synced_remote', handleSync);
     window.addEventListener('shift_updated', handleSync);
     window.addEventListener('safe_updated', handleSync);
+    window.addEventListener('shortage_updated', handleSync);
     window.addEventListener('storage', handleSync);
     return () => {
       window.removeEventListener('cafe_db_synced_remote', handleSync);
       window.removeEventListener('shift_updated', handleSync);
       window.removeEventListener('safe_updated', handleSync);
+      window.removeEventListener('shortage_updated', handleSync);
       window.removeEventListener('storage', handleSync);
     };
   }, []);
@@ -129,6 +131,7 @@ export default function DashboardView({
   const cashDrawer = useMemo(() => dbService.getActiveDrawer(), [tick]);
   const mainSafeBalance = useMemo(() => dbService.getSafeBalance('MAIN_SAFE'), [tick]);
   const privateSafeBalance = useMemo(() => dbService.getSafeBalance('PRIVATE_SAFE'), [tick]);
+  const totalPendingShortage = useMemo(() => dbService.getTotalPendingShortage(), [tick]);
   const auditLogs = useMemo(() => {
     const logs = dbService.getAuditLogs ? dbService.getAuditLogs() : [];
     return [...logs].reverse().slice(0, 5);
@@ -1010,12 +1013,12 @@ export default function DashboardView({
             </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-2.5">
+          <div className="grid grid-cols-3 gap-2">
             <div
               onClick={() => onNavigate('safes')}
               className="bg-black/60 border border-emerald-500/30 hover:border-emerald-400 rounded-xl p-2.5 cursor-pointer transition-all"
             >
-              <span className="text-[9px] font-bold text-emerald-400 block">الخزنة الرئيسية (اليومية)</span>
+              <span className="text-[9px] font-bold text-emerald-400 block">الخزنة الرئيسية</span>
               <span className="text-sm font-black font-mono text-white">
                 {mainSafeBalance.toLocaleString('ar-EG')} <span className="text-[10px] text-emerald-400 font-sans">ج.م</span>
               </span>
@@ -1026,10 +1029,28 @@ export default function DashboardView({
             >
               <span className="text-[9px] font-bold text-[#D4AF37] flex items-center gap-1">
                 <Lock className="w-2.5 h-2.5" />
-                الخزنة الخاصة (للأدمن)
+                الخزنة الخاصة
               </span>
               <span className="text-sm font-black font-mono text-white">
                 {privateSafeBalance.toLocaleString('ar-EG')} <span className="text-[10px] text-[#D4AF37] font-sans">ج.م</span>
+              </span>
+            </div>
+            <div
+              onClick={() => onNavigate('safes')}
+              className={`bg-black/60 rounded-xl p-2.5 cursor-pointer transition-all border ${
+                totalPendingShortage > 0
+                  ? 'border-red-500/50 hover:border-red-400'
+                  : 'border-gray-800 hover:border-gray-600'
+              }`}
+            >
+              <span className={`text-[9px] font-bold flex items-center gap-1 ${
+                totalPendingShortage > 0 ? 'text-red-400' : 'text-gray-400'
+              }`}>
+                <AlertTriangle className="w-2.5 h-2.5" />
+                خانة العجز
+              </span>
+              <span className={`text-sm font-black font-mono ${totalPendingShortage > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                {totalPendingShortage.toLocaleString('ar-EG')} <span className="text-[10px] font-sans">ج.م</span>
               </span>
             </div>
           </div>

@@ -261,6 +261,8 @@ export interface DailyClose {
   transferred_to_private_safe?: number;
   drawer_transferred?: number;
   main_safe_transferred?: number;
+  shortage_amount?: number;
+  shortage_id?: string;
   notes?: string;
   created_at: string;
   updated_at: string;
@@ -455,7 +457,7 @@ export interface CreditAdjustment {
 export interface CashMovement {
   id: string;
   previous_balance: number;
-  transaction_type: 'OPENING_CASH' | 'CASH_SALE' | 'CUSTOMER_PAYMENT' | 'EXPENSE' | 'CASH_WITHDRAWAL' | 'ADD_CASH' | 'CASH_ADJUSTMENT_ADD' | 'CASH_ADJUSTMENT_SUB' | 'MANUAL_ADD' | 'MANUAL_SUB' | 'DRAWER_RESET';
+  transaction_type: 'OPENING_CASH' | 'CASH_SALE' | 'CUSTOMER_PAYMENT' | 'EXPENSE' | 'CASH_WITHDRAWAL' | 'ADD_CASH' | 'CASH_ADJUSTMENT_ADD' | 'CASH_ADJUSTMENT_SUB' | 'MANUAL_ADD' | 'MANUAL_SUB' | 'DRAWER_RESET' | 'SHORTAGE_SETTLEMENT';
   amount: number;
   new_balance: number;
   date: string; // YYYY-MM-DD
@@ -752,7 +754,8 @@ export type SafeTransactionType =
   | 'TRANSFER_TO_DRAWER'    // تغذية درج الكاشير من الخزنة الرئيسية
   | 'TRANSFER_FROM_DRAWER'  // توريد من درج الكاشير للخزنة
   | 'TRANSFER_TO_PRIVATE'   // ترحيل يدوي من الخزنة الرئيسية للخزنة الخاصة
-  | 'AUTO_DAILY_TRANSFER';  // ترحيل الباقي تلقائياً في نهاية اليوم إلى الخزنة الخاصة
+  | 'AUTO_DAILY_TRANSFER'   // ترحيل الباقي تلقائياً في نهاية اليوم إلى الخزنة الخاصة
+  | 'SHORTAGE_SETTLEMENT';  // إضافة وسداد العجز تلقائياً إلى الحساب
 
 export interface SafeTransaction {
   id: string;
@@ -769,3 +772,34 @@ export interface SafeTransaction {
   daily_close_id?: string;
   created_at: string; // ISO string
 }
+
+// End-of-Day Cash Shortage Ledger (خانة العجز اليومية)
+export type ShortageTargetAccount = 'PRIVATE_SAFE' | 'MAIN_SAFE' | 'DRAWER';
+
+export interface ShortageSettlement {
+  id: string;
+  amount: number;
+  target_account: ShortageTargetAccount;
+  settled_at: string;
+  operator: string;
+  notes?: string;
+}
+
+export interface DailyShortage {
+  id: string;
+  business_date: string; // YYYY-MM-DD
+  expected_amount: number;
+  actual_amount: number;
+  shortage_amount: number;
+  paid_amount: number;
+  remaining_amount: number;
+  target_account: ShortageTargetAccount;
+  cashier_name: string;
+  notes: string;
+  status: 'PENDING' | 'PARTIAL' | 'SETTLED';
+  daily_close_id?: string;
+  settlements: ShortageSettlement[];
+  created_at: string;
+  updated_at: string;
+}
+

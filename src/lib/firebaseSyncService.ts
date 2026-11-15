@@ -42,7 +42,8 @@ const ALL_SYNC_KEYS: string[] = [
   'cafe_ps_sessions', 'cafe_daily_raw_materials', 'cafe_raw_materials', 'cafe_raw_materials_seeded',
   'cafe_raw_materials_deleted',  'cafe_inventory_batches', 'cafe_inventory_batch_logs', 'cafe_batch_consumptions',
   'cafe_auth_users', 'cafe_auth_audit_logs', 'cafe_partners', 'cafe_partner_drawings',
-  'cafe_update_logs', 'cafe_shifts', 'cafe_shift_handovers', 'cafe_safe_transactions'
+  'cafe_update_logs', 'cafe_shifts', 'cafe_shift_handovers', 'cafe_safe_transactions',
+  'cafe_daily_shortages'
 ];
 
 const MERGEABLE_ARRAY_KEYS = new Set<string>([
@@ -56,7 +57,8 @@ const MERGEABLE_ARRAY_KEYS = new Set<string>([
   'cafe_ps_sessions', 'cafe_daily_raw_materials', 'cafe_raw_materials',
   'cafe_inventory_batches', 'cafe_inventory_batch_logs', 'cafe_batch_consumptions',
   'cafe_auth_users', 'cafe_partners', 'cafe_partner_drawings',
-  'cafe_shifts', 'cafe_shift_handovers', 'cafe_returns_list', 'cafe_safe_transactions'
+  'cafe_shifts', 'cafe_shift_handovers', 'cafe_returns_list', 'cafe_safe_transactions',
+  'cafe_daily_shortages'
 ]);
 
 function getDeviceId(): string {

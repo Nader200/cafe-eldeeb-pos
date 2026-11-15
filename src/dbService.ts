@@ -59,7 +59,10 @@ import {
   ShiftStatus,
   SafeType,
   SafeTransactionType,
-  SafeTransaction
+  SafeTransaction,
+  ShortageTargetAccount,
+  ShortageSettlement,
+  DailyShortage
 } from './types';
 import { sanitizePaymentMethod } from './utils/paymentUtils';
 import { playOrderReadySound } from './lib/audioService';
@@ -191,7 +194,8 @@ const KEYS = {
   UPDATE_LOGS: 'cafe_update_logs',
   SHIFTS: 'cafe_shifts',
   SHIFT_HANDOVERS: 'cafe_shift_handovers',
-  SAFE_TRANSACTIONS: 'cafe_safe_transactions'
+  SAFE_TRANSACTIONS: 'cafe_safe_transactions',
+  DAILY_SHORTAGES: 'cafe_daily_shortages'
 };
 
 // Sync current client database state to the server
@@ -3773,6 +3777,7 @@ export const dbService = {
         case 'DAILY_DEPOSIT':
         case 'DEPOSIT':
         case 'TRANSFER_FROM_DRAWER':
+        case 'SHORTAGE_SETTLEMENT':
           return acc + amt;
         case 'WITHDRAWAL':
         case 'TRANSFER_TO_DRAWER':
@@ -4210,8 +4215,13 @@ export const dbService = {
   performEndOfDaySafeSweep: async (
     adminCredential: string,
     operator?: string,
-    notes?: string
-  ): Promise<{ drawerTransferred: number; mainSafeTransferred: number; totalTransferred: number }> => {
+    notes?: string,
+    options?: {
+      actualCashCounted?: number;
+      shortageAmount?: number;
+      shortageTargetAccount?: ShortageTargetAccount;
+    }
+  ): Promise<{ drawerTransferred: number; mainSafeTransferred: number; totalTransferred: number; recordedShortage: DailyShortage | null }> => {
     const cu = dbService.getCurrentUser();
     if (cu && cu.role !== 'Admin') {
       throw new Error('ترحيل نهاية اليوم إلى الخزنة الخاصة متاح للأدمن فقط!');
@@ -4229,30 +4239,56 @@ export const dbService = {
     const settings = dbService.getSettings();
     const source = settings.safe_auto_transfer_source || 'BOTH';
     const activeDrawer = dbService.getActiveDrawer();
-    const drawerRem = Math.max(0, Math.round((activeDrawer.opening_balance + activeDrawer.cash_in - activeDrawer.cash_out) * 100) / 100);
+    const expectedDrawerRem = Math.max(0, Math.round((activeDrawer.opening_balance + activeDrawer.cash_in - activeDrawer.cash_out) * 100) / 100);
+
+    const effectiveDrawerCash =
+      typeof options?.actualCashCounted === 'number' && !isNaN(options.actualCashCounted) && options.actualCashCounted >= 0
+        ? Math.round(options.actualCashCounted * 100) / 100
+        : expectedDrawerRem;
+
+    const explicitShortage =
+      typeof options?.shortageAmount === 'number' && !isNaN(options.shortageAmount) && options.shortageAmount > 0
+        ? Math.round(options.shortageAmount * 100) / 100
+        : undefined;
+    const autoShortage = effectiveDrawerCash < expectedDrawerRem ? Math.round((expectedDrawerRem - effectiveDrawerCash) * 100) / 100 : 0;
+    const finalShortage = explicitShortage !== undefined ? explicitShortage : autoShortage;
 
     const res = dbService.transferRemainingToPrivateSafeAtEndOfDay(op, {
-      drawerClosingAmount: drawerRem,
+      drawerClosingAmount: effectiveDrawerCash,
       source,
       notes: notes || 'ترحيل وتصفية نهاية اليوم إلى الخزنة الخاصة'
     });
 
-    if (res.drawerTransferred > 0) {
+    let recordedShortage: DailyShortage | null = null;
+    if (finalShortage > 0) {
+      recordedShortage = dbService.recordDailyShortage({
+        expectedAmount: expectedDrawerRem,
+        actualAmount: effectiveDrawerCash,
+        shortageAmount: finalShortage,
+        targetAccount: options?.shortageTargetAccount || 'PRIVATE_SAFE',
+        cashierName: op,
+        notes: notes?.trim() || 'عجز مسجل عند ترحيل وتصفية نهاية اليوم للخزنة الخاصة'
+      });
+    }
+
+    if (res.drawerTransferred > 0 || (effectiveDrawerCash === 0 && expectedDrawerRem > 0)) {
       const now = new Date();
       const todayStr = now.toISOString().split('T')[0];
       const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-      dbService.closeCashDrawer(drawerRem);
-      dbService.saveCashMovement({
-        previous_balance: drawerRem,
-        transaction_type: 'CASH_WITHDRAWAL',
-        amount: res.drawerTransferred,
-        new_balance: 0,
-        date: todayStr,
-        time: timeStr,
-        user: op,
-        notes: 'ترحيل نهاية اليوم تلقائياً إلى الخزنة الخاصة'
-      });
+      dbService.closeCashDrawer(effectiveDrawerCash);
+      if (res.drawerTransferred > 0) {
+        dbService.saveCashMovement({
+          previous_balance: effectiveDrawerCash,
+          transaction_type: 'CASH_WITHDRAWAL',
+          amount: res.drawerTransferred,
+          new_balance: 0,
+          date: todayStr,
+          time: timeStr,
+          user: op,
+          notes: 'ترحيل نهاية اليوم تلقائياً إلى الخزنة الخاصة'
+        });
+      }
       dbService.openCashDrawer(0);
 
       // Complete any active shift so dashboard starts fresh at 0
@@ -4263,9 +4299,9 @@ export const dbService = {
         shifts[activeShiftIdx] = {
           ...metrics,
           status: 'COMPLETED',
-          actual_received_cash: drawerRem,
-          discrepancy: Math.round((drawerRem - metrics.expected_cash) * 100) / 100,
-          discrepancy_reason: notes || 'تصفية نهاية اليوم وترحيل المتبقي للخزنة الخاصة',
+          actual_received_cash: effectiveDrawerCash,
+          discrepancy: Math.round((effectiveDrawerCash - metrics.expected_cash) * 100) / 100,
+          discrepancy_reason: notes || (finalShortage > 0 ? `تصفية نهاية اليوم مع عجز ${finalShortage} ج.م` : 'تصفية نهاية اليوم وترحيل المتبقي للخزنة الخاصة'),
           ended_at: now.toISOString(),
           updated_at: now.toISOString()
         };
@@ -4276,17 +4312,291 @@ export const dbService = {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('shift_updated'));
       window.dispatchEvent(new CustomEvent('safe_updated'));
+      window.dispatchEvent(new CustomEvent('shortage_updated'));
       window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
     }
 
-    return res;
+    return { ...res, recordedShortage };
+  },
+
+  // --- End-of-Day Cash Shortage Ledger (خانة العجز اليومية والتسوية التلقائية) ---
+  getDailyShortages: (): DailyShortage[] => getLocal<DailyShortage[]>(KEYS.DAILY_SHORTAGES, []),
+
+  getPendingShortages: (): DailyShortage[] =>
+    dbService.getDailyShortages().filter(s => s.status !== 'SETTLED' && Number(s.remaining_amount) > 0),
+
+  getTotalPendingShortage: (): number => {
+    const sum = dbService.getPendingShortages().reduce((acc, s) => acc + (Number(s.remaining_amount) || 0), 0);
+    return Math.round(sum * 100) / 100;
+  },
+
+  recordDailyShortage: (params: {
+    expectedAmount: number;
+    actualAmount: number;
+    shortageAmount?: number;
+    targetAccount?: ShortageTargetAccount;
+    cashierName?: string;
+    notes?: string;
+    businessDate?: string;
+    dailyCloseId?: string;
+  }): DailyShortage => {
+    const expected = Math.round((Number(params.expectedAmount) || 0) * 100) / 100;
+    const actual = Math.round((Number(params.actualAmount) || 0) * 100) / 100;
+    const calcShortage =
+      typeof params.shortageAmount === 'number' && !isNaN(params.shortageAmount)
+        ? Math.round(Number(params.shortageAmount) * 100) / 100
+        : Math.round(Math.max(0, expected - actual) * 100) / 100;
+
+    if (calcShortage <= 0) {
+      throw new Error('قيمة العجز يجب أن تكون أكبر من صفر');
+    }
+
+    const appSettings = dbService.getSettings();
+    const defaultTarget: ShortageTargetAccount =
+      params.targetAccount || (appSettings.safe_auto_transfer_enabled !== false ? 'PRIVATE_SAFE' : 'DRAWER');
+
+    const now = new Date();
+    const dateStr = params.businessDate || now.toISOString().split('T')[0];
+    const cashier = params.cashierName || dbService.getCurrentUser()?.name || 'الكاشير';
+
+    const record: DailyShortage = {
+      id: `short_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      business_date: dateStr,
+      expected_amount: expected,
+      actual_amount: actual,
+      shortage_amount: calcShortage,
+      paid_amount: 0,
+      remaining_amount: calcShortage,
+      target_account: defaultTarget,
+      cashier_name: cashier,
+      notes: params.notes?.trim() || 'عجز نقدية مسجل في نهاية اليوم',
+      status: 'PENDING',
+      daily_close_id: params.dailyCloseId,
+      settlements: [],
+      created_at: now.toISOString(),
+      updated_at: now.toISOString()
+    };
+
+    const all = dbService.getDailyShortages();
+    all.push(record);
+    setLocal(KEYS.DAILY_SHORTAGES, all);
+
+    dbService.logAuditAction(
+      'RECORD_DAILY_SHORTAGE',
+      `تسجيل عجز نهاية اليوم بتاريخ ${dateStr} بقيمة ${calcShortage} ج.م (المتوقع: ${expected} | الفعلي: ${actual}). الحساب المستفيد عند السداد: ${
+        defaultTarget === 'PRIVATE_SAFE' ? 'الخزنة الخاصة' : defaultTarget === 'MAIN_SAFE' ? 'الخزنة الرئيسية' : 'درج النقدية'
+      }`,
+      cashier
+    );
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shortage_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
+    return record;
+  },
+
+  settleShortageAdmin: (
+    shortageId: string,
+    amount: number,
+    targetAccount?: ShortageTargetAccount,
+    operator?: string,
+    notes?: string
+  ): DailyShortage => {
+    const cu = dbService.getCurrentUser();
+    if (cu && cu.role !== 'Admin') {
+      throw new Error('إضافة وتسوية العجز متاحة للأدمن فقط!');
+    }
+
+    const all = dbService.getDailyShortages();
+    const idx = all.findIndex(s => s.id === shortageId);
+    if (idx === -1) {
+      throw new Error('سجل العجز غير موجود!');
+    }
+
+    const shortage = all[idx];
+    if (shortage.status === 'SETTLED' || shortage.remaining_amount <= 0) {
+      throw new Error('تم سداد هذا العجز بالكامل مسبقاً!');
+    }
+
+    const cleanAmt = Math.round((Number(amount) || 0) * 100) / 100;
+    if (cleanAmt <= 0) {
+      throw new Error('يرجى إدخال مبلغ صحيح أكبر من صفر');
+    }
+    if (cleanAmt > shortage.remaining_amount) {
+      throw new Error(`المبلغ المدخل (${cleanAmt} ج.م) أكبر من العجز المتبقي (${shortage.remaining_amount} ج.م)!`);
+    }
+
+    const op = operator || cu?.name || 'أدمن النظام';
+    const destAccount: ShortageTargetAccount = targetAccount || shortage.target_account || 'PRIVATE_SAFE';
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const accountLabel =
+      destAccount === 'PRIVATE_SAFE' ? 'الخزنة الخاصة' : destAccount === 'MAIN_SAFE' ? 'الخزنة الرئيسية' : 'درج النقدية';
+    const noteText =
+      notes?.trim() || `إضافة وسداد عجز يوم ${shortage.business_date} تلقائياً إلى ${accountLabel}`;
+
+    // Credit the target account automatically
+    if (destAccount === 'DRAWER') {
+      dbService.logCashMovement(cleanAmt, 0, noteText, 'SHORTAGE_SETTLEMENT', op, noteText);
+    } else {
+      const prev = dbService.getSafeBalance(destAccount);
+      const next = Math.round((prev + cleanAmt) * 100) / 100;
+      const safeTx: SafeTransaction = {
+        id: `safe_${Date.now()}_sh_${Math.random().toString(36).substring(2, 5)}`,
+        safe_type: destAccount,
+        transaction_type: 'SHORTAGE_SETTLEMENT',
+        amount: cleanAmt,
+        previous_balance: prev,
+        new_balance: next,
+        date: dateStr,
+        time: timeStr,
+        operator: op,
+        notes: noteText,
+        created_at: now.toISOString()
+      };
+      const safeTxs = dbService.getSafeTransactions();
+      safeTxs.push(safeTx);
+      setLocal(KEYS.SAFE_TRANSACTIONS, safeTxs);
+    }
+
+    const nextPaid = Math.round((shortage.paid_amount + cleanAmt) * 100) / 100;
+    const nextRemaining = Math.max(0, Math.round((shortage.shortage_amount - nextPaid) * 100) / 100);
+    const settlement: ShortageSettlement = {
+      id: `shset_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+      amount: cleanAmt,
+      target_account: destAccount,
+      settled_at: now.toISOString(),
+      operator: op,
+      notes: noteText
+    };
+
+    all[idx] = {
+      ...shortage,
+      paid_amount: nextPaid,
+      remaining_amount: nextRemaining,
+      target_account: destAccount,
+      status: nextRemaining <= 0 ? 'SETTLED' : 'PARTIAL',
+      settlements: [...(shortage.settlements || []), settlement],
+      updated_at: now.toISOString()
+    };
+    setLocal(KEYS.DAILY_SHORTAGES, all);
+
+    dbService.logAuditAction(
+      'SETTLE_DAILY_SHORTAGE',
+      `قام الأدمن (${op}) بإضافة مبلغ العجز (${cleanAmt} ج.م) ليوم ${shortage.business_date} وتمت إضافته تلقائياً إلى ${accountLabel} (المتبقي من العجز: ${nextRemaining} ج.م)`,
+      op
+    );
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shortage_updated'));
+      window.dispatchEvent(new CustomEvent('safe_updated'));
+      window.dispatchEvent(new CustomEvent('shift_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
+    return all[idx];
+  },
+
+  addShortageDepositFIFO: (
+    amount: number,
+    targetAccount: ShortageTargetAccount,
+    operator?: string,
+    notes?: string
+  ): { settledAmount: number; extraDeposited: number; totalAdded: number; settledIds: string[] } => {
+    const cu = dbService.getCurrentUser();
+    if (cu && cu.role !== 'Admin') {
+      throw new Error('إضافة وتسوية العجز متاحة للأدمن فقط!');
+    }
+    const cleanAmt = Math.round((Number(amount) || 0) * 100) / 100;
+    if (cleanAmt <= 0) {
+      throw new Error('يرجى إدخال مبلغ صحيح أكبر من صفر');
+    }
+
+    const op = operator || cu?.name || 'أدمن النظام';
+    const pending = dbService.getPendingShortages();
+    let remainingToApply = cleanAmt;
+    let settledAmount = 0;
+    const settledIds: string[] = [];
+
+    for (const s of pending) {
+      if (remainingToApply <= 0) break;
+      const portion = Math.round(Math.min(remainingToApply, s.remaining_amount) * 100) / 100;
+      if (portion > 0) {
+        dbService.settleShortageAdmin(s.id, portion, targetAccount, op, notes);
+        settledAmount = Math.round((settledAmount + portion) * 100) / 100;
+        remainingToApply = Math.round((remainingToApply - portion) * 100) / 100;
+        settledIds.push(s.id);
+      }
+    }
+
+    let extraDeposited = 0;
+    if (remainingToApply > 0) {
+      const now = new Date();
+      const dateStr = now.toISOString().split('T')[0];
+      const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const accountLabel =
+        targetAccount === 'PRIVATE_SAFE' ? 'الخزنة الخاصة' : targetAccount === 'MAIN_SAFE' ? 'الخزنة الرئيسية' : 'درج النقدية';
+      const noteText = notes?.trim() || `إضافة مبلغ عجز / تسوية تلقائية إلى ${accountLabel}`;
+
+      if (targetAccount === 'DRAWER') {
+        dbService.logCashMovement(remainingToApply, 0, noteText, 'SHORTAGE_SETTLEMENT', op, noteText);
+      } else {
+        const prev = dbService.getSafeBalance(targetAccount);
+        const next = Math.round((prev + remainingToApply) * 100) / 100;
+        const safeTx: SafeTransaction = {
+          id: `safe_${Date.now()}_she_${Math.random().toString(36).substring(2, 5)}`,
+          safe_type: targetAccount,
+          transaction_type: 'SHORTAGE_SETTLEMENT',
+          amount: remainingToApply,
+          previous_balance: prev,
+          new_balance: next,
+          date: dateStr,
+          time: timeStr,
+          operator: op,
+          notes: noteText,
+          created_at: now.toISOString()
+        };
+        const safeTxs = dbService.getSafeTransactions();
+        safeTxs.push(safeTx);
+        setLocal(KEYS.SAFE_TRANSACTIONS, safeTxs);
+      }
+
+      extraDeposited = remainingToApply;
+      dbService.logAuditAction(
+        'ADD_SHORTAGE_TO_ACCOUNT',
+        `إضافة مبلغ ${extraDeposited} ج.م تلقائياً إلى ${accountLabel} من خانة العجز بواسطة ${op}`,
+        op
+      );
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('shortage_updated'));
+        window.dispatchEvent(new CustomEvent('safe_updated'));
+        window.dispatchEvent(new CustomEvent('shift_updated'));
+        window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+      }
+    }
+
+    return {
+      settledAmount,
+      extraDeposited,
+      totalAdded: cleanAmt,
+      settledIds
+    };
   },
 
   // --- Daily Close ---
   getDailyCloses: (): DailyClose[] => getLocal<DailyClose[]>(KEYS.DAILY_CLOSES, []),
   performDailyClose: (
     cashierName: string,
-    options?: { actualCashCounted?: number; notes?: string }
+    options?: {
+      actualCashCounted?: number;
+      notes?: string;
+      shortageAmount?: number;
+      shortageTargetAccount?: ShortageTargetAccount;
+    }
   ): DailyClose => {
     const todayStr = new Date().toISOString().split('T')[0];
     const closes = dbService.getDailyCloses();
@@ -4385,6 +4695,31 @@ export const dbService = {
       });
     }
 
+    // Record end-of-day shortage automatically if deficit exists or explicit shortage entered
+    const explicitShortage =
+      typeof options?.shortageAmount === 'number' && !isNaN(options.shortageAmount) && options.shortageAmount >= 0
+        ? Math.round(options.shortageAmount * 100) / 100
+        : undefined;
+    const autoShortage =
+      effectiveClosingCash < finalCalculatedCash
+        ? Math.round((finalCalculatedCash - effectiveClosingCash) * 100) / 100
+        : 0;
+    const finalShortageAmount = explicitShortage !== undefined ? explicitShortage : autoShortage;
+
+    let recordedShortage: DailyShortage | null = null;
+    if (finalShortageAmount > 0) {
+      recordedShortage = dbService.recordDailyShortage({
+        expectedAmount: finalCalculatedCash,
+        actualAmount: effectiveClosingCash,
+        shortageAmount: finalShortageAmount,
+        targetAccount: options?.shortageTargetAccount || (autoTransferEnabled ? 'PRIVATE_SAFE' : 'DRAWER'),
+        cashierName,
+        notes: options?.notes?.trim() || 'عجز نهاية اليوم عند إغلاق الوردية',
+        businessDate: todayStr,
+        dailyCloseId: closeId
+      });
+    }
+
     const newClose: DailyClose = {
       id: closeId,
       business_date: todayStr,
@@ -4398,6 +4733,8 @@ export const dbService = {
       transferred_to_private_safe: transferResult.totalTransferred,
       drawer_transferred: transferResult.drawerTransferred,
       main_safe_transferred: transferResult.mainSafeTransferred,
+      shortage_amount: finalShortageAmount > 0 ? finalShortageAmount : 0,
+      shortage_id: recordedShortage?.id,
       notes: options?.notes,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -4411,7 +4748,7 @@ export const dbService = {
     dbService.openCashDrawer(nextDrawerOpening);
 
     // Close active shift cleanly when drawer remainder is swept at end of day
-    if (transferResult.drawerTransferred > 0) {
+    if (transferResult.drawerTransferred > 0 || finalShortageAmount > 0) {
       const shifts = dbService.getShifts();
       const activeShiftIdx = shifts.findIndex(s => s.status === 'OPEN' || s.status === 'PENDING_HANDOVER');
       if (activeShiftIdx > -1) {
@@ -4421,7 +4758,7 @@ export const dbService = {
           status: 'COMPLETED',
           actual_received_cash: effectiveClosingCash,
           discrepancy: Math.round((effectiveClosingCash - metrics.expected_cash) * 100) / 100,
-          discrepancy_reason: options?.notes?.trim() || 'إغلاق نهاية اليوم وترحيل الباقي للخزنة الخاصة',
+          discrepancy_reason: options?.notes?.trim() || (finalShortageAmount > 0 ? `إغلاق نهاية اليوم بعجز ${finalShortageAmount} ج.م` : 'إغلاق نهاية اليوم وترحيل الباقي للخزنة الخاصة'),
           ended_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         };
@@ -4432,6 +4769,7 @@ export const dbService = {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('shift_updated'));
       window.dispatchEvent(new CustomEvent('safe_updated'));
+      window.dispatchEvent(new CustomEvent('shortage_updated'));
       window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
     }
 
@@ -6596,7 +6934,7 @@ export const dbService = {
       if (!cm.created_at || cm.transaction_type === 'DRAWER_RESET') return;
       const cmTime = new Date(cm.created_at).getTime();
       if (cmTime >= startTime && cmTime <= endTime) {
-        if (cm.transaction_type === 'CASH_ADJUSTMENT_ADD') {
+        if (cm.transaction_type === 'CASH_ADJUSTMENT_ADD' || cm.transaction_type === 'SHORTAGE_SETTLEMENT') {
           cashIn += cm.amount;
         } else if (cm.transaction_type === 'CASH_ADJUSTMENT_SUB') {
           cashOut += cm.amount;

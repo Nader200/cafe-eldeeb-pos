@@ -244,6 +244,8 @@ export default function CashDrawerView({
         return { label: 'تسوية (عجز وسحب)', color: 'bg-orange-950/40 text-orange-400 border-orange-950/30' };
       case 'DRAWER_RESET':
         return { label: 'تصفير الدرج (أدمن)', color: 'bg-red-950/60 text-red-300 border-red-700/40' };
+      case 'SHORTAGE_SETTLEMENT':
+        return { label: 'إضافة وسداد عجز', color: 'bg-teal-950/60 text-teal-300 border-teal-500/40' };
       default:
         return { label: 'قيد نقدية يدوية', color: 'bg-gray-900 text-gray-400 border-gray-800' };
     }
@@ -756,6 +758,32 @@ export default function CashDrawerView({
                           </span>{' '}
                           ج.م عن الرصيد الدفتري المعتمد.
                         </p>
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              try {
+                                const diffAbs = Math.abs(countResult.difference);
+                                dbService.recordDailyShortage({
+                                  expectedAmount: countResult.expected,
+                                  actualAmount: countResult.actual,
+                                  shortageAmount: diffAbs,
+                                  cashierName: currentUser?.name || 'أدمن النظام',
+                                  notes: countNotes || 'عجز مسجل من جرد ومطابقة آخر اليوم بالدرج'
+                                });
+                                onShowSuccessAlert(
+                                  `تم تسجيل العجز (${diffAbs.toLocaleString('ar-EG')} ج.م) في خانة العجز بنجاح! يمكنك إضافته للحساب تلقائياً من تبويب الخزنة الخاصة.`
+                                );
+                                refreshData();
+                              } catch (err: any) {
+                                onShowWarningAlert(err?.message || 'تعذر تسجيل العجز');
+                              }
+                            }}
+                            className="mt-2 px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-black transition-all cursor-pointer shadow active:scale-95"
+                          >
+                            ⚠️ تسجيل هذا المبلغ في خانة العجز نهاية اليوم
+                          </button>
+                        )}
                       </>
                     )}
 
@@ -841,7 +869,8 @@ export default function CashDrawerView({
                       'CASH_SALE',
                       'CUSTOMER_PAYMENT',
                       'CASH_ADJUSTMENT_ADD',
-                      'MANUAL_ADD'
+                      'MANUAL_ADD',
+                      'SHORTAGE_SETTLEMENT'
                     ].includes(item.transaction_type);
 
                     return (
