@@ -3676,7 +3676,26 @@ export default function POSView({
                       price_edit_reason: 'تعديل يدوي مصرح من المسؤول'
                     };
                     setCart(updatedCart);
-                    
+
+                    if (activeInvoiceId) {
+                      try {
+                        dbService.saveOpenInvoice(
+                          activeInvoiceId,
+                          updatedCart,
+                          paymentType,
+                          selectedCustomer === 'c_general' ? null : selectedCustomer,
+                          discount,
+                          taxPercentage,
+                          0,
+                          'أدمن النظام / نادر الديب',
+                          invoiceNotes,
+                          tableNumber
+                        );
+                      } catch (err: any) {
+                        onShowWarningAlert(err.message || 'فشل تحديث السعر في الفاتورة المعلقة');
+                      }
+                    }
+
                     onShowSuccessAlert(`تم تعديل سعر المنتج "${cart[priceEditIndex].product.name_ar}" إلى ${parsedPrice} ${settings.currency} لهذه الفاتورة بنجاح.`);
                     setShowPriceEditDialog(false);
                     setPriceEditIndex(null);
@@ -3774,13 +3793,47 @@ export default function POSView({
                   <span className="w-1/3 text-left">الإجمالي</span>
                 </div>
                 
-                {dbService.getInvoiceItems(recentInvoice.id).map(item => (
-                  <div key={item.id} className="flex justify-between py-0.5 text-gray-800">
-                    <span className="w-1/2 text-right truncate">{item.product_name_ar}</span>
-                    <span className="w-1/6 text-center font-bold">{item.quantity}</span>
-                    <span className="w-1/3 text-left font-bold">{item.total_price} ج.م</span>
-                  </div>
-                ))}
+                {dbService.getInvoiceItems(recentInvoice.id).map(item => {
+                  const qty = item.quantity || 1;
+                  const unitPrice = item.unit_price ?? (qty > 0 ? item.total_price / qty : item.total_price);
+                  const origPrice = item.original_price;
+                  const hasPriceDiff =
+                    origPrice !== undefined && origPrice !== null && Math.abs(origPrice - unitPrice) > 0.001;
+                  const isEditedPrice = Boolean(item.is_price_edited || hasPriceDiff);
+                  return (
+                    <div key={item.id} className="flex justify-between items-start py-1 text-gray-800 border-b border-gray-100 last:border-0">
+                      <div className="w-1/2 text-right">
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <span className="font-bold">{item.product_name_ar}</span>
+                          {isEditedPrice && (
+                            <span className="px-1 py-0.5 bg-amber-100 border border-amber-400 text-amber-800 text-[8px] rounded font-extrabold">
+                              سعر مخصص
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[8px] mt-0.5 flex items-center gap-1">
+                          {isEditedPrice && origPrice !== undefined && origPrice !== null && hasPriceDiff ? (
+                            <>
+                              <span className="text-amber-700 font-bold">{unitPrice.toLocaleString()} {settings.currency}</span>
+                              <span className="text-gray-400 line-through">{origPrice.toLocaleString()} {settings.currency}</span>
+                            </>
+                          ) : (
+                            <span className="text-gray-500">{unitPrice.toLocaleString()} {settings.currency}</span>
+                          )}
+                        </div>
+                      </div>
+                      <span className="w-1/6 text-center font-bold self-center">{qty}</span>
+                      <div className="w-1/3 text-left font-bold self-center">
+                        <div>{item.total_price.toLocaleString()} {settings.currency}</div>
+                        {isEditedPrice && origPrice !== undefined && origPrice !== null && hasPriceDiff && (
+                          <div className="text-[8px] text-gray-400 line-through font-normal">
+                            {(origPrice * qty).toLocaleString()} {settings.currency}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
               {/* Totals */}

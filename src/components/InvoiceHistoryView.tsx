@@ -544,13 +544,30 @@ export default function InvoiceHistoryView({
                 </tr>
               </thead>
               <tbody>
-                ${invoiceItems.map(item => `
+                ${invoiceItems.map(item => {
+                  const qty = item.quantity || 1;
+                  const unitPrice = item.unit_price ?? (qty > 0 ? item.total_price / qty : item.total_price);
+                  const origPrice = item.original_price;
+                  const hasPriceDiff = origPrice !== undefined && origPrice !== null && Math.abs(origPrice - unitPrice) > 0.001;
+                  const isEdited = Boolean(item.is_price_edited || hasPriceDiff);
+                  return `
                   <tr>
-                    <td>${item.product_name_ar}</td>
-                    <td class="text-center">${item.quantity}</td>
-                    <td class="text-left">${item.total_price.toLocaleString()} ${settings.currency}</td>
+                    <td>
+                      <div>${item.product_name_ar}${isEdited ? ' <span style="font-size:9px; border:1px solid #000; padding:0 3px;">سعر مخصص</span>' : ''}</div>
+                      ${isEdited && origPrice !== undefined && origPrice !== null && hasPriceDiff
+                        ? `<div style="font-size:10px;">${unitPrice.toLocaleString()} ${settings.currency} <s style="color:#666;">${origPrice.toLocaleString()} ${settings.currency}</s></div>`
+                        : `<div style="font-size:10px; color:#555;">${unitPrice.toLocaleString()} ${settings.currency}</div>`}
+                    </td>
+                    <td class="text-center">${qty}</td>
+                    <td class="text-left">
+                      <div>${item.total_price.toLocaleString()} ${settings.currency}</div>
+                      ${isEdited && origPrice !== undefined && origPrice !== null && hasPriceDiff
+                        ? `<div style="font-size:10px; color:#666; text-decoration:line-through;">${(origPrice * qty).toLocaleString()} ${settings.currency}</div>`
+                        : ''}
+                    </td>
                   </tr>
-                `).join('')}
+                `;
+                }).join('')}
               </tbody>
             </table>
             <div class="divider"></div>
@@ -688,13 +705,30 @@ export default function InvoiceHistoryView({
               </tr>
             </thead>
             <tbody>
-              ${invoiceItems.map(item => `
+              ${invoiceItems.map(item => {
+                const qty = item.quantity || 1;
+                const unitPrice = item.unit_price ?? (qty > 0 ? item.total_price / qty : item.total_price);
+                const origPrice = item.original_price;
+                const hasPriceDiff = origPrice !== undefined && origPrice !== null && Math.abs(origPrice - unitPrice) > 0.001;
+                const isEdited = Boolean(item.is_price_edited || hasPriceDiff);
+                return `
                 <tr>
-                  <td>${item.product_name_ar}</td>
-                  <td style="text-align: center;">${item.quantity}</td>
-                  <td style="text-align: left;">${item.total_price.toLocaleString()} ${settings.currency}</td>
+                  <td>
+                    <div>${item.product_name_ar}${isEdited ? ' <span style="font-size:10px; background:#fef3c7; color:#b45309; border:1px solid #f59e0b; border-radius:4px; padding:0 4px;">سعر مخصص</span>' : ''}</div>
+                    ${isEdited && origPrice !== undefined && origPrice !== null && hasPriceDiff
+                      ? `<div style="font-size:11px; color:#b45309; font-weight:bold;">${unitPrice.toLocaleString()} ${settings.currency} <span style="color:#9ca3af; text-decoration:line-through; font-weight:normal;">${origPrice.toLocaleString()} ${settings.currency}</span></div>`
+                      : `<div style="font-size:11px; color:#6b7280;">${unitPrice.toLocaleString()} ${settings.currency}</div>`}
+                  </td>
+                  <td style="text-align: center;">${qty}</td>
+                  <td style="text-align: left;">
+                    <div>${item.total_price.toLocaleString()} ${settings.currency}</div>
+                    ${isEdited && origPrice !== undefined && origPrice !== null && hasPriceDiff
+                      ? `<div style="font-size:10px; color:#9ca3af; text-decoration:line-through;">${(origPrice * qty).toLocaleString()} ${settings.currency}</div>`
+                      : ''}
+                  </td>
                 </tr>
-              `).join('')}
+              `;
+              }).join('')}
             </tbody>
           </table>
           <div class="total-section">
@@ -1189,16 +1223,47 @@ export default function InvoiceHistoryView({
                   <span className="w-1/3 text-left">الإجمالي</span>
                 </div>
                 
-                {invoiceItems.map(item => (
-                  <div key={item.id} className="flex justify-between py-1 text-gray-700 border-b border-gray-100 last:border-0">
-                    <div className="w-1/2 text-right">
-                      <span className="block truncate">{item.product_name_ar}</span>
-                      <span className="text-[8px] text-gray-500">{(item.total_price / item.quantity).toLocaleString()} {settings.currency}</span>
+                {invoiceItems.map(item => {
+                  const qty = item.quantity || 1;
+                  const unitPrice = item.unit_price ?? (qty > 0 ? item.total_price / qty : item.total_price);
+                  const origPrice = item.original_price;
+                  const hasPriceDiff =
+                    origPrice !== undefined && origPrice !== null && Math.abs(origPrice - unitPrice) > 0.001;
+                  const isEdited = Boolean(item.is_price_edited || hasPriceDiff);
+                  return (
+                    <div key={item.id} className="flex justify-between py-1 text-gray-700 border-b border-gray-100 last:border-0">
+                      <div className="w-1/2 text-right">
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <span className="truncate font-bold">{item.product_name_ar}</span>
+                          {isEdited && (
+                            <span className="px-1 py-0.5 bg-amber-100 border border-amber-400 text-amber-800 text-[7px] rounded font-extrabold">
+                              سعر مخصص
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[8px] mt-0.5 flex items-center gap-1">
+                          {isEdited && origPrice !== undefined && origPrice !== null && hasPriceDiff ? (
+                            <>
+                              <span className="text-amber-700 font-bold">{unitPrice.toLocaleString()} {settings.currency}</span>
+                              <span className="text-gray-400 line-through">{origPrice.toLocaleString()} {settings.currency}</span>
+                            </>
+                          ) : (
+                            <span className="text-gray-500">{(item.total_price / qty).toLocaleString()} {settings.currency}</span>
+                          )}
+                        </div>
+                      </div>
+                      <span className="w-1/6 text-center font-bold self-center">{qty}</span>
+                      <div className="w-1/3 text-left font-bold self-center">
+                        <div>{item.total_price.toLocaleString()} {settings.currency}</div>
+                        {isEdited && origPrice !== undefined && origPrice !== null && hasPriceDiff && (
+                          <div className="text-[8px] text-gray-400 line-through font-normal">
+                            {(origPrice * qty).toLocaleString()} {settings.currency}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <span className="w-1/6 text-center font-bold self-center">{item.quantity}</span>
-                    <span className="w-1/3 text-left font-bold self-center">{item.total_price.toLocaleString()} {settings.currency}</span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Totals Section */}

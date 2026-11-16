@@ -121,19 +121,40 @@ export async function createInvoiceReceiptImage({
             const qty = item.quantity || 1;
             const totalPrice = item.total_price ?? 0;
             const unitPrice = item.unit_price ?? (qty > 0 ? totalPrice / qty : totalPrice);
+            const origPrice = item.original_price;
+            const hasPriceDiff =
+              origPrice !== undefined && origPrice !== null && Math.abs(origPrice - unitPrice) > 0.001;
+            const isEditedPrice = Boolean(item.is_price_edited || hasPriceDiff);
             const borderStyle = idx < safeItems.length - 1 ? 'border-bottom: 1px solid #f3f4f6;' : '';
             const notesHtml = item.notes
               ? `<div style="font-size: 9.5px; color: #92400e; margin-top: 2px;">${escapeHtml(item.notes)}</div>`
               : '';
+            const editedBadgeHtml = isEditedPrice
+              ? `<span style="display: inline-block; font-size: 9px; font-weight: 800; color: #b45309; background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px; padding: 0 4px; margin-right: 4px;">سعر مخصص</span>`
+              : '';
+            const priceLineHtml =
+              isEditedPrice && origPrice !== undefined && origPrice !== null && hasPriceDiff
+                ? `<div style="font-size: 10px; margin-top: 2px;">
+                     <span style="color: #b45309; font-weight: 800;">${unitPrice.toLocaleString()} ${escapeHtml(currency)}</span>
+                     <span style="color: #9ca3af; text-decoration: line-through; margin-right: 4px;">${origPrice.toLocaleString()} ${escapeHtml(currency)}</span>
+                   </div>`
+                : `<div style="font-size: 10px; color: #6b7280; margin-top: 2px;">${unitPrice.toLocaleString()} ${escapeHtml(currency)}</div>`;
+            const origTotalHtml =
+              isEditedPrice && origPrice !== undefined && origPrice !== null && hasPriceDiff
+                ? `<div style="font-size: 9.5px; color: #9ca3af; text-decoration: line-through; font-weight: 600;">${(origPrice * qty).toLocaleString()} ${escapeHtml(currency)}</div>`
+                : '';
             return `
               <div style="display: flex; justify-content: space-between; align-items: center; padding: 7px 0; ${borderStyle} color: #374151;">
                 <div style="width: 52%; text-align: right; padding-left: 6px;">
-                  <div style="font-size: 12px; font-weight: 700; color: #111827; word-break: break-word;">${escapeHtml(item.product_name_ar || 'صنف غير مسمى')}</div>
-                  <div style="font-size: 10px; color: #6b7280; margin-top: 2px;">${unitPrice.toLocaleString()} ${escapeHtml(currency)}</div>
+                  <div style="font-size: 12px; font-weight: 700; color: #111827; word-break: break-word;">${escapeHtml(item.product_name_ar || 'صنف غير مسمى')}${editedBadgeHtml}</div>
+                  ${priceLineHtml}
                   ${notesHtml}
                 </div>
                 <div style="width: 18%; text-align: center; font-weight: 800; font-size: 12.5px; color: #111827;">${qty}</div>
-                <div style="width: 30%; text-align: left; font-weight: 800; font-size: 12px; color: #111827;">${totalPrice.toLocaleString()} ${escapeHtml(currency)}</div>
+                <div style="width: 30%; text-align: left; font-weight: 800; font-size: 12px; color: #111827;">
+                  <div>${totalPrice.toLocaleString()} ${escapeHtml(currency)}</div>
+                  ${origTotalHtml}
+                </div>
               </div>
             `;
           })

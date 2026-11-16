@@ -90,12 +90,22 @@ export async function createInvoicePDF({
           const qty = item.quantity || 1;
           const unitPrice = item.unit_price ?? (qty > 0 ? ((item.total_price || 0) / qty) : (item.total_price || 0));
           const totalPrice = item.total_price ?? (qty * unitPrice);
+          const origPrice = item.original_price;
+          const hasPriceDiff = origPrice !== undefined && origPrice !== null && Math.abs(origPrice - unitPrice) > 0.001;
+          const isEditedPrice = Boolean(item.is_price_edited || hasPriceDiff);
+          const editedBadge = isEditedPrice
+            ? ` <span style="font-size: 10px; font-weight: 800; color: #b45309; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px; padding: 1px 5px; margin-right: 4px;">سعر مخصص</span>`
+            : '';
+          const unitCell =
+            isEditedPrice && origPrice !== undefined && origPrice !== null && hasPriceDiff
+              ? `<span style="color: #b45309; font-weight: 800;">${unitPrice.toLocaleString()} ${currency}</span><br/><span style="font-size: 10px; color: #9ca3af; text-decoration: line-through;">${origPrice.toLocaleString()} ${currency}</span>`
+              : `${unitPrice.toLocaleString()} ${currency}`;
           return `
             <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#fdfdfd'};">
               <td style="padding: 8px 10px; border: 1px solid #e5e7eb; text-align: center; font-weight: bold; font-size: 12px; color: #4b5563;">${idx + 1}</td>
-              <td style="padding: 8px 10px; border: 1px solid #e5e7eb; text-align: right; font-weight: bold; font-size: 13px; color: #111827;">${item.product_name_ar || 'صنف غير مسمى'}</td>
+              <td style="padding: 8px 10px; border: 1px solid #e5e7eb; text-align: right; font-weight: bold; font-size: 13px; color: #111827;">${item.product_name_ar || 'صنف غير مسمى'}${editedBadge}</td>
               <td style="padding: 8px 10px; border: 1px solid #e5e7eb; text-align: center; font-weight: 800; font-size: 13px; color: #111827;">${qty}</td>
-              <td style="padding: 8px 10px; border: 1px solid #e5e7eb; text-align: left; font-size: 12px; color: #374151;">${unitPrice.toLocaleString()} ${currency}</td>
+              <td style="padding: 8px 10px; border: 1px solid #e5e7eb; text-align: left; font-size: 12px; color: #374151;">${unitCell}</td>
               <td style="padding: 8px 10px; border: 1px solid #e5e7eb; text-align: left; font-weight: bold; font-size: 13px; color: #111827;">${totalPrice.toLocaleString()} ${currency}</td>
             </tr>
           `;

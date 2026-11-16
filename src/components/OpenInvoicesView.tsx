@@ -301,7 +301,7 @@ export default function OpenInvoicesView({
           name_ar: item.product_name_ar,
           name_en: item.product_name_ar,
           barcode: '',
-          selling_price: item.unit_price,
+          selling_price: item.original_price ?? item.unit_price,
           cost_price: item.cost_price,
           current_stock: 999,
           minimum_stock: 0,
@@ -313,12 +313,21 @@ export default function OpenInvoicesView({
           created_at: '',
           updated_at: ''
         };
+        const resolvedProduct =
+          item.original_price !== undefined && item.original_price !== null
+            ? { ...prod, selling_price: item.original_price }
+            : prod;
         return {
-          product: prod,
+          product: resolvedProduct,
           quantity: item.quantity,
           notes: item.notes || '',
           kitchen_notes: '',
-          custom_price: item.is_price_edited ? item.unit_price : undefined
+          custom_price: item.is_price_edited ? item.unit_price : undefined,
+          is_price_edited: item.is_price_edited,
+          price_edit_reason: item.price_edit_reason,
+          item_discount_type: item.item_discount_type,
+          item_discount_value: item.item_discount_value,
+          item_discount_amount: item.item_discount_amount
         };
       });
 
@@ -397,7 +406,7 @@ export default function OpenInvoicesView({
           name_ar: item.product_name_ar,
           name_en: item.product_name_ar,
           barcode: '',
-          selling_price: item.unit_price,
+          selling_price: item.original_price ?? item.unit_price,
           cost_price: item.cost_price,
           current_stock: 999,
           minimum_stock: 0,
@@ -409,12 +418,21 @@ export default function OpenInvoicesView({
           created_at: '',
           updated_at: ''
         };
+        const resolvedProduct =
+          item.original_price !== undefined && item.original_price !== null
+            ? { ...prod, selling_price: item.original_price }
+            : prod;
         return {
-          product: prod,
+          product: resolvedProduct,
           quantity: item.quantity,
           notes: item.notes || '',
           kitchen_notes: '',
-          custom_price: item.is_price_edited ? item.unit_price : undefined
+          custom_price: item.is_price_edited ? item.unit_price : undefined,
+          is_price_edited: item.is_price_edited,
+          price_edit_reason: item.price_edit_reason,
+          item_discount_type: item.item_discount_type,
+          item_discount_value: item.item_discount_value,
+          item_discount_amount: item.item_discount_amount
         };
       });
 
@@ -1538,18 +1556,37 @@ export default function OpenInvoicesView({
                   <div className="space-y-2">
                     <h4 className="text-[10px] font-extrabold text-gold-500 tracking-wider">الأصناف المسجلة عليها</h4>
                     <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
-                      {invoiceItems.map(item => (
+                      {invoiceItems.map(item => {
+                        const hasPriceDiff =
+                          item.original_price !== undefined &&
+                          item.original_price !== null &&
+                          Math.abs(item.original_price - item.unit_price) > 0.001;
+                        const isEdited = Boolean(item.is_price_edited || hasPriceDiff);
+                        return (
                         <div key={item.id} className="bg-luxury-bg/30 p-2.5 rounded-xl border border-gray-900/40 flex flex-col gap-2 text-xs animate-scale-in">
                           <div className="flex justify-between items-center">
                             <div>
-                              <p className="font-extrabold text-white flex items-center gap-1.5">
+                              <p className="font-extrabold text-white flex items-center gap-1.5 flex-wrap">
                                 {item.product_name_ar}
+                                {isEdited && (
+                                  <span className="text-[8px] bg-amber-500/15 border border-amber-500/40 text-amber-400 px-1.5 py-0.5 rounded font-extrabold">
+                                    سعر مخصص
+                                  </span>
+                                )}
                                 {item.is_paid && (
                                   <span className="text-[8px] bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 px-2 py-0.5 rounded-full font-bold">✓ مدفوع منفصلاً</span>
                                 )}
                               </p>
-                              <p className="text-[10px] text-gray-500 mt-0.5">
-                                {item.quantity} × {item.unit_price} {settings.currency}
+                              <p className="text-[10px] text-gray-500 mt-0.5 flex items-center gap-1.5">
+                                <span>{item.quantity} ×</span>
+                                {isEdited && item.original_price !== undefined && item.original_price !== null && hasPriceDiff ? (
+                                  <>
+                                    <span className="text-amber-400 font-bold font-mono">{item.unit_price} {settings.currency}</span>
+                                    <span className="text-gray-600 line-through font-mono">{item.original_price} {settings.currency}</span>
+                                  </>
+                                ) : (
+                                  <span>{item.unit_price} {settings.currency}</span>
+                                )}
                               </p>
                             </div>
                             <span className="font-bold text-gray-300 font-mono">
@@ -1581,7 +1618,8 @@ export default function OpenInvoicesView({
                             </div>
                           )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
 
