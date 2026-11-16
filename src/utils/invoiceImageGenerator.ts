@@ -936,9 +936,60 @@ export async function shareInvoiceImageToWhatsApp({
 
     const isOpenOrDraft = invoice.invoice_status === 'OPEN' || invoice.invoice_status === 'DRAFT';
     const currency = settings?.currency || 'ج.م';
-    const message = isOpenOrDraft
-      ? `مرفق إليكم صورة الفاتورة المفتوحة رقم ${invoice.invoice_number} (قبل الدفع) بقيمة ${(invoice.total ?? 0).toLocaleString()} ${currency}.\n\nشكراً لتعاملكم مع كافيه الديب ☕`
-      : `مرفق إليكم صورة فاتورتكم رقم ${invoice.invoice_number}.\n\nشكراً لتعاملكم مع كافيه الديب ☕`;
+    const invTotal = invoice.total ?? 0;
+    const invPaid = invoice.paid_amount ?? 0;
+    const invRemaining = invoice.remaining_amount ?? (isOpenOrDraft ? Math.max(0, invTotal - invPaid) : 0);
+    const hasRegisteredCustomer = Boolean(customer && customer.id !== 'c_general');
+    const currentCustomerDebt = hasRegisteredCustomer ? Math.max(0, customer?.current_balance || 0) : 0;
+
+    const msgLines: string[] = [];
+    if (isOpenOrDraft) {
+      msgLines.push(
+        `مرفق إليكم صورة الفاتورة المفتوحة رقم ${invoice.invoice_number} (قبل الدفع) بقيمة ${invTotal.toLocaleString()} ${currency}.`
+      );
+      const prevCredit = invoice.previous_credit_balance ?? currentCustomerDebt;
+      const grandTotalWithCredit = invoice.grand_total_with_credit ?? (invRemaining + prevCredit);
+      if (prevCredit > 0) {
+        msgLines.push(`📌 الحساب الآجل السابق: ${prevCredit.toLocaleString()} ${currency}`);
+        msgLines.push(`💰 إجمالي المطلوب (الفاتورة + الآجل): ${grandTotalWithCredit.toLocaleString()} ${currency}`);
+      }
+    } else {
+      msgLines.push(
+        `مرفق إليكم صورة فاتورتكم رقم ${invoice.invoice_number} بقيمة ${invTotal.toLocaleString()} ${currency}.`
+      );
+      const hasCreditSnapshot =
+        invoice.previous_credit_balance !== undefined &&
+        ((invoice.previous_credit_balance || 0) > 0 ||
+          (invoice.credit_paid_with_invoice || 0) > 0 ||
+          (invoice.remaining_credit_after_invoice || 0) > 0);
+
+      if (hasCreditSnapshot) {
+        const prevCredit = invoice.previous_credit_balance ?? 0;
+        const creditPaid = invoice.credit_paid_with_invoice ?? 0;
+        const remCreditAfter =
+          invoice.remaining_credit_after_invoice ??
+          Math.max(0, prevCredit - creditPaid + invRemaining);
+
+        if (prevCredit > 0) {
+          msgLines.push(`📌 الحساب الآجل السابق: ${prevCredit.toLocaleString()} ${currency}`);
+        }
+        if (creditPaid > 0) {
+          msgLines.push(`✅ المسدد من الآجل مع الفاتورة: ${creditPaid.toLocaleString()} ${currency}`);
+        }
+        msgLines.push(
+          remCreditAfter > 0
+            ? `💳 الحساب الآجل المتبقي على العميل: ${remCreditAfter.toLocaleString()} ${currency}`
+            : `💳 الحساب الآجل المتبقي على العميل: 0 ${currency} (خالص)`
+        );
+      } else if (currentCustomerDebt > 0) {
+        msgLines.push(`📌 الحساب الآجل الحالي على العميل: ${currentCustomerDebt.toLocaleString()} ${currency}`);
+      } else if (invRemaining > 0) {
+        msgLines.push(`📌 المتبقي آجل على الفاتورة: ${invRemaining.toLocaleString()} ${currency}`);
+      }
+    }
+
+    msgLines.push('', 'شكراً لتعاملكم مع كافيه الديب ☕');
+    const message = msgLines.join('\n');
     const encodedText = encodeURIComponent(message);
     const whatsappUrl = cleanPhone
       ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedText}`
