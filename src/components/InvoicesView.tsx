@@ -354,6 +354,13 @@ export default function InvoicesView({ onShowSuccessAlert, onShowWarningAlert }:
             {/* Receipt container simulation */}
             <div className="bg-white text-black p-4 rounded-xl font-mono text-xs max-h-[380px] overflow-y-auto leading-relaxed select-text flex flex-col items-center">
               
+              {/* Top-Right Commercial Register */}
+              <div className="w-full flex justify-start mb-1.5">
+                <span className="inline-block px-2.5 py-0.5 bg-amber-50 border border-amber-400 rounded-md text-[10px] font-black text-gray-900 font-sans">
+                  سجل تجارى : ٩٠٠٤٧
+                </span>
+              </div>
+
               {/* Receipt Header branding */}
               <div className="text-center w-full border-b border-dashed border-gray-400 pb-2 flex flex-col items-center">
                 <div className="mb-1 flex justify-center">

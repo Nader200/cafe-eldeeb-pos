@@ -135,6 +135,10 @@ export async function createInvoicePDF({
   renderDiv.innerHTML = `
     <div style="background: #ffffff; width: 100%; box-sizing: border-box; border: 1px solid #e5e7eb; padding: 30px; border-radius: 12px; font-family: 'Cairo', -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, sans-serif; direction: rtl; letter-spacing: normal;">
       
+      <div style="text-align: right; margin-bottom: 10px;">
+        <span style="display: inline-block; padding: 5px 12px; background-color: #fffbeb; border: 1.5px solid #d4af37; border-radius: 8px; font-size: 14px; font-weight: 800; color: #111827;">سجل تجارى : ٩٠٠٤٧</span>
+      </div>
+
       <!-- HEADER matching Customer Statement -->
       <div style="text-align: center; border-bottom: 3px double #d4af37; padding-bottom: 20px; margin-bottom: 22px;">
         <img src="${getEldeebLogoDataUrl(300, false, 'gold')}" alt="Cafe Eldeeb Logo" style="height: 155px; width: auto; margin: 0 auto 12px; display: block; filter: contrast(115%) brightness(102%); image-rendering: -webkit-optimize-contrast;" />

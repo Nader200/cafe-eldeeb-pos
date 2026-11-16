@@ -515,6 +515,9 @@ export default function InvoiceHistoryView({
             </style>
           </head>
           <body>
+            <div style="text-align: right; margin-bottom: 6px;">
+              <span style="display: inline-block; padding: 3px 8px; border: 1.5px solid #000; border-radius: 4px; font-weight: 900; font-size: 12px; font-family: Arial, sans-serif;">سجل تجارى : ٩٠٠٤٧</span>
+            </div>
             <div class="center" style="margin-bottom: 8px;"><img src="${getEldeebLogoDataUrl(240, false, 'gold')}" alt="Logo" style="height: 135px; width: auto; margin: 0 auto 8px; display: block; filter: contrast(115%) brightness(102%); image-rendering: -webkit-optimize-contrast;" /></div>
             <div class="center bold" style="font-size: 16px;">${settings.cafe_name}</div>
             <div class="center">${settings.address || 'كافيه الديب'}</div>
@@ -677,6 +680,9 @@ export default function InvoiceHistoryView({
       </head>
       <body>
         <div class="receipt-card">
+          <div style="text-align: right; margin-bottom: 10px;">
+            <span style="display: inline-block; padding: 4px 10px; background: #fffbeb; border: 1.5px solid #d4af37; border-radius: 6px; font-size: 13px; font-weight: 800; color: #111827;">سجل تجارى : ٩٠٠٤٧</span>
+          </div>
           <div class="title">☕ ${settings.cafe_name}</div>
           <p class="subtitle">${settings.address || 'كافيه الديب إنتربرايز'}</p>
           <p class="subtitle">هاتف: ${settings.phone || '00000'}</p>
@@ -1156,6 +1162,13 @@ export default function InvoiceHistoryView({
             {/* High Fidelity Receipt styling */}
             <div id="history-receipt-print-area" className="bg-white text-black p-4 rounded-2xl font-mono text-xs max-h-[420px] overflow-y-auto leading-relaxed select-text flex flex-col items-center shadow-inner">
               
+              {/* Top-Right Commercial Register */}
+              <div className="w-full flex justify-start mb-1.5">
+                <span className="inline-block px-2.5 py-0.5 bg-amber-50 border border-amber-400 rounded-md text-[10px] font-black text-gray-900 font-sans">
+                  سجل تجارى : ٩٠٠٤٧
+                </span>
+              </div>
+
               {/* Receipt Header */}
               <div className="text-center w-full border-b border-dashed border-gray-400 pb-2.5 flex flex-col items-center">
                 <div className="mb-1 flex justify-center">

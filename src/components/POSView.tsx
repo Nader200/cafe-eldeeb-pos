@@ -3856,6 +3856,13 @@ export default function POSView({
             {/* Receipt Inner Styled Box */}
             <div id="receipt-print-area" className="bg-white text-black p-4 rounded-xl font-mono text-xs shadow-inner leading-relaxed select-text flex flex-col items-center">
               
+              {/* Top-Right Commercial Register */}
+              <div className="w-full flex justify-start mb-2">
+                <span className="inline-block px-2.5 py-1 bg-amber-50 border border-amber-400 rounded-md text-[11px] font-black text-gray-900 font-sans">
+                  سجل تجارى : ٩٠٠٤٧
+                </span>
+              </div>
+
               {/* Branding header */}
               <div className="text-center w-full border-b border-dashed border-gray-400 pb-3 flex flex-col items-center">
                 <div className="mb-1.5 flex justify-center">

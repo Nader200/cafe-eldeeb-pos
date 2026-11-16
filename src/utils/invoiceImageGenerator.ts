@@ -524,8 +524,14 @@ export async function createInvoiceReceiptImage({
     fFooter
   );
 
+  // Commercial Register top-right box
+  const commercialRegText = 'سجل تجارى : ٩٠٠٤٧';
+  const fCommReg = `700 14px ${CANVAS_FONT_FAMILY}`;
+  const commRegBoxH = 30;
+
   // Measure total height cleanly
   let totalH = padTop;
+  totalH += commRegBoxH + 10; // top-right commercial register box
   const logoDrawSize = logoImg ? 185 : 0;
   if (logoImg) totalH += logoDrawSize + 8;
   totalH += addressLines.length * 18;
@@ -588,6 +594,32 @@ export async function createInvoiceReceiptImage({
   ctx.fillRect(0, 0, width, totalH);
 
   let y = padTop;
+
+  // 0. Top-Right Commercial Register Box
+  ctx.save();
+  ctx.font = fCommReg;
+  const commRegTextW = ctx.measureText(commercialRegText).width;
+  const commRegBoxW = Math.min(contentW, commRegTextW + 24);
+  const commRegBoxX = rightX - commRegBoxW;
+  const commRegBoxY = y;
+  ctx.fillStyle = '#fffbeb';
+  ctx.strokeStyle = '#d4af37';
+  ctx.lineWidth = 1.4;
+  drawRoundedRectPath(ctx, commRegBoxX, commRegBoxY, commRegBoxW, commRegBoxH, 7);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+  drawTextSegment(
+    ctx,
+    commercialRegText,
+    commRegBoxX + commRegBoxW / 2,
+    commRegBoxY + commRegBoxH / 2 + 0.5,
+    'center',
+    fCommReg,
+    '#111827',
+    'rtl'
+  );
+  y += commRegBoxH + 10;
 
   // 1. Header Branding
   if (logoImg) {
