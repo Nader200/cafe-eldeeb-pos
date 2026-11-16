@@ -70,6 +70,7 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
   const [settlePayAmount, setSettlePayAmount] = useState<number>(0);
   const [settleNotes, setSettleNotes] = useState<string>('');
   const [settleDeductDrawer, setSettleDeductDrawer] = useState<boolean>(true);
+  const [carryOverRemaining, setCarryOverRemaining] = useState<boolean>(true);
 
   // Employee consumption modal states
   const [showConsumptionModal, setShowConsumptionModal] = useState<boolean>(false);
@@ -417,6 +418,7 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
 
     const dateStr = new Date().toISOString();
     const todayStr = dateStr.split('T')[0];
+    const remainingDifference = Number((settlementBreakdown.rawNet - settlePayAmount).toFixed(2));
 
     // 1. If checked, add daily wage entitlement
     if (includeDailyWage) {
@@ -435,13 +437,18 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
 
     // 2. Add wage payment for the net amount paid
     if (settlePayAmount > 0) {
+      const defaultPayNote =
+        remainingDifference > 0 && carryOverRemaining
+          ? `صرف جزء من اليومية (${settlePayAmount} ج.م) وترحيل المتبقي (${remainingDifference} ج.م) لليوم التالي`
+          : `صرف صافي مستحقات اليومية (${settlePayAmount} ج.م)`;
+
       const paymentTx: EmployeeTransaction = {
-        id: `emp_tx_pay_${Date.now()}`,
+        id: `emp_tx_pay_${Date.now() + 1}`,
         employee_id: settleEmployee.id,
         employee_name: settleEmployee.name,
         type: 'WAGE_PAYMENT',
         amount: settlePayAmount,
-        notes: settleNotes.trim() || `صرف صافي مستحقات اليومية بعد الخصومات والسلفيات (${settlePayAmount} ج.م)`,
+        notes: settleNotes.trim() || defaultPayNote,
         date: todayStr,
         created_at: dateStr
       };
@@ -449,12 +456,40 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
 
       // Deduct from cash drawer
       if (settleDeductDrawer) {
-        const desc = `صرف صافي يومية الموظف: ${settleEmployee.name} (صافي اليوم بعد خصم السلف والاستهلاكات)`;
+        const desc =
+          remainingDifference > 0 && carryOverRemaining
+            ? `صرف يومية الموظف: ${settleEmployee.name} (${settlePayAmount} ج.م - وترحيل ${remainingDifference} ج.م لليوم التالي)`
+            : `صرف صافي يومية الموظف: ${settleEmployee.name} (صافي اليوم بعد خصم السلف والاستهلاكات)`;
         dbService.saveExpense('Salaries', desc, settlePayAmount);
       }
     }
 
-    onShowSuccessAlert(`تم إجراء التسوية اليومية للموظف "${settleEmployee.name}" وصرف صافي المستحقات بقيمة ${settlePayAmount} ج.م بنجاح!`);
+    // 3. If user explicitly disabled carry-over and there's a positive remaining amount, close the difference
+    if (!carryOverRemaining && remainingDifference > 0) {
+      const waiveTx: EmployeeTransaction = {
+        id: `emp_tx_waive_${Date.now() + 2}`,
+        employee_id: settleEmployee.id,
+        employee_name: settleEmployee.name,
+        type: 'CUSTOM_DEDUCTION',
+        amount: remainingDifference,
+        notes: `إغلاق وتسوية نهائية لفرق اليومية بدون ترحيل لليوم التالي (${remainingDifference} ج.م)`,
+        date: todayStr,
+        created_at: dateStr
+      };
+      dbService.addEmployeeTransaction(waiveTx);
+    }
+
+    if (remainingDifference > 0 && carryOverRemaining) {
+      onShowSuccessAlert(
+        `تم إجراء التسوية اليومية للموظف "${settleEmployee.name}": تم صرف ${settlePayAmount} ج.م وترحيل المتبقي (+${remainingDifference} ج.م) إلى اليوم التالي بنجاح!`
+      );
+    } else if (remainingDifference < 0 && carryOverRemaining) {
+      onShowSuccessAlert(
+        `تم إجراء التسوية للموظف "${settleEmployee.name}": تم صرف ${settlePayAmount} ج.م وترحيل الزيادة/المديونية (${remainingDifference} ج.م) إلى اليوم التالي.`
+      );
+    } else {
+      onShowSuccessAlert(`تم إجراء التسوية اليومية للموظف "${settleEmployee.name}" وصرف صافي المستحقات بقيمة ${settlePayAmount} ج.م بنجاح!`);
+    }
     setShowSettlementModal(false);
     loadData();
   };
@@ -530,22 +565,63 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
   }, [employeeStats]);
 
   const settlementBreakdown = useMemo(() => {
-    if (!settleEmployee) return { wage: 0, loans: 0, consumption: 0, drinks: 0, custom: 0, net: 0 };
+    if (!settleEmployee) {
+      return {
+        wage: 0,
+        priorCarried: 0,
+        todayEntitlements: 0,
+        todayPaid: 0,
+        loans: 0,
+        consumption: 0,
+        drinks: 0,
+        custom: 0,
+        rawNet: 0,
+        net: 0
+      };
+    }
     const todayStr = new Date().toISOString().split('T')[0];
-    
+
+    // Past days balance (all transactions before todayStr)
+    const pastTxs = transactions.filter(t => t.employee_id === settleEmployee.id && t.date < todayStr);
+    const priorCarried = pastTxs.reduce((sum, t) => {
+      if (t.type === 'ENTITLEMENT') return sum + t.amount;
+      return sum - t.amount;
+    }, 0);
+
     // Get today's transactions for this employee
     const todayTxs = transactions.filter(t => t.employee_id === settleEmployee.id && t.date === todayStr);
-    
+
     const wage = settleEmployee.daily_wage;
+    const todayEntitlements = todayTxs.filter(t => t.type === 'ENTITLEMENT').reduce((sum, t) => sum + t.amount, 0);
+    const todayPaid = todayTxs.filter(t => t.type === 'WAGE_PAYMENT').reduce((sum, t) => sum + t.amount, 0);
     const loans = todayTxs.filter(t => t.type === 'LOAN').reduce((sum, t) => sum + t.amount, 0);
     const consumption = todayTxs.filter(t => t.type === 'CONSUMPTION').reduce((sum, t) => sum + t.amount, 0);
     const drinks = todayTxs.filter(t => t.type === 'DRINK_DEDUCTION').reduce((sum, t) => sum + t.amount, 0);
     const custom = todayTxs.filter(t => t.type === 'CUSTOM_DEDUCTION').reduce((sum, t) => sum + t.amount, 0);
-    
-    const baseNet = (includeDailyWage ? wage : 0) - loans - consumption - drinks - custom;
-    const net = Math.max(0, baseNet);
-    
-    return { wage, loans, consumption, drinks, custom, net };
+
+    const rawNet =
+      priorCarried +
+      todayEntitlements +
+      (includeDailyWage ? wage : 0) -
+      loans -
+      consumption -
+      drinks -
+      custom -
+      todayPaid;
+    const net = Math.max(0, rawNet);
+
+    return {
+      wage,
+      priorCarried,
+      todayEntitlements,
+      todayPaid,
+      loans,
+      consumption,
+      drinks,
+      custom,
+      rawNet,
+      net
+    };
   }, [settleEmployee, transactions, includeDailyWage]);
 
   useEffect(() => {
@@ -743,15 +819,24 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                     </div>
 
                     {/* Bottom Action buttons */}
-                    <div className="flex justify-between items-center mt-4 pt-3 border-t border-gray-900/40">
+                    <div className="flex flex-wrap justify-between items-center gap-2 mt-4 pt-3 border-t border-gray-900/40">
                       <div className="text-right">
-                        <span className="text-[9px] text-gray-500 block">صافي رصيد الموظف:</span>
-                        <span className={`text-xs font-black font-mono ${stats.balance >= 0 ? 'text-gold-500' : 'text-red-500'}`}>
-                          {stats.balance >= 0 ? `+${stats.balance}` : stats.balance} ج.م
+                        <span className="text-[9px] text-gray-500 block">
+                          {stats.balance > 0 ? 'رصيد متبقي (مرحل لليوم التالي):' : 'صافي رصيد الموظف:'}
                         </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-xs font-black font-mono ${stats.balance >= 0 ? 'text-gold-500' : 'text-red-500'}`}>
+                            {stats.balance >= 0 ? `+${stats.balance}` : stats.balance} ج.م
+                          </span>
+                          {stats.balance > 0 && (
+                            <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
+                              🔄 مرحل
+                            </span>
+                          )}
+                        </div>
                       </div>
 
-                      <div className="flex gap-1.5">
+                      <div className="flex flex-wrap gap-1.5">
                         <button
                           onClick={() => handleOpenTxModal(emp.id, 'ENTITLEMENT')}
                           className="px-2 py-1 bg-green-950/30 border border-green-900/40 text-green-400 hover:text-white hover:bg-green-900 rounded-lg text-[9px] font-bold cursor-pointer transition-all"
@@ -785,14 +870,19 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                         </button>
                         <button
                           onClick={() => {
+                            const todayStr = new Date().toISOString().split('T')[0];
+                            const hasEntitlementToday = transactions.some(
+                              t => t.employee_id === emp.id && t.date === todayStr && t.type === 'ENTITLEMENT'
+                            );
                             setSettleEmployee(emp);
-                            setIncludeDailyWage(true);
+                            setIncludeDailyWage(!hasEntitlementToday);
+                            setCarryOverRemaining(true);
                             setSettleNotes('');
                             setSettleDeductDrawer(true);
                             setShowSettlementModal(true);
                           }}
                           className="px-2 py-1 bg-amber-500 hover:bg-amber-400 text-black rounded-lg text-[9px] font-black cursor-pointer transition-all"
-                          title="تسوية اليومية وصرف صافي المستحقات نهاية اليوم"
+                          title="تسوية اليومية وصرف صافي المستحقات وترحيل المتبقي لليوم التالي"
                         >
                           ⚖️ تسوية اليوم
                         </button>
@@ -861,6 +951,11 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                         {t.type === 'WAGE_PAYMENT' && (
                           <span className="px-2 py-0.5 rounded-md bg-blue-950 border border-blue-900/60 text-blue-400 text-[9px] font-bold">
                             صرف نقدي كاش
+                          </span>
+                        )}
+                        {t.type === 'CONSUMPTION' && (
+                          <span className="px-2 py-0.5 rounded-md bg-purple-950 border border-purple-900/60 text-purple-400 text-[9px] font-bold">
+                            استهلاك منتجات
                           </span>
                         )}
                       </td>
@@ -1709,7 +1804,11 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
               <div className="bg-black/30 p-3 rounded-xl border border-gray-900 flex items-center justify-between">
                 <div>
                   <span className="text-xs font-bold text-white block">استحقاق يومية اليوم الحالية</span>
-                  <span className="text-[10px] text-gray-500">معدل الأجر اليومي الافتراضي للموظف</span>
+                  <span className="text-[10px] text-gray-500">
+                    {settlementBreakdown.todayEntitlements > 0
+                      ? 'تم تسجيل يومية اليوم مسبقاً (حدد لإضافة يوم إضافي)'
+                      : 'معدل الأجر اليومي الافتراضي للموظف'}
+                  </span>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-xs font-mono font-black text-green-400">+{settleEmployee.daily_wage} ج.م</span>
@@ -1721,6 +1820,47 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                   />
                 </div>
               </div>
+
+              {/* Carried-over Balance from Previous Days / Earlier Today */}
+              {(settlementBreakdown.priorCarried !== 0 || settlementBreakdown.todayEntitlements > 0 || settlementBreakdown.todayPaid > 0) && (
+                <div className={`p-3 rounded-xl border space-y-1.5 ${
+                  settlementBreakdown.priorCarried + settlementBreakdown.todayEntitlements - settlementBreakdown.todayPaid >= 0
+                    ? 'bg-emerald-950/20 border-emerald-500/30'
+                    : 'bg-red-950/20 border-red-500/30'
+                }`}>
+                  {settlementBreakdown.priorCarried !== 0 && (
+                    <div className="flex items-center justify-between text-xs">
+                      <div>
+                        <span className="font-extrabold text-white block">
+                          {settlementBreakdown.priorCarried > 0
+                            ? '🔄 متبقي يومية مرحل من أيام سابقة'
+                            : '📌 رصيد مدين مرحل من أيام سابقة'}
+                        </span>
+                        <span className="text-[10px] text-gray-400">
+                          {settlementBreakdown.priorCarried > 0
+                            ? 'يُضاف تلقائياً إلى مستحقات الموظف اليوم'
+                            : 'يُخصم تلقائياً من مستحقات الموظف اليوم'}
+                        </span>
+                      </div>
+                      <span className={`font-mono font-black ${settlementBreakdown.priorCarried > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {settlementBreakdown.priorCarried > 0 ? `+${settlementBreakdown.priorCarried}` : settlementBreakdown.priorCarried} ج.م
+                      </span>
+                    </div>
+                  )}
+                  {settlementBreakdown.todayEntitlements > 0 && (
+                    <div className="flex items-center justify-between text-xs pt-1 border-t border-gray-900/40">
+                      <span className="text-gray-300 font-semibold">📋 استحقاق يومية مسجل مسبقاً اليوم:</span>
+                      <span className="font-mono font-bold text-emerald-400">+{settlementBreakdown.todayEntitlements} ج.م</span>
+                    </div>
+                  )}
+                  {settlementBreakdown.todayPaid > 0 && (
+                    <div className="flex items-center justify-between text-xs pt-1 border-t border-gray-900/40">
+                      <span className="text-gray-300 font-semibold">💸 مبالغ منصرفة مسبقاً اليوم:</span>
+                      <span className="font-mono font-bold text-blue-400">-{settlementBreakdown.todayPaid} ج.م</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Today's Deductions Breakdown */}
               <div className="space-y-2 bg-[#060606] p-3.5 rounded-2xl border border-gray-950">
@@ -1738,7 +1878,7 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
 
                 <div className="flex justify-between text-xs border-b border-gray-900/60 pb-1.5">
                   <span className="text-gray-400">☕ خصومات مشروبات يدوية:</span>
-                  <span className="font-mono text-red-400 font-bold">-{settlementBreakdown.drinks} ج.m</span>
+                  <span className="font-mono text-red-400 font-bold">-{settlementBreakdown.drinks} ج.م</span>
                 </div>
 
                 <div className="flex justify-between text-xs pb-1">
@@ -1747,12 +1887,31 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                 </div>
 
                 {/* Combined Calculation Formula */}
-                <div className="border-t border-dashed border-gray-800 mt-2.5 pt-2.5 flex justify-between items-center text-xs">
-                  <span className="text-gray-400 font-bold">المكتسب ({includeDailyWage ? settleEmployee.daily_wage : 0}) - المستقطع ({settlementBreakdown.loans + settlementBreakdown.consumption + settlementBreakdown.drinks + settlementBreakdown.custom}):</span>
-                  <span className="font-mono font-black text-amber-500">
-                    {settlementBreakdown.net} ج.م
-                  </span>
-                </div>
+                {(() => {
+                  const priorCredit = Math.max(0, settlementBreakdown.priorCarried);
+                  const priorDebt = Math.max(0, -settlementBreakdown.priorCarried);
+                  const totalDeductions =
+                    priorDebt +
+                    settlementBreakdown.loans +
+                    settlementBreakdown.consumption +
+                    settlementBreakdown.drinks +
+                    settlementBreakdown.custom +
+                    settlementBreakdown.todayPaid;
+                  const totalEarned =
+                    (includeDailyWage ? settleEmployee.daily_wage : 0) +
+                    settlementBreakdown.todayEntitlements +
+                    priorCredit;
+                  return (
+                    <div className="border-t border-dashed border-gray-800 mt-2.5 pt-2.5 flex justify-between items-center text-xs">
+                      <span className="text-gray-400 font-bold">
+                        الإجمالي ({totalEarned}) - المستقطع ({totalDeductions}):
+                      </span>
+                      <span className="font-mono font-black text-amber-500">
+                        {settlementBreakdown.net} ج.م
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Cash Payment Form Fields */}
@@ -1762,6 +1921,7 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                   <input
                     type="number"
                     min="0"
+                    step="any"
                     required
                     value={settlePayAmount}
                     onChange={(e) => setSettlePayAmount(parseFloat(e.target.value) || 0)}
@@ -1779,6 +1939,60 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                   />
                 </div>
               </div>
+
+              {/* Carry-over Remaining Preview & Toggle */}
+              {(() => {
+                const remainingDiff = Number((settlementBreakdown.rawNet - settlePayAmount).toFixed(2));
+                return (
+                  <div className="space-y-2">
+                    <label className="bg-black/30 p-2.5 rounded-xl border border-gray-900 flex items-center justify-between cursor-pointer">
+                      <span className="text-[11px] text-gold-400 font-extrabold">
+                        🔄 ترحيل المتبقي من اليومية إلى اليوم التالي تلقائياً
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={carryOverRemaining}
+                        onChange={(e) => setCarryOverRemaining(e.target.checked)}
+                        className="w-4 h-4 text-gold-500 bg-black border-gray-800 rounded focus:ring-gold-500 focus:ring-2 cursor-pointer"
+                      />
+                    </label>
+
+                    {remainingDiff > 0 && (
+                      <div className={`p-3 rounded-xl border text-xs flex justify-between items-center ${
+                        carryOverRemaining
+                          ? 'bg-emerald-950/25 border-emerald-500/40 text-emerald-300'
+                          : 'bg-amber-950/25 border-amber-500/40 text-amber-300'
+                      }`}>
+                        <div>
+                          <span className="font-extrabold block">
+                            {carryOverRemaining
+                              ? '🔄 المتبقي المرحل إلى اليوم التالي:'
+                              : '⚠️ فرق غير مرحل (سيتم تسويته كإغلاق نهائي):'}
+                          </span>
+                          <span className="text-[10px] opacity-80">
+                            {carryOverRemaining
+                              ? 'سيُضاف تلقائياً لاستحقاق الموظف في اليوم التالي'
+                              : 'لن يُرحّل هذا المبلغ لليوم التالي'}
+                          </span>
+                        </div>
+                        <span className="font-mono font-black text-sm">
+                          {carryOverRemaining ? `+${remainingDiff}` : remainingDiff} ج.م
+                        </span>
+                      </div>
+                    )}
+
+                    {remainingDiff < 0 && (
+                      <div className="p-3 rounded-xl border bg-red-950/25 border-red-500/40 text-red-300 text-xs flex justify-between items-center">
+                        <div>
+                          <span className="font-extrabold block">💳 زيادة منصرفة عن المستحق:</span>
+                          <span className="text-[10px] opacity-80">سيُخصم تلقائياً كرصيد مدين من يومية الغد</span>
+                        </div>
+                        <span className="font-mono font-black text-sm">{remainingDiff} ج.م</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Deduct from Drawer Checkbox */}
               <div className="bg-black/30 p-2.5 rounded-xl border border-gray-900 flex items-center justify-between">
