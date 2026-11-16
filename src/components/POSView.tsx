@@ -412,13 +412,20 @@ export default function POSView({
             created_at: '',
             updated_at: ''
           };
+          const resolvedOrigPrice =
+            item.original_price !== undefined && item.original_price !== null
+              ? item.original_price
+              : product.selling_price;
+          const hasPriceDiff = Math.abs(resolvedOrigPrice - item.unit_price) > 0.001;
+          const effectivePriceEdited = Boolean(item.is_price_edited || hasPriceDiff);
           return {
             product,
             quantity: item.quantity,
             notes: item.notes || '',
             kitchen_notes: '',
-            custom_price: item.is_price_edited ? item.unit_price : undefined,
-            is_price_edited: item.is_price_edited,
+            original_price: resolvedOrigPrice,
+            custom_price: effectivePriceEdited ? item.unit_price : undefined,
+            is_price_edited: effectivePriceEdited,
             price_edit_reason: item.price_edit_reason,
             item_discount_type: item.item_discount_type,
             item_discount_value: item.item_discount_value,
@@ -474,13 +481,20 @@ export default function POSView({
           created_at: '',
           updated_at: ''
         };
+        const resolvedOrigPrice =
+          item.original_price !== undefined && item.original_price !== null
+            ? item.original_price
+            : product.selling_price;
+        const hasPriceDiff = Math.abs(resolvedOrigPrice - item.unit_price) > 0.001;
+        const effectivePriceEdited = Boolean(item.is_price_edited || hasPriceDiff);
         return {
           product,
           quantity: item.quantity,
           notes: item.notes || '',
           kitchen_notes: '',
-          custom_price: item.is_price_edited ? item.unit_price : undefined,
-          is_price_edited: item.is_price_edited,
+          original_price: resolvedOrigPrice,
+          custom_price: effectivePriceEdited ? item.unit_price : undefined,
+          is_price_edited: effectivePriceEdited,
           price_edit_reason: item.price_edit_reason,
           item_discount_type: item.item_discount_type,
           item_discount_value: item.item_discount_value,
@@ -888,6 +902,32 @@ export default function POSView({
         kitchen_notes: editKitchenNotes
       };
       setCart(updated);
+      if (activeInvoiceId) {
+        try {
+          dbService.saveOpenInvoice(
+            activeInvoiceId,
+            updated,
+            paymentType,
+            selectedCustomer === 'c_general' ? null : selectedCustomer,
+            discount,
+            taxPercentage,
+            0,
+            cashierName,
+            invoiceNotes,
+            tableNumber.trim(),
+            paymentMethod,
+            referenceNumber,
+            paymentNotes,
+            'OPEN',
+            senderPhone,
+            receiptImageUrl
+          );
+          firebaseSyncService.flushPendingPushes().catch(() => {});
+          setOpenInvoicesCount(dbService.getOpenInvoices().length);
+        } catch (err: any) {
+          onShowWarningAlert(err?.message || 'فشل تحديث تفاصيل الفاتورة المفتوحة');
+        }
+      }
       setShowItemNotesModal(false);
       setEditingCartItemIndex(null);
     }
@@ -1702,24 +1742,36 @@ export default function POSView({
                       >
                         <span className="text-xs shrink-0 mt-0.5">{item.product.image}</span>
                         <div>
-                          <div className="flex items-center gap-1 flex-wrap">
-                            <h6 className="text-[10px] md:text-[11px] font-black text-white line-clamp-1">{item.product.name_ar}</h6>
-                            {item.is_price_edited && (
-                              <span className="px-1 py-0.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[8px] rounded font-extrabold">
-                                سعر مخصص
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1 mt-0.5">
-                            {item.is_price_edited ? (
+                          {(() => {
+                            const origPrice = item.original_price ?? item.product.selling_price;
+                            const activePrice = item.custom_price !== undefined ? item.custom_price : item.product.selling_price;
+                            const hasDiff = Math.abs(activePrice - origPrice) > 0.001;
+                            const isEdited = Boolean(item.is_price_edited || hasDiff);
+                            return (
                               <>
-                                <span className="text-[8px] md:text-[9px] text-amber-400 font-bold font-mono">{(item.custom_price !== undefined ? item.custom_price : item.product.selling_price)} {settings.currency}</span>
-                                <span className="text-[8px] md:text-[9px] text-gray-650 line-through font-mono">{item.product.selling_price} {settings.currency}</span>
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  <h6 className="text-[10px] md:text-[11px] font-black text-white line-clamp-1">{item.product.name_ar}</h6>
+                                  {isEdited && (
+                                    <span className="px-1 py-0.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[8px] rounded font-extrabold">
+                                      سعر مخصص
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1 mt-0.5">
+                                  {isEdited ? (
+                                    <>
+                                      <span className="text-[8px] md:text-[9px] text-amber-400 font-bold font-mono">{activePrice} {settings.currency}</span>
+                                      {hasDiff && (
+                                        <span className="text-[8px] md:text-[9px] text-gray-500 line-through font-mono">{origPrice} {settings.currency}</span>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <span className="text-[8px] md:text-[9px] text-gray-500 block">{origPrice} {settings.currency}</span>
+                                  )}
+                                </div>
                               </>
-                            ) : (
-                              <span className="text-[8px] md:text-[9px] text-gray-500 block">{item.product.selling_price} {settings.currency}</span>
-                            )}
-                          </div>
+                            );
+                          })()}
                         </div>
                       </div>
                       
@@ -3439,6 +3491,11 @@ export default function POSView({
                   <button
                     type="button"
                     onClick={() => {
+                      const parsedPrice = parseFloat(newPriceVal);
+                      if (isNaN(parsedPrice) || parsedPrice < 0) {
+                        setPriceEditError('يرجى إدخال سعر صحيح أكبر من أو يساوي الصفر!');
+                        return;
+                      }
                       if (adminPinInput !== settings.pin_code) {
                         setPriceEditError('رمز الأمان PIN غير صحيح!');
                         return;
@@ -3446,9 +3503,14 @@ export default function POSView({
                       const updatedCart = [...cart];
                       const currentItem = updatedCart[actionMenuIndex];
                       if (currentItem) {
-                        currentItem.custom_price = parseFloat(newPriceVal);
-                        currentItem.is_price_edited = true;
-                        currentItem.price_edit_reason = 'تعديل سريع من لوحة التحكم بمسؤولية المدير';
+                        const baseOrigPrice = currentItem.original_price ?? currentItem.product.selling_price;
+                        updatedCart[actionMenuIndex] = {
+                          ...currentItem,
+                          original_price: baseOrigPrice,
+                          custom_price: parsedPrice,
+                          is_price_edited: true,
+                          price_edit_reason: 'تعديل سريع من لوحة التحكم بمسؤولية المدير'
+                        };
                         setCart(updatedCart);
                         
                         if (activeInvoiceId) {
@@ -3461,15 +3523,23 @@ export default function POSView({
                               discount,
                               taxPercentage,
                               0,
-                              'أدمن النظام / نادر الديب',
+                              cashierName,
                               invoiceNotes,
-                              tableNumber
+                              tableNumber.trim(),
+                              paymentMethod,
+                              referenceNumber,
+                              paymentNotes,
+                              'OPEN',
+                              senderPhone,
+                              receiptImageUrl
                             );
+                            firebaseSyncService.flushPendingPushes().catch(() => {});
+                            setOpenInvoicesCount(dbService.getOpenInvoices().length);
                           } catch (err: any) {
                             onShowWarningAlert(err.message || 'فشل تحديث السعر في الفاتورة المعلقة');
                           }
                         }
-                        onShowSuccessAlert('تم تحديث السعر المخصص بنجاح!');
+                        onShowSuccessAlert(`تم تحديث السعر المخصص إلى ${parsedPrice} ${settings.currency} بنجاح!`);
                         setPriceEditError('');
                       }
                     }}
@@ -3483,23 +3553,53 @@ export default function POSView({
 
               {/* Bottom Buttons Row */}
               <div className="flex gap-2.5 border-t border-gray-900 pt-3">
-                {/* Save Note & Qty */}
+                {/* Save Note, Qty & Optional Price Edit */}
                 <button
                   type="button"
                   onClick={() => {
                     const updatedCart = [...cart];
                     const currentItem = updatedCart[actionMenuIndex];
                     if (currentItem) {
-                      const potentialCart = updatedCart.map((item, idx) => idx === actionMenuIndex ? { ...item, quantity: editQty } : item);
+                      const currentUnitPrice =
+                        currentItem.custom_price !== undefined
+                          ? currentItem.custom_price
+                          : currentItem.product.selling_price;
+                      const parsedPrice = parseFloat(newPriceVal);
+                      const priceChanged =
+                        newPriceVal.trim() !== '' &&
+                        !isNaN(parsedPrice) &&
+                        parsedPrice >= 0 &&
+                        Math.abs(parsedPrice - currentUnitPrice) > 0.001;
+
+                      if (priceChanged && adminPinInput !== settings.pin_code) {
+                        setPriceEditError('لتطبيق السعر الجديد يرجى إدخال رمز الأمان PIN للمدير أولاً!');
+                        return;
+                      }
+
+                      const potentialCart = updatedCart.map((item, idx) =>
+                        idx === actionMenuIndex ? { ...item, quantity: editQty } : item
+                      );
                       const check = dbService.checkInventorySufficiency(potentialCart);
                       if (!check.sufficient) {
                         onShowWarningAlert(check.message || 'المخزون غير كافٍ، يرجى إضافة دفعة جديدة.');
                         return;
                       }
 
-                      currentItem.quantity = editQty;
-                      currentItem.notes = editNotes;
-                      currentItem.kitchen_notes = editKitchenNotes;
+                      const baseOrigPrice = currentItem.original_price ?? currentItem.product.selling_price;
+                      updatedCart[actionMenuIndex] = {
+                        ...currentItem,
+                        quantity: editQty,
+                        notes: editNotes,
+                        kitchen_notes: editKitchenNotes,
+                        original_price: baseOrigPrice,
+                        ...(priceChanged
+                          ? {
+                              custom_price: parsedPrice,
+                              is_price_edited: true,
+                              price_edit_reason: 'تعديل سريع من لوحة التحكم بمسؤولية المدير'
+                            }
+                          : {})
+                      };
                       setCart(updatedCart);
                       
                       if (activeInvoiceId) {
@@ -3512,18 +3612,31 @@ export default function POSView({
                             discount,
                             taxPercentage,
                             0,
-                            'أدمن النظام / نادر الديب',
+                            cashierName,
                             invoiceNotes,
-                            tableNumber
+                            tableNumber.trim(),
+                            paymentMethod,
+                            referenceNumber,
+                            paymentNotes,
+                            'OPEN',
+                            senderPhone,
+                            receiptImageUrl
                           );
+                          firebaseSyncService.flushPendingPushes().catch(() => {});
+                          setOpenInvoicesCount(dbService.getOpenInvoices().length);
                           onShowSuccessAlert('تم حفظ تعديلات الفاتورة المعلقة بنجاح!');
                         } catch (err: any) {
                           onShowWarningAlert(err.message || 'فشل تحديث الفاتورة');
                         }
                       } else {
-                        onShowSuccessAlert('تم حفظ تفاصيل الصنف بالسلة.');
+                        onShowSuccessAlert(
+                          priceChanged
+                            ? `تم حفظ تفاصيل الصنف والسعر الجديد (${parsedPrice} ${settings.currency}) بالسلة.`
+                            : 'تم حفظ تفاصيل الصنف بالسلة.'
+                        );
                       }
                     }
+                    setPriceEditError('');
                     setShowItemActionMenu(false);
                   }}
                   className="flex-1 py-3 bg-gold-600 hover:bg-gold-500 text-black font-black text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1 shadow-md"
@@ -3669,8 +3782,11 @@ export default function POSView({
 
                     // Save the custom price to this cart item
                     const updatedCart = [...cart];
+                    const targetItem = updatedCart[priceEditIndex];
+                    const baseOrigPrice = targetItem.original_price ?? targetItem.product.selling_price;
                     updatedCart[priceEditIndex] = {
-                      ...updatedCart[priceEditIndex],
+                      ...targetItem,
+                      original_price: baseOrigPrice,
                       custom_price: parsedPrice,
                       is_price_edited: true,
                       price_edit_reason: 'تعديل يدوي مصرح من المسؤول'
@@ -3687,10 +3803,18 @@ export default function POSView({
                           discount,
                           taxPercentage,
                           0,
-                          'أدمن النظام / نادر الديب',
+                          cashierName,
                           invoiceNotes,
-                          tableNumber
+                          tableNumber.trim(),
+                          paymentMethod,
+                          referenceNumber,
+                          paymentNotes,
+                          'OPEN',
+                          senderPhone,
+                          receiptImageUrl
                         );
+                        firebaseSyncService.flushPendingPushes().catch(() => {});
+                        setOpenInvoicesCount(dbService.getOpenInvoices().length);
                       } catch (err: any) {
                         onShowWarningAlert(err.message || 'فشل تحديث السعر في الفاتورة المعلقة');
                       }

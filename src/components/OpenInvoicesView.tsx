@@ -37,7 +37,8 @@ import {
   Copy,
   Camera,
   Upload,
-  Share2
+  Share2,
+  Edit3
 } from 'lucide-react';
 import { dbService, safeStorage } from '../dbService';
 const localStorage = safeStorage;
@@ -45,6 +46,7 @@ import { Invoice, Customer, TableSystem, InvoiceItem } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { uploadReceiptImage } from '../lib/receiptStorage';
 import { shareInvoiceImageToWhatsApp } from '../utils/invoiceImageGenerator';
+import { firebaseSyncService } from '../lib/firebaseSyncService';
 
 interface OpenInvoicesViewProps {
   onNavigate: (tab: string) => void;
@@ -176,16 +178,79 @@ export default function OpenInvoicesView({
   const [newInvoiceNotesInput, setNewInvoiceNotesInput] = useState<string>('');
   const [sendingWhatsAppId, setSendingWhatsAppId] = useState<string | null>(null);
 
+  // Direct Item Price Edit Modal State (Admin PIN protected)
+  const [editingPriceItem, setEditingPriceItem] = useState<InvoiceItem | null>(null);
+  const [editItemPriceValue, setEditItemPriceValue] = useState<string>('');
+  const [editItemPriceReason, setEditItemPriceReason] = useState<string>('');
+  const [editItemPricePin, setEditItemPricePin] = useState<string>('');
+  const [editItemPriceError, setEditItemPriceError] = useState<string>('');
+
+  const selectedInvoiceIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    selectedInvoiceIdRef.current = selectedInvoice?.id || null;
+  }, [selectedInvoice?.id]);
+
+  const handleOpenEditPriceModal = (item: InvoiceItem) => {
+    setEditingPriceItem(item);
+    setEditItemPriceValue(String(item.unit_price));
+    setEditItemPriceReason(item.price_edit_reason || '');
+    setEditItemPricePin('');
+    setEditItemPriceError('');
+  };
+
+  const handleConfirmEditItemPrice = () => {
+    if (!selectedInvoice || !editingPriceItem) return;
+    const trimmedPin = editItemPricePin.trim();
+    if (!trimmedPin || trimmedPin !== settings.pin_code) {
+      setEditItemPriceError('رمز الأمان (PIN) للأدمن غير صحيح!');
+      return;
+    }
+    const parsedPrice = Number(editItemPriceValue);
+    if (isNaN(parsedPrice) || parsedPrice < 0) {
+      setEditItemPriceError('يرجى إدخال سعر صحيح أكبر من أو يساوي صفر.');
+      return;
+    }
+
+    try {
+      const updated = dbService.updateOpenInvoiceItemPrice(
+        selectedInvoice.id,
+        editingPriceItem.id,
+        parsedPrice,
+        currentUser?.name || 'أدمن النظام',
+        editItemPriceReason.trim() || undefined
+      );
+      firebaseSyncService.flushPendingPushes().catch(() => {});
+      if (updated) {
+        setSelectedInvoice(updated.invoice);
+        setInvoiceItems(updated.items);
+      }
+      loadData();
+      setEditingPriceItem(null);
+      setEditItemPricePin('');
+      setEditItemPriceError('');
+      onShowSuccessAlert(`تم تعديل سعر "${editingPriceItem.product_name_ar}" إلى ${parsedPrice} ${settings.currency} وحفظه في الفاتورة المفتوحة.`);
+    } catch (err: any) {
+      setEditItemPriceError(err?.message || 'حدث خطأ أثناء تعديل السعر');
+    }
+  };
+
   const handleSendOpenInvoiceImageToWhatsApp = async (inv: Invoice) => {
     if (!inv || sendingWhatsAppId) return;
     setSendingWhatsAppId(inv.id);
     try {
-      const custObj = customers.find(c => c.id === inv.customer_id) || null;
+      const freshDetails = dbService.getInvoiceById(inv.id);
+      const targetInv = freshDetails?.invoice || inv;
+      const items = freshDetails?.items || dbService.getInvoiceItems(inv.id);
+      if (freshDetails && selectedInvoice?.id === inv.id) {
+        setSelectedInvoice(freshDetails.invoice);
+        setInvoiceItems(freshDetails.items);
+      }
+
+      const custObj = customers.find(c => c.id === targetInv.customer_id) || null;
       const custPhone = custObj ? (custObj.whatsapp || custObj.phone || '') : '';
-      const items = dbService.getInvoiceItems(inv.id);
 
       await shareInvoiceImageToWhatsApp({
-        invoice: inv,
+        invoice: targetInv,
         items,
         customer: custObj,
         settings,
@@ -242,6 +307,14 @@ export default function OpenInvoicesView({
     setOpenInvoices(list);
     setCustomers(dbService.getCustomers());
     setTables(dbService.getTables());
+    const activeSelId = selectedInvoiceIdRef.current;
+    if (activeSelId) {
+      const freshDetails = dbService.getInvoiceById(activeSelId);
+      if (freshDetails && (freshDetails.invoice.invoice_status === 'OPEN' || freshDetails.invoice.invoice_status === 'DRAFT')) {
+        setSelectedInvoice(freshDetails.invoice);
+        setInvoiceItems(freshDetails.items);
+      }
+    }
   };
 
   useEffect(() => {
@@ -313,17 +386,21 @@ export default function OpenInvoicesView({
           created_at: '',
           updated_at: ''
         };
-        const resolvedProduct =
+        const resolvedOrigPrice =
           item.original_price !== undefined && item.original_price !== null
-            ? { ...prod, selling_price: item.original_price }
-            : prod;
+            ? item.original_price
+            : prod.selling_price;
+        const resolvedProduct = { ...prod, selling_price: resolvedOrigPrice };
+        const hasPriceDiff = Math.abs(resolvedOrigPrice - item.unit_price) > 0.001;
+        const isEdited = Boolean(item.is_price_edited || hasPriceDiff);
         return {
           product: resolvedProduct,
           quantity: item.quantity,
           notes: item.notes || '',
           kitchen_notes: '',
-          custom_price: item.is_price_edited ? item.unit_price : undefined,
-          is_price_edited: item.is_price_edited,
+          original_price: resolvedOrigPrice,
+          custom_price: isEdited ? item.unit_price : undefined,
+          is_price_edited: isEdited,
           price_edit_reason: item.price_edit_reason,
           item_discount_type: item.item_discount_type,
           item_discount_value: item.item_discount_value,
@@ -418,17 +495,21 @@ export default function OpenInvoicesView({
           created_at: '',
           updated_at: ''
         };
-        const resolvedProduct =
+        const resolvedOrigPrice =
           item.original_price !== undefined && item.original_price !== null
-            ? { ...prod, selling_price: item.original_price }
-            : prod;
+            ? item.original_price
+            : prod.selling_price;
+        const resolvedProduct = { ...prod, selling_price: resolvedOrigPrice };
+        const hasPriceDiff = Math.abs(resolvedOrigPrice - item.unit_price) > 0.001;
+        const isEdited = Boolean(item.is_price_edited || hasPriceDiff);
         return {
           product: resolvedProduct,
           quantity: item.quantity,
           notes: item.notes || '',
           kitchen_notes: '',
-          custom_price: item.is_price_edited ? item.unit_price : undefined,
-          is_price_edited: item.is_price_edited,
+          original_price: resolvedOrigPrice,
+          custom_price: isEdited ? item.unit_price : undefined,
+          is_price_edited: isEdited,
           price_edit_reason: item.price_edit_reason,
           item_discount_type: item.item_discount_type,
           item_discount_value: item.item_discount_value,
@@ -1055,7 +1136,16 @@ export default function OpenInvoicesView({
                   </div>
                 ) : (
                   sortedAndFilteredInvoices.map(inv => {
-                    const totalItems = getInvoiceItemsCount(inv.id);
+                    const cardItems = dbService.getInvoiceItems(inv.id);
+                    const totalItems = cardItems.reduce((sum, it) => sum + it.quantity, 0);
+                    const hasEditedPriceItem = cardItems.some(it =>
+                      Boolean(
+                        it.is_price_edited ||
+                        (it.original_price !== undefined &&
+                          it.original_price !== null &&
+                          Math.abs(it.original_price - it.unit_price) > 0.001)
+                      )
+                    );
                     const opStatus = inv.operational_status || 'NEW';
                     return (
                       <div
@@ -1095,6 +1185,12 @@ export default function OpenInvoicesView({
                                 {opStatus === 'READY' && '🔔 جاهز للاستلام'}
                                 {opStatus === 'DELIVERED' && '🚶 تم التسليم للعميل'}
                               </span>
+
+                              {hasEditedPriceItem && (
+                                <span className="text-[8px] font-extrabold px-2 py-0.5 rounded-md border bg-amber-500/15 text-amber-300 border-amber-500/40">
+                                  🏷️ أسعار معدلة
+                                </span>
+                              )}
                             </div>
                             
                             <div className="mt-2 space-y-1 text-[10px] text-gray-400">
@@ -1124,7 +1220,10 @@ export default function OpenInvoicesView({
                             <span className="text-sm font-black text-gold-500 font-mono">
                               {inv.total} <span className="text-[10px] font-bold">{settings.currency}</span>
                             </span>
-                            <div className="mt-2 text-left text-[9px] text-gray-500 space-y-0.5">
+                            <span className="text-[9px] text-gray-500 font-bold mt-0.5">
+                              {totalItems} صنف
+                            </span>
+                            <div className="mt-1.5 text-left text-[9px] text-gray-500 space-y-0.5">
                               <p className="flex items-center gap-1 justify-end">
                                 <Clock className="w-3 h-3 text-gold-500" />
                                 <span>مفتوح منذ: {formatDateTime(inv.created_at)}</span>
@@ -1137,6 +1236,47 @@ export default function OpenInvoicesView({
                             </div>
                           </div>
                         </div>
+
+                        {/* Compact Items Summary inside Card (shows edited custom prices directly) */}
+                        {cardItems.length > 0 && (
+                          <div className="mb-2.5 bg-black/35 border border-gray-900/70 rounded-xl p-2 space-y-1">
+                            {cardItems.slice(0, 4).map((it) => {
+                              const hasDiff =
+                                it.original_price !== undefined &&
+                                it.original_price !== null &&
+                                Math.abs(it.original_price - it.unit_price) > 0.001;
+                              const isItEdited = Boolean(it.is_price_edited || hasDiff);
+                              return (
+                                <div key={it.id} className="flex items-center justify-between gap-2 text-[10px]">
+                                  <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                                    <span className="text-gray-200 font-bold truncate">{it.product_name_ar}</span>
+                                    <span className="text-gray-500 font-mono">×{it.quantity}</span>
+                                    {isItEdited && (
+                                      <span className="text-[8px] px-1.5 py-0.2 rounded bg-amber-500/15 border border-amber-500/40 text-amber-300 font-extrabold">
+                                        سعر مخصص
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-1.5 shrink-0 font-mono">
+                                    {isItEdited && hasDiff && (
+                                      <span className="text-[9px] text-gray-600 line-through">
+                                        {it.original_price} {settings.currency}
+                                      </span>
+                                    )}
+                                    <span className={`font-bold ${isItEdited ? 'text-amber-300' : 'text-gray-300'}`}>
+                                      {it.unit_price} {settings.currency}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            {cardItems.length > 4 && (
+                              <p className="text-[9px] text-gray-500 font-bold pt-0.5">
+                                +{cardItems.length - 4} أصناف أخرى (اضغط لفتح التفاصيل)
+                              </p>
+                            )}
+                          </div>
+                        )}
 
                         {/* Card Action Buttons Bar */}
                         <div className="pt-2.5 border-t border-gray-900/40 flex flex-col gap-2">
@@ -1595,7 +1735,15 @@ export default function OpenInvoicesView({
                           </div>
 
                           {!item.is_paid && (
-                            <div className="flex gap-2 justify-end border-t border-gray-900/40 pt-2 mt-1">
+                            <div className="flex flex-wrap gap-1.5 justify-end border-t border-gray-900/40 pt-2 mt-1">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditPriceModal(item)}
+                                className="px-2.5 py-1 bg-amber-500/15 border border-amber-500/40 hover:bg-amber-500/30 text-amber-300 font-extrabold text-[9px] rounded-lg cursor-pointer transition-all flex items-center gap-1"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                تعديل السعر
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => handlePayItemClick(item)}
@@ -3389,10 +3537,11 @@ export default function OpenInvoicesView({
                           {evt.status === 'DELIVERED_TO_CASHIER' && '📥 تم التسليم للكاشير'}
                           {evt.status === 'DELIVERED_TO_CUSTOMER' && '🚶 تم التسليم للعميل'}
                           {evt.status === 'OPEN_INVOICE' && '📋 نقل إلى الفواتير المفتوحة'}
+                          {evt.status === 'PRICE_EDITED' && '🏷️ تعديل سعر صنف بالفاتورة'}
                           {evt.status === 'PAID' && '💰 تم السداد بالكامل وإغلاق الفاتورة'}
                           {evt.status === 'CREDIT' && '📜 تم التحويل لعميل آجل'}
                           {evt.status === 'CANCELLED' && '❌ تم إلغاء الفاتورة'}
-                          {!['CREATED','SENT_TO_BARISTA','PREPARING','PREPARED','DELIVERED_TO_CASHIER','DELIVERED_TO_CUSTOMER','OPEN_INVOICE','PAID','CREDIT','CANCELLED'].includes(evt.status) && evt.status}
+                          {!['CREATED','SENT_TO_BARISTA','PREPARING','PREPARED','DELIVERED_TO_CASHIER','DELIVERED_TO_CUSTOMER','OPEN_INVOICE','PRICE_EDITED','PAID','CREDIT','CANCELLED'].includes(evt.status) && evt.status}
                         </span>
                         <span className="text-[9px] text-gray-500 font-mono">
                           {new Date(evt.timestamp).toLocaleString('ar-EG')}
@@ -3487,6 +3636,119 @@ export default function OpenInvoicesView({
                 type="button"
                 onClick={() => setEditingNotesInvoice(null)}
                 className="px-4 py-2 bg-gray-800 text-gray-300 font-bold text-xs rounded-xl cursor-pointer"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* EDIT ITEM PRICE MODAL (ADMIN PIN PROTECTED)               */}
+      {/* ========================================================= */}
+      {editingPriceItem && selectedInvoice && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-scale-in" dir="rtl">
+          <div className="bg-luxury-card border-2 border-amber-500/40 rounded-3xl p-6 w-full max-w-md shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b border-gray-800 pb-3">
+              <h3 className="text-sm font-black text-amber-400 flex items-center gap-2">
+                <Edit3 className="w-4 h-4" />
+                <span>تعديل سعر صنف في الفاتورة #{selectedInvoice.invoice_number}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingPriceItem(null)}
+                className="text-gray-400 hover:text-white text-xs p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="bg-black/40 border border-gray-800 rounded-2xl p-3 space-y-1 text-xs">
+              <div className="flex justify-between">
+                <span className="text-gray-400">الصنف:</span>
+                <span className="text-white font-black">{editingPriceItem.product_name_ar}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">الكمية:</span>
+                <span className="text-gold-400 font-mono font-bold">{editingPriceItem.quantity}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">السعر الأساسي / الأصلي:</span>
+                <span className="text-gray-300 font-mono">
+                  {(editingPriceItem.original_price ?? editingPriceItem.unit_price)} {settings.currency}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-amber-300 block">
+                  السعر الجديد للوحدة ({settings.currency}):
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={editItemPriceValue}
+                  onChange={(e) => {
+                    setEditItemPriceValue(e.target.value);
+                    setEditItemPriceError('');
+                  }}
+                  className="w-full bg-black/80 border border-amber-500/40 text-white text-sm font-mono font-black rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-gray-400 block">
+                  سبب التعديل (اختياري):
+                </label>
+                <input
+                  type="text"
+                  value={editItemPriceReason}
+                  onChange={(e) => setEditItemPriceReason(e.target.value)}
+                  placeholder="مثال: سعر خاص للعميل / خصم إداري"
+                  className="w-full bg-black/80 border border-gray-800 text-gray-200 text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-red-400 flex items-center gap-1">
+                  <Lock className="w-3.5 h-3.5" />
+                  رمز الأمان PIN للمسؤول:
+                </label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  value={editItemPricePin}
+                  onChange={(e) => {
+                    setEditItemPricePin(e.target.value);
+                    setEditItemPriceError('');
+                  }}
+                  placeholder="أدخل رمز الـ PIN..."
+                  className="w-full bg-black/80 border border-red-500/40 text-white text-sm font-mono rounded-xl px-3 py-2.5 focus:outline-none focus:border-red-400"
+                />
+              </div>
+
+              {editItemPriceError && (
+                <p className="text-xs font-bold text-red-400 bg-red-950/40 border border-red-500/40 rounded-xl px-3 py-2">
+                  ⚠️ {editItemPriceError}
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-gray-800">
+              <button
+                type="button"
+                onClick={handleConfirmEditItemPrice}
+                className="flex-1 py-2.5 bg-gradient-to-r from-amber-500 to-gold-500 hover:from-amber-400 hover:to-gold-400 text-black font-black text-xs rounded-xl shadow-lg cursor-pointer"
+              >
+                اعتماد وحفظ السعر الجديد 🔑
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingPriceItem(null)}
+                className="px-4 py-2.5 bg-gray-800 text-gray-300 font-bold text-xs rounded-xl cursor-pointer"
               >
                 إلغاء
               </button>

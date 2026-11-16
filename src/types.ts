@@ -380,6 +380,7 @@ export interface CartItem {
   quantity: number;
   notes: string;
   kitchen_notes: string;
+  original_price?: number; // base catalog price before custom override
   custom_price?: number; // edited unit price for this item
   is_price_edited?: boolean;
   price_edit_reason?: string;

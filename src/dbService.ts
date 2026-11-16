@@ -379,17 +379,20 @@ const reconcileOpenInvoicesWithVault = (): void => {
 
     let nextItems = [...mainItems];
     if (restoredInvoiceIds.size > 0) {
-      const existingItemIds = new Set(nextItems.map(it => it.id));
-      for (const vItem of vaultItems) {
-        if (!vItem || !restoredInvoiceIds.has(vItem.invoice_id)) continue;
-        const alreadyHasItemsForInv = nextItems.some(it => it.invoice_id === vItem.invoice_id);
-        if (!alreadyHasItemsForInv || !existingItemIds.has(vItem.id)) {
-          if (!existingItemIds.has(vItem.id)) {
+      const vaultHasItemsForInv = new Set(
+        vaultItems.filter(it => it && restoredInvoiceIds.has(it.invoice_id)).map(it => it.invoice_id)
+      );
+      if (vaultHasItemsForInv.size > 0) {
+        nextItems = nextItems.filter(it => !vaultHasItemsForInv.has(it.invoice_id));
+        const seenRestoredIds = new Set(nextItems.map(it => it.id));
+        for (const vItem of vaultItems) {
+          if (!vItem || !vaultHasItemsForInv.has(vItem.invoice_id)) continue;
+          if (!seenRestoredIds.has(vItem.id)) {
             nextItems.push(vItem);
-            existingItemIds.add(vItem.id);
-            itemsChanged = true;
+            seenRestoredIds.add(vItem.id);
           }
         }
+        itemsChanged = true;
       }
     }
 
@@ -1895,7 +1898,12 @@ export const dbService = {
         }
       }
 
+      const origPrice = cartItem.original_price ?? cartItem.product.selling_price;
       const unitPrice = cartItem.custom_price !== undefined ? cartItem.custom_price : cartItem.product.selling_price;
+      const isPriceEdited = Boolean(
+        cartItem.is_price_edited ||
+        (cartItem.custom_price !== undefined && Math.abs(cartItem.custom_price - origPrice) > 0.001)
+      );
       const itemTotalPrice = (unitPrice * cartItem.quantity) - (cartItem.item_discount_amount || 0);
       
       const invoiceItem: InvoiceItem = {
@@ -1909,8 +1917,8 @@ export const dbService = {
         product_name_ar: cartItem.product.name_ar,
         created_at: invoiceDate,
         updated_at: invoiceDate,
-        original_price: cartItem.product.selling_price,
-        is_price_edited: cartItem.is_price_edited,
+        original_price: origPrice,
+        is_price_edited: isPriceEdited,
         price_edit_reason: cartItem.price_edit_reason,
         item_discount_type: cartItem.item_discount_type,
         item_discount_value: cartItem.item_discount_value,
@@ -1921,16 +1929,16 @@ export const dbService = {
       invoiceItemsList.push(invoiceItem);
 
       // Permanently Log Modification actions to ItemModification table
-      if (cartItem.is_price_edited) {
+      if (isPriceEdited) {
         dbService.logItemModification({
           invoice_id: invoiceId,
           invoice_number: invoiceNum,
           type: 'PRICE_CHANGE',
           product_id: cartItem.product.id,
           product_name: cartItem.product.name_ar,
-          original_price: cartItem.product.selling_price,
+          original_price: origPrice,
           new_price: unitPrice,
-          difference: unitPrice - cartItem.product.selling_price,
+          difference: unitPrice - origPrice,
           reason: cartItem.price_edit_reason || 'تعديل سعر يدوي',
           quantity: cartItem.quantity,
           cashier: cashierName
@@ -2290,7 +2298,12 @@ export const dbService = {
     // Save items
     const filteredItems = invoiceItemsList.filter(item => item.invoice_id !== invoiceId);
     const newItems: InvoiceItem[] = cartItems.map((cartItem, idx) => {
+      const origPrice = cartItem.original_price ?? cartItem.product.selling_price;
       const unitPrice = cartItem.custom_price !== undefined ? cartItem.custom_price : cartItem.product.selling_price;
+      const isPriceEdited = Boolean(
+        cartItem.is_price_edited ||
+        (cartItem.custom_price !== undefined && Math.abs(cartItem.custom_price - origPrice) > 0.001)
+      );
       const itemTotalPrice = (unitPrice * cartItem.quantity) - (cartItem.item_discount_amount || 0);
       return {
         id: `item_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}`,
@@ -2304,8 +2317,8 @@ export const dbService = {
         notes: cartItem.notes || '',
         created_at: dateStr,
         updated_at: dateStr,
-        original_price: cartItem.product.selling_price,
-        is_price_edited: cartItem.is_price_edited,
+        original_price: origPrice,
+        is_price_edited: isPriceEdited,
         price_edit_reason: cartItem.price_edit_reason,
         item_discount_type: cartItem.item_discount_type,
         item_discount_value: cartItem.item_discount_value,
@@ -2591,7 +2604,12 @@ export const dbService = {
         }
       }
 
+      const origPrice = cartItem.original_price ?? cartItem.product.selling_price;
       const unitPrice = cartItem.custom_price !== undefined ? cartItem.custom_price : cartItem.product.selling_price;
+      const isPriceEdited = Boolean(
+        cartItem.is_price_edited ||
+        (cartItem.custom_price !== undefined && Math.abs(cartItem.custom_price - origPrice) > 0.001)
+      );
       const itemTotalPrice = (unitPrice * cartItem.quantity) - (cartItem.item_discount_amount || 0);
       
       const invoiceItem: InvoiceItem = {
@@ -2605,8 +2623,8 @@ export const dbService = {
         product_name_ar: cartItem.product.name_ar,
         created_at: dateStr,
         updated_at: dateStr,
-        original_price: cartItem.product.selling_price,
-        is_price_edited: cartItem.is_price_edited,
+        original_price: origPrice,
+        is_price_edited: isPriceEdited,
         price_edit_reason: cartItem.price_edit_reason,
         item_discount_type: cartItem.item_discount_type,
         item_discount_value: cartItem.item_discount_value,
@@ -2616,16 +2634,16 @@ export const dbService = {
       newItems.push(invoiceItem);
       filteredItems.push(invoiceItem);
 
-      if (cartItem.is_price_edited) {
+      if (isPriceEdited) {
         dbService.logItemModification({
           invoice_id: id,
           invoice_number: existingInvoice.invoice_number,
           type: 'PRICE_CHANGE',
           product_id: cartItem.product.id,
           product_name: cartItem.product.name_ar,
-          original_price: cartItem.product.selling_price,
+          original_price: origPrice,
           new_price: unitPrice,
-          difference: unitPrice - cartItem.product.selling_price,
+          difference: unitPrice - origPrice,
           reason: cartItem.price_edit_reason || 'تعديل سعر يدوي',
           quantity: cartItem.quantity,
           cashier: cashierName
@@ -3026,6 +3044,111 @@ export const dbService = {
     return invoice;
   },
 
+  updateOpenInvoiceItemPrice: (
+    invoiceId: string,
+    itemId: string,
+    newUnitPrice: number,
+    operator: string,
+    reason?: string
+  ): { invoice: Invoice; items: InvoiceItem[] } => {
+    const invoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
+    const allItems = getLocal<InvoiceItem[]>(KEYS.INVOICE_ITEMS, []);
+    const products = dbService.getProducts();
+    const dateStr = new Date().toISOString();
+
+    const invIdx = invoices.findIndex(i => i.id === invoiceId);
+    if (invIdx === -1) {
+      throw new Error('الفاتورة غير موجودة!');
+    }
+    const existingInv = invoices[invIdx];
+    if (!isOpenOrDraftStatus(existingInv.invoice_status)) {
+      throw new Error('لا يمكن تعديل السعر بهذه الأداة إلا للفواتير المفتوحة أو المعلقة!');
+    }
+
+    const itemIdx = allItems.findIndex(it => it.id === itemId && it.invoice_id === invoiceId);
+    if (itemIdx === -1) {
+      throw new Error('الصنف غير موجود داخل الفاتورة المحددة!');
+    }
+
+    const targetItem = allItems[itemIdx];
+    const catalogProduct = products.find(p => p.id === targetItem.product_id);
+    const origPrice =
+      targetItem.original_price !== undefined && targetItem.original_price !== null
+        ? targetItem.original_price
+        : catalogProduct?.selling_price ?? targetItem.unit_price;
+    const isPriceEdited = Math.abs(newUnitPrice - origPrice) > 0.001 || true;
+    const newTotalPrice = (newUnitPrice * targetItem.quantity) - (targetItem.item_discount_amount || 0);
+
+    allItems[itemIdx] = {
+      ...targetItem,
+      unit_price: newUnitPrice,
+      total_price: newTotalPrice,
+      original_price: origPrice,
+      is_price_edited: isPriceEdited,
+      price_edit_reason: reason || targetItem.price_edit_reason || 'تعديل سعر من الفواتير المفتوحة بمسؤولية المدير',
+      updated_at: dateStr
+    };
+
+    const invItems = allItems.filter(it => it.invoice_id === invoiceId);
+    const newSubtotal = invItems.reduce((sum, it) => sum + (it.total_price + (it.item_discount_amount || 0)), 0);
+    const totalItemDiscount = invItems.reduce((sum, it) => sum + (it.item_discount_amount || 0), 0);
+    const oldNet = Math.max(1, (existingInv.subtotal || 0) - (existingInv.discount || 0));
+    const effectiveTaxPct = existingInv.tax > 0 && existingInv.subtotal > 0 ? Math.round((existingInv.tax / oldNet) * 100) : 0;
+    const invoiceLevelDiscount = Math.max(0, (existingInv.discount || 0) - totalItemDiscount);
+    const newDiscount = invoiceLevelDiscount + totalItemDiscount;
+    const newTax = Math.round(Math.max(0, newSubtotal - newDiscount) * (effectiveTaxPct / 100));
+    const newTotal = Math.max(0, newSubtotal - newDiscount + newTax);
+
+    const prevTimeline = Array.isArray(existingInv.timeline) ? [...existingInv.timeline] : [];
+    prevTimeline.push({
+      status: 'PRICE_EDITED',
+      timestamp: dateStr,
+      operator,
+      notes: `تعديل سعر "${targetItem.product_name_ar}" من ${targetItem.unit_price} إلى ${newUnitPrice} (السعر الأصلي: ${origPrice})`
+    });
+
+    invoices[invIdx] = {
+      ...existingInv,
+      subtotal: newSubtotal,
+      discount: newDiscount,
+      tax: newTax,
+      total: newTotal,
+      remaining_amount: Math.max(0, newTotal - (existingInv.paid_amount || 0)),
+      updated_at: dateStr,
+      timeline: prevTimeline
+    };
+
+    setLocal(KEYS.INVOICES, invoices);
+    setLocal(KEYS.INVOICE_ITEMS, allItems);
+
+    dbService.logItemModification({
+      invoice_id: invoiceId,
+      invoice_number: existingInv.invoice_number,
+      type: 'PRICE_CHANGE',
+      product_id: targetItem.product_id,
+      product_name: targetItem.product_name_ar,
+      original_price: origPrice,
+      new_price: newUnitPrice,
+      difference: newUnitPrice - origPrice,
+      reason: reason || 'تعديل سعر من شاشة الفواتير المفتوحة',
+      quantity: targetItem.quantity,
+      cashier: operator
+    });
+
+    dbService.logAuditAction(
+      'EDIT_OPEN_INVOICE_ITEM_PRICE',
+      `تعديل سعر الصنف (${targetItem.product_name_ar}) في الفاتورة المفتوحة ${existingInv.invoice_number} من ${targetItem.unit_price} إلى ${newUnitPrice}`,
+      operator
+    );
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('open_invoices_updated', { detail: { invoice: invoices[invIdx] } }));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
+    return { invoice: invoices[invIdx], items: invItems };
+  },
+
   mergeOpenInvoices: (invoiceIds: string[], cashierName: string, targetTable?: string): Invoice => {
     if (invoiceIds.length < 2) {
       throw new Error('يرجى اختيار فاتورتين على الأقل للدمج!');
@@ -3054,6 +3177,14 @@ export const dbService = {
         if (mergedItemsMap[item.product_id]) {
           mergedItemsMap[item.product_id].quantity += item.quantity;
           mergedItemsMap[item.product_id].total_price += item.total_price;
+          if (mergedItemsMap[item.product_id].quantity > 0) {
+            mergedItemsMap[item.product_id].unit_price = Number(
+              (mergedItemsMap[item.product_id].total_price / mergedItemsMap[item.product_id].quantity).toFixed(2)
+            );
+          }
+          if (item.is_price_edited) {
+            mergedItemsMap[item.product_id].is_price_edited = true;
+          }
           mergedItemsMap[item.product_id].updated_at = new Date().toISOString();
         } else {
           mergedItemsMap[item.product_id] = {
