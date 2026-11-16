@@ -755,7 +755,9 @@ export type SafeTransactionType =
   | 'TRANSFER_FROM_DRAWER'  // توريد من درج الكاشير للخزنة
   | 'TRANSFER_TO_PRIVATE'   // ترحيل يدوي من الخزنة الرئيسية للخزنة الخاصة
   | 'AUTO_DAILY_TRANSFER'   // ترحيل الباقي تلقائياً في نهاية اليوم إلى الخزنة الخاصة
-  | 'SHORTAGE_SETTLEMENT';  // إضافة وسداد العجز تلقائياً إلى الحساب
+  | 'SHORTAGE_SETTLEMENT'   // إضافة وسداد العجز تلقائياً إلى الحساب
+  | 'BALANCE_ADJUSTMENT'    // تعديل رصيد الخزنة يدوياً (أدمن فقط)
+  | 'SAFE_RESET';           // تصفير رصيد الخزنة (أدمن فقط)
 
 export interface SafeTransaction {
   id: string;
@@ -764,6 +766,7 @@ export interface SafeTransaction {
   amount: number;
   previous_balance: number;
   new_balance: number;
+  adjustment_delta?: number;
   date: string;       // YYYY-MM-DD
   time: string;       // HH:MM:SS
   operator: string;

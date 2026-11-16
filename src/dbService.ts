@@ -4255,6 +4255,14 @@ export const dbService = {
         case 'AUTO_DAILY_TRANSFER':
           // Outgoing from MAIN_SAFE, incoming into PRIVATE_SAFE
           return tx.safe_type === 'PRIVATE_SAFE' ? acc + amt : acc - amt;
+        case 'BALANCE_ADJUSTMENT':
+        case 'SAFE_RESET': {
+          const delta =
+            typeof tx.adjustment_delta === 'number'
+              ? tx.adjustment_delta
+              : (Number(tx.new_balance) || 0) - (Number(tx.previous_balance) || 0);
+          return acc + delta;
+        }
         default:
           return acc;
       }
@@ -4786,6 +4794,116 @@ export const dbService = {
     }
 
     return { ...res, recordedShortage };
+  },
+
+  adjustSafeBalanceAdmin: async (
+    safeType: SafeType,
+    newBalance: number,
+    adminCredential: string,
+    reason: string,
+    operatorName?: string,
+    mode: 'ADJUST' | 'RESET' = 'ADJUST'
+  ): Promise<{ previousBalance: number; newBalance: number; delta: number; transaction: SafeTransaction }> => {
+    const cu = dbService.getCurrentUser();
+    if (cu && cu.role !== 'Admin') {
+      throw new Error('عذراً! صلاحية تعديل وتصفير أرصدة الخزن متاحة للأدمن فقط.');
+    }
+
+    const isValid = await dbService.verifyAdminActionCredential(adminCredential);
+    if (!isValid) {
+      throw new Error(
+        isAdminSecurityPasswordSet()
+          ? 'كلمة مرور حماية الشاشات الحساسة (Admin Security Password) غير صحيحة!'
+          : 'رمز الأمان PIN للمسؤول غير صحيح!'
+      );
+    }
+
+    const targetBalance = Math.round((Number(newBalance) || 0) * 100) / 100;
+    if (isNaN(targetBalance) || targetBalance < 0) {
+      throw new Error('يرجى إدخال رصيد صحيح لا يقل عن 0 ج.م');
+    }
+
+    const safeLabel = safeType === 'MAIN_SAFE' ? 'الخزنة الرئيسية' : 'الخزنة الخاصة';
+    const prev = dbService.getSafeBalance(safeType);
+    const delta = Math.round((targetBalance - prev) * 100) / 100;
+
+    if (delta === 0) {
+      throw new Error(
+        mode === 'RESET'
+          ? `رصيد ${safeLabel} مصفّر بالفعل (0 ج.م).`
+          : `الرصيد الجديد مطابق للرصيد الحالي في ${safeLabel} (${prev.toLocaleString('ar-EG')} ج.م).`
+      );
+    }
+
+    const op = operatorName || cu?.name || 'أدمن النظام';
+    const cleanReason =
+      reason?.trim() ||
+      (mode === 'RESET'
+        ? `تصفير رصيد ${safeLabel} لتصحيح خطأ حسابي`
+        : `تعديل رصيد ${safeLabel} يدوياً لتصحيح خطأ حسابي`);
+
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = now.toLocaleTimeString('en-US', {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+
+    const txType: SafeTransactionType = mode === 'RESET' ? 'SAFE_RESET' : 'BALANCE_ADJUSTMENT';
+    const tx: SafeTransaction = {
+      id: `safe_adj_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      safe_type: safeType,
+      transaction_type: txType,
+      amount: Math.abs(delta),
+      previous_balance: prev,
+      new_balance: targetBalance,
+      adjustment_delta: delta,
+      date: dateStr,
+      time: timeStr,
+      operator: op,
+      notes: `${mode === 'RESET' ? 'تصفير رصيد الخزنة' : 'تعديل رصيد الخزنة'}: ${cleanReason}`,
+      created_at: now.toISOString()
+    };
+
+    const all = dbService.getSafeTransactions();
+    all.push(tx);
+    setLocal(KEYS.SAFE_TRANSACTIONS, all);
+
+    dbService.logAuditAction(
+      mode === 'RESET' ? 'RESET_SAFE_BALANCE' : 'ADJUST_SAFE_BALANCE',
+      `قام الأدمن (${op}) بـ${mode === 'RESET' ? 'تصفير' : 'تعديل'} رصيد ${safeLabel} من ${prev} ج.م إلى ${targetBalance} ج.م (الفرق: ${delta >= 0 ? `+${delta}` : delta} ج.م). السبب: ${cleanReason}`,
+      op
+    );
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('safe_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
+    return {
+      previousBalance: prev,
+      newBalance: targetBalance,
+      delta,
+      transaction: tx
+    };
+  },
+
+  resetSafeBalanceAdmin: async (
+    safeType: SafeType,
+    adminCredential: string,
+    reason: string,
+    operatorName?: string
+  ) => {
+    return dbService.adjustSafeBalanceAdmin(
+      safeType,
+      0,
+      adminCredential,
+      reason || `تصفير رصيد ${safeType === 'MAIN_SAFE' ? 'الخزنة الرئيسية' : 'الخزنة الخاصة'} إلى 0 ج.م`,
+      operatorName,
+      'RESET'
+    );
   },
 
   // --- End-of-Day Cash Shortage Ledger (خانة العجز اليومية والتسوية التلقائية) ---

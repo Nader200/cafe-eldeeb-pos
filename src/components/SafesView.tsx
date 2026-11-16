@@ -16,13 +16,15 @@ import {
   Coins,
   Sparkles,
   ArrowDownLeft,
-  ArrowUpRight
+  ArrowUpRight,
+  Pencil
 } from 'lucide-react';
 import { dbService } from '../dbService';
 import { AppSettings, DailyShortage, SafeTransaction, SafeType, ShortageTargetAccount } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { isAdminSecurityPasswordSet } from '../lib/securityService';
 import ResetCashDrawerModal from './ResetCashDrawerModal';
+import AdjustSafeBalanceModal from './AdjustSafeBalanceModal';
 
 interface SafesViewProps {
   settings: AppSettings;
@@ -84,6 +86,11 @@ export default function SafesView({
 
   // Reset Drawer Modal
   const [showResetDrawerModal, setShowResetDrawerModal] = useState(false);
+
+  // Adjust / Reset Safe Balance Modal
+  const [showAdjustSafeModal, setShowAdjustSafeModal] = useState(false);
+  const [adjustTargetSafe, setAdjustTargetSafe] = useState<SafeType>('MAIN_SAFE');
+  const [adjustModalMode, setAdjustModalMode] = useState<'ADJUST' | 'RESET'>('ADJUST');
 
   // Ledger Filter
   const [ledgerFilter, setLedgerFilter] = useState<'ALL' | 'MAIN_SAFE' | 'PRIVATE_SAFE' | 'AUTO_DAILY'>('ALL');
@@ -437,6 +444,28 @@ export default function SafesView({
           cls: 'bg-teal-950/60 text-teal-300 border-teal-500/40',
           sign: '+'
         };
+      case 'BALANCE_ADJUSTMENT': {
+        const delta =
+          typeof tx.adjustment_delta === 'number'
+            ? tx.adjustment_delta
+            : (Number(tx.new_balance) || 0) - (Number(tx.previous_balance) || 0);
+        return {
+          label: 'تعديل رصيد الخزنة',
+          cls: 'bg-sky-950/60 text-sky-300 border-sky-500/40',
+          sign: delta >= 0 ? '+' : '-'
+        };
+      }
+      case 'SAFE_RESET': {
+        const delta =
+          typeof tx.adjustment_delta === 'number'
+            ? tx.adjustment_delta
+            : (Number(tx.new_balance) || 0) - (Number(tx.previous_balance) || 0);
+        return {
+          label: 'تصفير رصيد الخزنة',
+          cls: 'bg-red-950/60 text-red-300 border-red-500/40',
+          sign: delta > 0 ? '+' : '-'
+        };
+      }
       default:
         return { label: 'حركة خزنة', cls: 'bg-gray-900 text-gray-300 border-gray-700', sign: '' };
     }
@@ -511,6 +540,32 @@ export default function SafesView({
               مضاف اليوم: <strong className="text-emerald-300 font-mono">{todayMainDeposits.toLocaleString('ar-EG')} ج.م</strong>
             </p>
           </div>
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setAdjustTargetSafe('MAIN_SAFE');
+                setAdjustModalMode('ADJUST');
+                setShowAdjustSafeModal(true);
+              }}
+              className="py-2 px-2.5 bg-emerald-950/50 hover:bg-emerald-600/30 border border-emerald-500/35 text-emerald-300 hover:text-white rounded-xl text-[11px] font-black transition-all cursor-pointer flex items-center justify-center gap-1"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              <span>تعديل الرصيد</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAdjustTargetSafe('MAIN_SAFE');
+                setAdjustModalMode('RESET');
+                setShowAdjustSafeModal(true);
+              }}
+              className="py-2 px-2.5 bg-red-950/40 hover:bg-red-600/90 border border-red-500/30 text-red-300 hover:text-white rounded-xl text-[11px] font-black transition-all cursor-pointer flex items-center justify-center gap-1"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>تصفير (0)</span>
+            </button>
+          </div>
         </div>
 
         {/* Card 3: Private Safe (الخزنة الخاصة) */}
@@ -532,6 +587,32 @@ export default function SafesView({
               إجمالي المرحّل تلقائياً نهاية اليوم:{' '}
               <strong className="text-gold-300 font-mono">{totalAutoTransferredToPrivate.toLocaleString('ar-EG')} ج.م</strong>
             </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setAdjustTargetSafe('PRIVATE_SAFE');
+                setAdjustModalMode('ADJUST');
+                setShowAdjustSafeModal(true);
+              }}
+              className="py-2 px-2.5 bg-gold-500/15 hover:bg-gold-500/30 border border-gold-500/40 text-gold-300 hover:text-white rounded-xl text-[11px] font-black transition-all cursor-pointer flex items-center justify-center gap-1"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              <span>تعديل الرصيد</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAdjustTargetSafe('PRIVATE_SAFE');
+                setAdjustModalMode('RESET');
+                setShowAdjustSafeModal(true);
+              }}
+              className="py-2 px-2.5 bg-red-950/40 hover:bg-red-600/90 border border-red-500/30 text-red-300 hover:text-white rounded-xl text-[11px] font-black transition-all cursor-pointer flex items-center justify-center gap-1"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>تصفير (0)</span>
+            </button>
           </div>
         </div>
 
@@ -1368,6 +1449,17 @@ export default function SafesView({
       <ResetCashDrawerModal
         isOpen={showResetDrawerModal}
         onClose={() => setShowResetDrawerModal(false)}
+        onSuccess={() => refreshAll()}
+        onShowSuccessAlert={onShowSuccessAlert}
+        onShowWarningAlert={onShowWarningAlert}
+      />
+
+      {/* Admin-only Adjust / Reset Safe Balance Modal */}
+      <AdjustSafeBalanceModal
+        isOpen={showAdjustSafeModal}
+        initialSafeType={adjustTargetSafe}
+        initialMode={adjustModalMode}
+        onClose={() => setShowAdjustSafeModal(false)}
         onSuccess={() => refreshAll()}
         onShowSuccessAlert={onShowSuccessAlert}
         onShowWarningAlert={onShowWarningAlert}
