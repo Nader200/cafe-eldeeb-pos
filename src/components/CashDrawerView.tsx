@@ -18,12 +18,14 @@ import {
   ShieldAlert,
   Printer,
   RotateCcw,
-  ShieldCheck
+  ShieldCheck,
+  ArrowLeftRight
 } from 'lucide-react';
 import { dbService } from '../dbService';
 import { getEldeebLogoDataUrl } from '../lib/logoSvg';
 import { AppSettings, CashDrawer, CashMovement } from '../types';
 import { useAuth } from '../contexts/AuthContext';
+import { isAdminSecurityPasswordSet } from '../lib/securityService';
 import ResetCashDrawerModal from './ResetCashDrawerModal';
 import SafesView from './SafesView';
 
@@ -60,11 +62,12 @@ export default function CashDrawerView({
   const [openingPin, setOpeningPin] = useState<string>('');
 
   // Form states: Cash Adjustment
-  const [adjType, setAdjType] = useState<'ADD' | 'WITHDRAW'>('ADD');
+  const [adjType, setAdjType] = useState<'ADD' | 'WITHDRAW' | 'FROM_PRIVATE_SAFE'>('ADD');
   const [adjAmount, setAdjAmount] = useState<number>(0);
   const [adjReason, setAdjReason] = useState<string>('');
   const [adjNotes, setAdjNotes] = useState<string>('');
   const [adjPin, setAdjPin] = useState<string>('');
+  const [privateSafeBalance, setPrivateSafeBalance] = useState<number>(() => dbService.getSafeBalance('PRIVATE_SAFE'));
 
   // Form states: End of Day Count
   const [actualCash, setActualCash] = useState<number>(0);
@@ -81,14 +84,19 @@ export default function CashDrawerView({
   const refreshData = () => {
     setActiveDrawer(dbService.getActiveDrawer());
     setHistory(dbService.getCashHistory());
+    setPrivateSafeBalance(dbService.getSafeBalance('PRIVATE_SAFE'));
   };
 
   useEffect(() => {
     refreshData();
     const handleSync = () => refreshData();
+    window.addEventListener('shift_updated', handleSync);
+    window.addEventListener('safe_updated', handleSync);
     window.addEventListener('cafe_db_synced_remote', handleSync);
     window.addEventListener('storage', handleSync);
     return () => {
+      window.removeEventListener('shift_updated', handleSync);
+      window.removeEventListener('safe_updated', handleSync);
       window.removeEventListener('cafe_db_synced_remote', handleSync);
       window.removeEventListener('storage', handleSync);
     };
@@ -123,15 +131,46 @@ export default function CashDrawerView({
     }
   };
 
-  const handleAdjustCashSubmit = (e: React.FormEvent) => {
+  const handleAdjustCashSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (adjPin !== settings.pin_code) {
-      onShowWarningAlert('رمز الأمان PIN للمسؤول غير صحيح!');
+    if (adjAmount <= 0) {
+      onShowWarningAlert('يرجى إدخال مبلغ صحيح أكبر من صفر');
       return;
     }
 
-    if (adjAmount <= 0) {
-      onShowWarningAlert('يرجى إدخال مبلغ صحيح أكبر من صفر');
+    if (adjType === 'FROM_PRIVATE_SAFE') {
+      const valid = await dbService.verifyAdminActionCredential(adjPin);
+      if (!valid) {
+        onShowWarningAlert(
+          isAdminSecurityPasswordSet()
+            ? 'كلمة مرور حماية الشاشات الحساسة غير صحيحة!'
+            : 'رمز الأمان PIN للمسؤول غير صحيح!'
+        );
+        return;
+      }
+      try {
+        const noteText = [adjReason.trim(), adjNotes.trim()].filter(Boolean).join(' - ');
+        const res = dbService.transferPrivateSafeToDrawer(
+          adjAmount,
+          currentUser?.name || 'Administrator',
+          noteText || undefined
+        );
+        onShowSuccessAlert(
+          `تم سحب ${adjAmount.toLocaleString('ar-EG')} ج.م من الخزنة الخاصة (الرصيد: ${res.newSafeBalance.toLocaleString('ar-EG')} ج.م) وإضافتها إلى الدرج (الرصيد: ${res.newDrawerBalance.toLocaleString('ar-EG')} ج.م) ✅`
+        );
+        setAdjAmount(0);
+        setAdjReason('');
+        setAdjNotes('');
+        setAdjPin('');
+        refreshData();
+      } catch (err: any) {
+        onShowWarningAlert(err.message || 'تعذر السحب من الخزنة الخاصة إلى الدرج');
+      }
+      return;
+    }
+
+    if (adjPin !== settings.pin_code) {
+      onShowWarningAlert('رمز الأمان PIN للمسؤول غير صحيح!');
       return;
     }
 
@@ -536,31 +575,45 @@ export default function CashDrawerView({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs text-gray-400 font-bold block mb-1.5">نوع التسوية النقدية *</label>
-                  <div className="grid grid-cols-2 gap-1.5 bg-luxury-bg border border-gray-800 p-1 rounded-xl">
+                  <div className={`grid ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5 bg-luxury-bg border border-gray-800 p-1 rounded-xl`}>
                     <button
                       type="button"
                       onClick={() => setAdjType('ADD')}
-                      className={`py-2 text-xs font-bold rounded-lg transition-all ${
+                      className={`py-2 px-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
                         adjType === 'ADD'
                           ? 'bg-green-600 text-white shadow'
                           : 'text-gray-400 hover:text-white'
                       }`}
                     >
-                      <Plus className="w-3.5 h-3.5 inline mr-1" />
-                      إيداع وتوريد نقدية
+                      <Plus className="w-3.5 h-3.5 inline ml-0.5" />
+                      إيداع نقدية
                     </button>
                     <button
                       type="button"
                       onClick={() => setAdjType('WITHDRAW')}
-                      className={`py-2 text-xs font-bold rounded-lg transition-all ${
+                      className={`py-2 px-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
                         adjType === 'WITHDRAW'
                           ? 'bg-red-600 text-white shadow'
                           : 'text-gray-400 hover:text-white'
                       }`}
                     >
-                      <Minus className="w-3.5 h-3.5 inline mr-1" />
-                      سحب نقدية ومسحوبات
+                      <Minus className="w-3.5 h-3.5 inline ml-0.5" />
+                      سحب نقدية
                     </button>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => setAdjType('FROM_PRIVATE_SAFE')}
+                        className={`py-2 px-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
+                          adjType === 'FROM_PRIVATE_SAFE'
+                            ? 'bg-emerald-500 text-black font-black shadow'
+                            : 'text-gold-400 hover:text-white'
+                        }`}
+                      >
+                        <ArrowLeftRight className="w-3.5 h-3.5 inline ml-0.5" />
+                        من الخزنة الخاصة
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -579,13 +632,46 @@ export default function CashDrawerView({
                 </div>
               </div>
 
+              {adjType === 'FROM_PRIVATE_SAFE' && (
+                <div className="bg-black/60 border border-emerald-500/30 rounded-2xl p-3 grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <span className="text-[10px] text-gray-400 block">رصيد الخزنة الخاصة:</span>
+                    <span className="font-mono font-black text-gold-400">
+                      {privateSafeBalance.toLocaleString('ar-EG')} ج.م
+                      {adjAmount > 0 && (
+                        <span className={`block text-[11px] ${privateSafeBalance - adjAmount < 0 ? 'text-red-400' : 'text-amber-300'}`}>
+                          ← {(Math.round((privateSafeBalance - adjAmount) * 100) / 100).toLocaleString('ar-EG')} ج.م
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-gray-400 block">رصيد الدرج المتوقع:</span>
+                    <span className="font-mono font-black text-emerald-400">
+                      {expectedCash.toLocaleString('ar-EG')} ج.م
+                      {adjAmount > 0 && (
+                        <span className="block text-[11px] text-emerald-300">
+                          ← {(Math.round((expectedCash + adjAmount) * 100) / 100).toLocaleString('ar-EG')} ج.م
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs text-gray-400 font-bold block mb-1.5">سبب وغرض الحركة *</label>
+                  <label className="text-xs text-gray-400 font-bold block mb-1.5">
+                    {adjType === 'FROM_PRIVATE_SAFE' ? 'سبب التحويل (اختياري)' : 'سبب وغرض الحركة *'}
+                  </label>
                   <input
                     type="text"
-                    required
-                    placeholder="مثال: زيادة سلفة، مصروف طوارئ، سحب للمالك..."
+                    required={adjType !== 'FROM_PRIVATE_SAFE'}
+                    placeholder={
+                      adjType === 'FROM_PRIVATE_SAFE'
+                        ? 'مثال: تغذية الدرج / فكة للعمل...'
+                        : 'مثال: زيادة سلفة، مصروف طوارئ، سحب للمالك...'
+                    }
                     value={adjReason}
                     onChange={(e) => setAdjReason(e.target.value)}
                     className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-600 text-right"
@@ -593,10 +679,14 @@ export default function CashDrawerView({
                 </div>
 
                 <div>
-                  <label className="text-xs text-gray-400 font-bold block mb-1.5">رمز مرور المسؤول (PIN) *</label>
+                  <label className="text-xs text-gray-400 font-bold block mb-1.5">
+                    {adjType === 'FROM_PRIVATE_SAFE' && isAdminSecurityPasswordSet()
+                      ? 'كلمة مرور الشاشات الحساسة (Admin) *'
+                      : 'رمز مرور المسؤول (PIN) *'}
+                  </label>
                   <input
                     type="password"
-                    maxLength={10}
+                    maxLength={24}
                     required
                     placeholder="••••"
                     value={adjPin}
@@ -619,9 +709,17 @@ export default function CashDrawerView({
 
               <button
                 type="submit"
-                className={`w-full py-3 ${adjType === 'ADD' ? 'bg-green-600 hover:bg-green-500' : 'bg-red-600 hover:bg-red-500'} text-white font-extrabold text-xs rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5`}
+                className={`w-full py-3 ${
+                  adjType === 'FROM_PRIVATE_SAFE'
+                    ? 'bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-black font-black'
+                    : adjType === 'ADD'
+                    ? 'bg-green-600 hover:bg-green-500 text-white font-extrabold'
+                    : 'bg-red-600 hover:bg-red-500 text-white font-extrabold'
+                } text-xs rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5`}
               >
-                تطبيق الحركة وتحديث الخزينة
+                {adjType === 'FROM_PRIVATE_SAFE'
+                  ? 'سحب من الخزنة الخاصة وإضافة إلى الدرج تلقائياً'
+                  : 'تطبيق الحركة وتحديث الخزينة'}
               </button>
             </form>
           </div>

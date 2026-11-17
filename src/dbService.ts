@@ -4688,6 +4688,90 @@ export const dbService = {
     return tx;
   },
 
+  transferPrivateSafeToDrawer: (
+    amount: number,
+    operator?: string,
+    notes?: string
+  ): {
+    tx: SafeTransaction;
+    previousSafeBalance: number;
+    newSafeBalance: number;
+    previousDrawerBalance: number;
+    newDrawerBalance: number;
+  } => {
+    const cu = dbService.getCurrentUser();
+    if (cu && cu.role !== 'Admin') {
+      throw new Error('السحب من الخزنة الخاصة إلى درج النقدية متاح للأدمن فقط!');
+    }
+    const cleanAmount = Math.round((Number(amount) || 0) * 100) / 100;
+    if (cleanAmount <= 0) {
+      throw new Error('يرجى إدخال مبلغ صحيح أكبر من صفر');
+    }
+
+    const prevSafe = dbService.getSafeBalance('PRIVATE_SAFE');
+    if (cleanAmount > prevSafe) {
+      throw new Error(`رصيد الخزنة الخاصة الحالي (${prevSafe.toLocaleString('ar-EG')} ج.م) غير كافٍ لتحويل هذا المبلغ إلى الدرج!`);
+    }
+
+    const activeDrawer = dbService.getActiveDrawer();
+    const prevDrawer = Math.round((activeDrawer.opening_balance + activeDrawer.cash_in - activeDrawer.cash_out) * 100) / 100;
+
+    const op = operator || cu?.name || 'أدمن النظام';
+    const nextSafe = Math.round((prevSafe - cleanAmount) * 100) / 100;
+    const nextDrawer = Math.round((prevDrawer + cleanAmount) * 100) / 100;
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const cleanNotes = notes?.trim();
+    const safeNote = cleanNotes
+      ? `سحب وتحويل إلى درج النقدية - ${cleanNotes}`
+      : 'سحب من الخزنة الخاصة لتغذية درج النقدية';
+    const drawerNote = cleanNotes
+      ? `تغذية الدرج من الخزنة الخاصة - ${cleanNotes}`
+      : 'تغذية درج النقدية من الخزنة الخاصة';
+
+    const tx: SafeTransaction = {
+      id: `safe_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      safe_type: 'PRIVATE_SAFE',
+      transaction_type: 'TRANSFER_TO_DRAWER',
+      amount: cleanAmount,
+      previous_balance: prevSafe,
+      new_balance: nextSafe,
+      date: dateStr,
+      time: timeStr,
+      operator: op,
+      notes: safeNote,
+      created_at: now.toISOString()
+    };
+
+    const all = dbService.getSafeTransactions();
+    all.push(tx);
+    setLocal(KEYS.SAFE_TRANSACTIONS, all);
+
+    // Add cash directly into active Drawer and update Cash History & Active Shift metrics
+    dbService.logCashMovement(cleanAmount, 0, drawerNote, 'CASH_ADJUSTMENT_ADD', op, drawerNote);
+
+    dbService.logAuditAction(
+      'TRANSFER_PRIVATE_SAFE_TO_DRAWER',
+      `سحب ${cleanAmount} ج.م من الخزنة الخاصة إلى درج النقدية بواسطة ${op} (الخزنة الخاصة: ${prevSafe} ← ${nextSafe} ج.م | الدرج: ${prevDrawer} ← ${nextDrawer} ج.م)`,
+      op
+    );
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shift_updated'));
+      window.dispatchEvent(new CustomEvent('safe_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
+    return {
+      tx,
+      previousSafeBalance: prevSafe,
+      newSafeBalance: nextSafe,
+      previousDrawerBalance: prevDrawer,
+      newDrawerBalance: nextDrawer
+    };
+  },
+
   transferDrawerToMainSafe: (
     amount: number,
     operator?: string,

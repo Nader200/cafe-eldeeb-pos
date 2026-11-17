@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   ShieldCheck,
   Wallet,
@@ -16,7 +16,8 @@ import {
   Pencil,
   Home,
   Users,
-  Trash2
+  Trash2,
+  ArrowLeftRight
 } from 'lucide-react';
 import { dbService } from '../dbService';
 import { AppSettings, DailyShortage, SafeTransaction, SafeType, ShortageTargetAccount } from '../types';
@@ -76,7 +77,9 @@ export default function SafesView({
   const [gamiaWithdrawCred, setGamiaWithdrawCred] = useState<string>('');
   const [showGamiaCred, setShowGamiaCred] = useState<boolean>(false);
 
-  // Private Safe Withdrawal form
+  // Private Safe Withdrawal / Transfer to Drawer form
+  const privPanelRef = useRef<HTMLDivElement>(null);
+  const [privWithdrawMode, setPrivWithdrawMode] = useState<'TO_DRAWER' | 'EXTERNAL'>('TO_DRAWER');
   const [privWithdrawAmount, setPrivWithdrawAmount] = useState<string>('');
   const [privWithdrawNotes, setPrivWithdrawNotes] = useState<string>('');
   const [privWithdrawCred, setPrivWithdrawCred] = useState<string>('');
@@ -310,19 +313,30 @@ export default function SafesView({
       return;
     }
     try {
-      dbService.withdrawFromSafe(
-        'PRIVATE_SAFE',
-        amt,
-        currentUser?.name || 'أدمن النظام',
-        privWithdrawNotes || 'سحب إداري من الخزنة الخاصة'
-      );
-      onShowSuccessAlert(`تم سحب ${amt.toLocaleString('ar-EG')} ج.م من الخزنة الخاصة بنجاح ✅`);
+      if (privWithdrawMode === 'TO_DRAWER') {
+        const res = dbService.transferPrivateSafeToDrawer(
+          amt,
+          currentUser?.name || 'أدمن النظام',
+          privWithdrawNotes || undefined
+        );
+        onShowSuccessAlert(
+          `تم سحب ${amt.toLocaleString('ar-EG')} ج.م من الخزنة الخاصة (الرصيد: ${res.newSafeBalance.toLocaleString('ar-EG')} ج.م) وإضافتها تلقائياً إلى درج النقدية (الرصيد: ${res.newDrawerBalance.toLocaleString('ar-EG')} ج.م) ✅`
+        );
+      } else {
+        dbService.withdrawFromSafe(
+          'PRIVATE_SAFE',
+          amt,
+          currentUser?.name || 'أدمن النظام',
+          privWithdrawNotes || 'سحب إداري من الخزنة الخاصة'
+        );
+        onShowSuccessAlert(`تم سحب ${amt.toLocaleString('ar-EG')} ج.م من الخزنة الخاصة بنجاح ✅`);
+      }
       setPrivWithdrawAmount('');
       setPrivWithdrawNotes('');
       setPrivWithdrawCred('');
       refreshAll();
     } catch (err: any) {
-      onShowWarningAlert(err?.message || 'تعذر السحب من الخزنة الخاصة');
+      onShowWarningAlert(err?.message || 'تعذر تنفيذ العملية من الخزنة الخاصة');
     }
   };
 
@@ -605,31 +619,44 @@ export default function SafesView({
               <strong className="text-gold-300 font-mono">{totalAutoTransferredToPrivate.toLocaleString('ar-EG')} ج.م</strong>
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-2 pt-1">
+          <div className="space-y-2 pt-1">
             <button
               type="button"
               onClick={() => {
-                setAdjustTargetSafe('PRIVATE_SAFE');
-                setAdjustModalMode('ADJUST');
-                setShowAdjustSafeModal(true);
+                setPrivWithdrawMode('TO_DRAWER');
+                privPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
               }}
-              className="py-2 px-2.5 bg-gold-500/15 hover:bg-gold-500/30 border border-gold-500/40 text-gold-300 hover:text-white rounded-xl text-[11px] font-black transition-all cursor-pointer flex items-center justify-center gap-1"
+              className="w-full py-2 px-2.5 bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/40 text-emerald-300 hover:text-white rounded-xl text-[11px] font-black transition-all cursor-pointer flex items-center justify-center gap-1.5"
             >
-              <Pencil className="w-3.5 h-3.5" />
-              <span>تعديل الرصيد</span>
+              <ArrowLeftRight className="w-3.5 h-3.5" />
+              <span>سحب من الخزنة إلى الدرج</span>
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAdjustTargetSafe('PRIVATE_SAFE');
-                setAdjustModalMode('RESET');
-                setShowAdjustSafeModal(true);
-              }}
-              className="py-2 px-2.5 bg-red-950/40 hover:bg-red-600/90 border border-red-500/30 text-red-300 hover:text-white rounded-xl text-[11px] font-black transition-all cursor-pointer flex items-center justify-center gap-1"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>تصفير (0)</span>
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setAdjustTargetSafe('PRIVATE_SAFE');
+                  setAdjustModalMode('ADJUST');
+                  setShowAdjustSafeModal(true);
+                }}
+                className="py-2 px-2.5 bg-gold-500/15 hover:bg-gold-500/30 border border-gold-500/40 text-gold-300 hover:text-white rounded-xl text-[11px] font-black transition-all cursor-pointer flex items-center justify-center gap-1"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                <span>تعديل الرصيد</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAdjustTargetSafe('PRIVATE_SAFE');
+                  setAdjustModalMode('RESET');
+                  setShowAdjustSafeModal(true);
+                }}
+                className="py-2 px-2.5 bg-red-950/40 hover:bg-red-600/90 border border-red-500/30 text-red-300 hover:text-white rounded-xl text-[11px] font-black transition-all cursor-pointer flex items-center justify-center gap-1"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>تصفير (0)</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1122,20 +1149,113 @@ export default function SafesView({
             </button>
           </div>
 
-          {/* 2B: Withdraw from Private Safe (Admin Only) */}
-          <div className="bg-luxury-card border border-luxury-border rounded-3xl p-6 shadow-lg">
-            <h3 className="text-sm font-black text-white mb-1 flex items-center gap-2">
-              <Lock className="w-5 h-5 text-red-400" />
-              سحب من الخزنة الخاصة (للأدمن فقط)
-            </h3>
-            <p className="text-[11px] text-gray-400 mb-4 pb-3 border-b border-gray-900">
-              يُشترط التوثيق بكلمة مرور الأدمن لتسجيل أي سحب نقدي من الخزنة الخاصة
-            </p>
+          {/* 2B: Withdraw / Transfer from Private Safe to Cash Drawer (Admin Only) */}
+          <div
+            ref={privPanelRef}
+            className={`bg-luxury-card border-2 rounded-3xl p-6 shadow-lg space-y-4 ${
+              privWithdrawMode === 'TO_DRAWER' ? 'border-emerald-500/40' : 'border-luxury-border'
+            }`}
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-gray-900 pb-3">
+              <div>
+                <h3 className="text-sm font-black text-white flex items-center gap-2">
+                  {privWithdrawMode === 'TO_DRAWER' ? (
+                    <ArrowLeftRight className="w-5 h-5 text-emerald-400" />
+                  ) : (
+                    <Lock className="w-5 h-5 text-red-400" />
+                  )}
+                  <span>
+                    {privWithdrawMode === 'TO_DRAWER'
+                      ? 'سحب من الخزنة الخاصة إلى درج النقدية'
+                      : 'سحب إداري خارجي من الخزنة الخاصة'}
+                  </span>
+                </h3>
+                <p className="text-[11px] text-gray-400 mt-0.5">
+                  {privWithdrawMode === 'TO_DRAWER'
+                    ? 'يتم خصم المبلغ من الخزنة الخاصة وإضافته تلقائياً إلى درج النقدية وحساب الوردية'
+                    : 'يُشترط التوثيق بكلمة مرور الأدمن لتسجيل أي سحب نقدي خارجي من الخزنة الخاصة'}
+                </p>
+              </div>
+
+              <div className="flex gap-1.5 bg-black/50 p-1 rounded-xl border border-gray-800 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setPrivWithdrawMode('TO_DRAWER')}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-black cursor-pointer transition-all ${
+                    privWithdrawMode === 'TO_DRAWER' ? 'bg-emerald-500 text-black' : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  تحويل للدرج
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrivWithdrawMode('EXTERNAL')}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-black cursor-pointer transition-all ${
+                    privWithdrawMode === 'EXTERNAL' ? 'bg-red-600 text-white' : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  سحب خارجي
+                </button>
+              </div>
+            </div>
 
             <form onSubmit={handlePrivateWithdrawSubmit} className="space-y-3.5">
+              {privWithdrawMode === 'TO_DRAWER' && (
+                <>
+                  {/* Quick Preset Amounts */}
+                  <div className="flex flex-wrap gap-2">
+                    {[100, 200, 500, 1000, 2000].map(preset => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setPrivWithdrawAmount(String(preset))}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-950/40 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs font-mono font-bold cursor-pointer transition-all"
+                      >
+                        {preset.toLocaleString('ar-EG')} ج
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Live Balance Impact Preview */}
+                  {(() => {
+                    const amt = parseFloat(privWithdrawAmount) || 0;
+                    const safeAfter = Math.round((privateSafeBalance - amt) * 100) / 100;
+                    const drawerAfter = Math.round((drawerBalance + amt) * 100) / 100;
+                    return (
+                      <div className="bg-black/60 border border-emerald-500/25 rounded-2xl p-3 grid grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <span className="text-[10px] text-gray-400 block">الخزنة الخاصة:</span>
+                          <div className="font-mono font-black text-gold-400">
+                            {privateSafeBalance.toLocaleString('ar-EG')} ج.م
+                            {amt > 0 && (
+                              <span className={`block text-[11px] ${safeAfter < 0 ? 'text-red-400' : 'text-amber-300'}`}>
+                                ← {safeAfter.toLocaleString('ar-EG')} ج.م
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-gray-400 block">درج النقدية المفتوح:</span>
+                          <div className="font-mono font-black text-emerald-400">
+                            {drawerBalance.toLocaleString('ar-EG')} ج.م
+                            {amt > 0 && (
+                              <span className="block text-[11px] text-emerald-300">
+                                ← {drawerAfter.toLocaleString('ar-EG')} ج.م
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-gray-300 mb-1.5">المبلغ المسحوب (ج.م) *</label>
+                  <label className="block text-xs font-bold text-gray-300 mb-1.5">
+                    {privWithdrawMode === 'TO_DRAWER' ? 'المبلغ المحوّل إلى الدرج (ج.م) *' : 'المبلغ المسحوب (ج.م) *'}
+                  </label>
                   <input
                     type="number"
                     min="1"
@@ -1144,18 +1264,28 @@ export default function SafesView({
                     value={privWithdrawAmount}
                     onChange={(e) => setPrivWithdrawAmount(e.target.value)}
                     placeholder="0.00"
-                    className="w-full bg-luxury-bg border border-gray-800 focus:border-red-500 text-red-400 rounded-xl py-2.5 px-3 text-base font-black text-center font-mono focus:outline-none"
+                    className={`w-full bg-luxury-bg border border-gray-800 rounded-xl py-2.5 px-3 text-base font-black text-center font-mono focus:outline-none ${
+                      privWithdrawMode === 'TO_DRAWER'
+                        ? 'focus:border-emerald-500 text-emerald-400'
+                        : 'focus:border-red-500 text-red-400'
+                    }`}
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-300 mb-1.5">سبب السحب *</label>
+                  <label className="block text-xs font-bold text-gray-300 mb-1.5">
+                    {privWithdrawMode === 'TO_DRAWER' ? 'بيان / ملاحظات (اختياري)' : 'سبب السحب *'}
+                  </label>
                   <input
                     type="text"
-                    required
+                    required={privWithdrawMode === 'EXTERNAL'}
                     value={privWithdrawNotes}
                     onChange={(e) => setPrivWithdrawNotes(e.target.value)}
-                    placeholder="مثال: تسليم أرباح / إيداع بنكي..."
-                    className="w-full bg-luxury-bg border border-gray-800 focus:border-red-500 text-white rounded-xl py-2.5 px-3 text-xs font-bold focus:outline-none text-right"
+                    placeholder={
+                      privWithdrawMode === 'TO_DRAWER'
+                        ? 'مثال: تغذية درج النقدية / فكة للوردية...'
+                        : 'مثال: تسليم أرباح / إيداع بنكي...'
+                    }
+                    className="w-full bg-luxury-bg border border-gray-800 focus:border-gold-500 text-white rounded-xl py-2.5 px-3 text-xs font-bold focus:outline-none text-right"
                   />
                 </div>
               </div>
@@ -1185,10 +1315,18 @@ export default function SafesView({
 
               <button
                 type="submit"
-                className="w-full py-3 bg-red-950/70 hover:bg-red-600 text-red-200 hover:text-white border border-red-500/40 font-black text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2"
+                className={`w-full py-3 font-black text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-95 ${
+                  privWithdrawMode === 'TO_DRAWER'
+                    ? 'bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-black shadow-lg'
+                    : 'bg-red-950/70 hover:bg-red-600 text-red-200 hover:text-white border border-red-500/40'
+                }`}
               >
-                <Minus className="w-4 h-4" />
-                <span>تأكيد السحب من الخزنة الخاصة</span>
+                {privWithdrawMode === 'TO_DRAWER' ? <ArrowLeftRight className="w-4 h-4" /> : <Minus className="w-4 h-4" />}
+                <span>
+                  {privWithdrawMode === 'TO_DRAWER'
+                    ? 'سحب من الخزنة الخاصة وإضافة إلى درج النقدية'
+                    : 'تأكيد السحب الخارجي من الخزنة الخاصة'}
+                </span>
               </button>
             </form>
           </div>
