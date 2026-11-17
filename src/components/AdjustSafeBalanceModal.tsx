@@ -9,7 +9,8 @@ import {
   X,
   AlertTriangle,
   CheckCircle2,
-  Coins
+  Home,
+  Users
 } from 'lucide-react';
 import { dbService } from '../dbService';
 import { isAdminSecurityPasswordSet } from '../lib/securityService';
@@ -48,21 +49,35 @@ export default function AdjustSafeBalanceModal({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
 
-  const mainSafeBalance = isOpen ? dbService.getSafeBalance('MAIN_SAFE') : 0;
   const privateSafeBalance = isOpen ? dbService.getSafeBalance('PRIVATE_SAFE') : 0;
-  const currentSafeBalance = safeType === 'MAIN_SAFE' ? mainSafeBalance : privateSafeBalance;
-  const safeLabel = safeType === 'MAIN_SAFE' ? 'الخزنة الرئيسية' : 'الخزنة الخاصة';
+  const rentBoxBalance = isOpen ? dbService.getSafeBalance('RENT_BOX') : 0;
+  const gamiaBoxBalance = isOpen ? dbService.getSafeBalance('GAMIA_BOX') : 0;
+
+  const getSafeBalanceByType = (t: SafeType) => {
+    if (t === 'RENT_BOX') return rentBoxBalance;
+    if (t === 'GAMIA_BOX') return gamiaBoxBalance;
+    return privateSafeBalance;
+  };
+  const getSafeLabel = (t: SafeType) => {
+    if (t === 'RENT_BOX') return 'قسم الإيجار';
+    if (t === 'GAMIA_BOX') return 'قسم الجمعية';
+    return 'الخزنة الخاصة';
+  };
+
+  const currentSafeBalance = getSafeBalanceByType(safeType);
+  const safeLabel = getSafeLabel(safeType);
 
   useEffect(() => {
     if (isOpen) {
-      setSafeType(initialSafeType);
+      const normalizedInit: SafeType = initialSafeType === 'MAIN_SAFE' ? 'PRIVATE_SAFE' : initialSafeType;
+      setSafeType(normalizedInit);
       setMode(initialMode);
-      const startBal = dbService.getSafeBalance(initialSafeType);
+      const startBal = dbService.getSafeBalance(normalizedInit);
       setNewBalanceInput(initialMode === 'RESET' ? '0' : String(startBal));
       setReason(
         initialMode === 'RESET'
-          ? 'تصفير رصيد الخزنة لتصحيح خطأ حسابي'
-          : 'تعديل رصيد الخزنة يدوياً لتصحيح خطأ حسابي'
+          ? 'تصفير الرصيد لتصحيح خطأ حسابي'
+          : 'تعديل الرصيد يدوياً لتصحيح خطأ حسابي'
       );
       setCredential('');
       setErrorMsg(null);
@@ -73,7 +88,7 @@ export default function AdjustSafeBalanceModal({
   const handleChangeSafe = (nextSafe: SafeType) => {
     setSafeType(nextSafe);
     setErrorMsg(null);
-    const bal = nextSafe === 'MAIN_SAFE' ? mainSafeBalance : privateSafeBalance;
+    const bal = getSafeBalanceByType(nextSafe);
     if (mode === 'ADJUST') {
       setNewBalanceInput(String(bal));
     } else {
@@ -196,7 +211,7 @@ export default function AdjustSafeBalanceModal({
               </span>
             </h3>
             <p className="text-[11px] text-gray-400 mt-0.5">
-              تصحيح أو تصفير أرصدة الخزنة الرئيسية والخزنة الخاصة عند وجود خطأ
+              تصحيح أو تصفير أرصدة الخزنة الخاصة وقسم الإيجار وقسم الجمعية عند وجود خطأ
             </p>
           </div>
         </div>
@@ -208,33 +223,45 @@ export default function AdjustSafeBalanceModal({
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Safe Selector */}
+            {/* Safe / Box Selector */}
             <div>
-              <label className="block text-[11px] font-bold text-gray-400 mb-1.5">اختر الخزنة:</label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleChangeSafe('MAIN_SAFE')}
-                  className={`py-2.5 px-3 rounded-xl text-xs font-black border transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                    safeType === 'MAIN_SAFE'
-                      ? 'bg-emerald-600/25 border-emerald-500 text-emerald-300 shadow'
-                      : 'bg-black/40 border-gray-800 text-gray-400 hover:text-white'
-                  }`}
-                >
-                  <Coins className="w-3.5 h-3.5" />
-                  <span>الخزنة الرئيسية</span>
-                </button>
+              <label className="block text-[11px] font-bold text-gray-400 mb-1.5">اختر الخزنة / القسم:</label>
+              <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
                   onClick={() => handleChangeSafe('PRIVATE_SAFE')}
-                  className={`py-2.5 px-3 rounded-xl text-xs font-black border transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  className={`py-2.5 px-2 rounded-xl text-[11px] font-black border transition-all cursor-pointer flex items-center justify-center gap-1 ${
                     safeType === 'PRIVATE_SAFE'
                       ? 'bg-gold-500/20 border-gold-500 text-gold-300 shadow'
                       : 'bg-black/40 border-gray-800 text-gray-400 hover:text-white'
                   }`}
                 >
-                  <Lock className="w-3.5 h-3.5" />
+                  <Lock className="w-3.5 h-3.5 shrink-0" />
                   <span>الخزنة الخاصة</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleChangeSafe('RENT_BOX')}
+                  className={`py-2.5 px-2 rounded-xl text-[11px] font-black border transition-all cursor-pointer flex items-center justify-center gap-1 ${
+                    safeType === 'RENT_BOX'
+                      ? 'bg-sky-600/25 border-sky-500 text-sky-300 shadow'
+                      : 'bg-black/40 border-gray-800 text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <Home className="w-3.5 h-3.5 shrink-0" />
+                  <span>قسم الإيجار</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleChangeSafe('GAMIA_BOX')}
+                  className={`py-2.5 px-2 rounded-xl text-[11px] font-black border transition-all cursor-pointer flex items-center justify-center gap-1 ${
+                    safeType === 'GAMIA_BOX'
+                      ? 'bg-purple-600/25 border-purple-500 text-purple-300 shadow'
+                      : 'bg-black/40 border-gray-800 text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5 shrink-0" />
+                  <span>قسم الجمعية</span>
                 </button>
               </div>
             </div>

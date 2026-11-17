@@ -745,16 +745,16 @@ export interface ShiftHandover {
   created_at: string;
 }
 
-// Two-Safe Treasury System Types (الخزنة الرئيسية والخزنة الخاصة)
-export type SafeType = 'MAIN_SAFE' | 'PRIVATE_SAFE';
+// Treasury System Types (الخزنة الخاصة وقسمي الإيجار والجمعية والعجز)
+export type SafeType = 'PRIVATE_SAFE' | 'RENT_BOX' | 'GAMIA_BOX' | 'MAIN_SAFE';
 
 export type SafeTransactionType =
-  | 'DAILY_DEPOSIT'         // إضافة مبلغ يومي في الخزنة الرئيسية
+  | 'DAILY_DEPOSIT'         // إضافة مبلغ يومي
   | 'DEPOSIT'               // إيداع يدوي
-  | 'WITHDRAWAL'            // سحب من الخزنة (أدمن فقط)
-  | 'TRANSFER_TO_DRAWER'    // تغذية درج الكاشير من الخزنة الرئيسية
-  | 'TRANSFER_FROM_DRAWER'  // توريد من درج الكاشير للخزنة
-  | 'TRANSFER_TO_PRIVATE'   // ترحيل يدوي من الخزنة الرئيسية للخزنة الخاصة
+  | 'WITHDRAWAL'            // سحب / صرف من الخزنة أو القسم (أدمن فقط)
+  | 'TRANSFER_TO_DRAWER'    // تغذية درج الكاشير
+  | 'TRANSFER_FROM_DRAWER'  // توريد من درج الكاشير
+  | 'TRANSFER_TO_PRIVATE'   // ترحيل يدوي للخزنة الخاصة
   | 'AUTO_DAILY_TRANSFER'   // ترحيل الباقي تلقائياً في نهاية اليوم إلى الخزنة الخاصة
   | 'SHORTAGE_SETTLEMENT'   // إضافة وسداد العجز تلقائياً إلى الحساب
   | 'BALANCE_ADJUSTMENT'    // تعديل رصيد الخزنة يدوياً (أدمن فقط)
@@ -778,7 +778,7 @@ export interface SafeTransaction {
 }
 
 // End-of-Day Cash Shortage Ledger (خانة العجز اليومية)
-export type ShortageTargetAccount = 'PRIVATE_SAFE' | 'MAIN_SAFE' | 'DRAWER';
+export type ShortageTargetAccount = 'PRIVATE_SAFE' | 'RENT_BOX' | 'GAMIA_BOX' | 'DRAWER' | 'MAIN_SAFE';
 
 export interface ShortageSettlement {
   id: string;

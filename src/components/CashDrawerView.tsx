@@ -428,7 +428,7 @@ export default function CashDrawerView({
             }`}
           >
             <ShieldCheck className="w-4 h-4" />
-            <span>الخزنة الرئيسية والخاصة</span>
+            <span>الخزنة الخاصة والإيجار والجمعية</span>
           </button>
         )}
       </div>

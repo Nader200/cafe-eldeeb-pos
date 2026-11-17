@@ -100,7 +100,7 @@ const TAB_LABELS: Record<string, string> = {
   expenses: 'المصروفات والنفقات العامة',
   suppliers: 'إدارة الموردين والمشتريات',
   products: 'المنيو وإدارة التصنيفات',
-  safes: 'الخزنة الرئيسية والخزنة الخاصة',
+  safes: 'الخزنة الخاصة والإيجار والجمعية',
 };
 
 const getTabFromPathname = (pathname: string): TabType | null => {
@@ -752,7 +752,7 @@ function AppContent() {
             { id: 'partner_drawings', label: '🤝 مسحوبات الشركاء', icon: <Coins className="w-4 h-4 text-amber-400" /> },
             { id: 'cash_drawer', label: 'إدارة درج النقدية والتسويات', icon: <Wallet className="w-4 h-4" /> },
             ...(currentUser?.role === 'Admin'
-              ? [{ id: 'safes', label: '🔐 الخزنة الرئيسية والخاصة', icon: <ShieldCheck className="w-4 h-4 text-gold-400" /> }]
+              ? [{ id: 'safes', label: '🔐 الخزنة الخاصة والإيجار والجمعية', icon: <ShieldCheck className="w-4 h-4 text-gold-400" /> }]
               : []),
             { id: 'employees', label: '👨‍💼 شؤون الموظفين والرواتب', icon: <Users className="w-4 h-4 text-amber-500" /> },
             { id: 'playstation', label: '🎮 ألعاب صالة البلايستيشن', icon: <Gamepad2 className="w-4 h-4 text-gold-500" /> },
@@ -989,7 +989,7 @@ function AppContent() {
                   activeTab === 'expenses' ? 'المصروفات والنفقات العامة' :
                   activeTab === 'partner_drawings' ? 'مسحوبات الشركاء المحاسبية' :
                   activeTab === 'cash_drawer' ? 'إدارة النقدية والوردية' :
-                  activeTab === 'safes' ? 'الخزنة الرئيسية والخزنة الخاصة' :
+                  activeTab === 'safes' ? 'الخزنة الخاصة والإيجار والجمعية' :
                   activeTab === 'reports' ? 'التقارير والأرباح المالية' :
                   activeTab === 'employees' ? 'شؤون الموظفين والرواتب' :
                   activeTab === 'playstation' ? '🎮 صالات البلايستيشن' :
@@ -1375,7 +1375,8 @@ function AppContent() {
                       className="w-full bg-luxury-bg border border-gray-800 text-white rounded-lg py-1.5 px-2.5 text-[11px] font-bold focus:outline-none"
                     >
                       <option value="PRIVATE_SAFE">الخزنة الخاصة</option>
-                      <option value="MAIN_SAFE">الخزنة الرئيسية</option>
+                      <option value="RENT_BOX">قسم الإيجار</option>
+                      <option value="GAMIA_BOX">قسم الجمعية</option>
                       <option value="DRAWER">درج النقدية</option>
                     </select>
                   </div>
@@ -1385,19 +1386,10 @@ function AppContent() {
               {settings?.safe_auto_transfer_enabled !== false && (
                 <div className="p-3 bg-gold-500/10 border border-gold-500/30 rounded-xl space-y-1 text-[10px]">
                   <span className="font-black text-gold-400 block">🔐 الترحيل التلقائي للخزنة الخاصة بنهاية اليوم:</span>
-                  <div className="flex justify-between text-gray-300">
-                    <span>رصيد الخزنة الرئيسية الحالي:</span>
-                    <span className="font-mono font-bold text-emerald-400">{dbService.getSafeBalance('MAIN_SAFE').toLocaleString('ar-EG')} ج.م</span>
-                  </div>
                   <div className="flex justify-between text-gold-300 font-black pt-1 border-t border-gold-500/20">
-                    <span>سيتم ترحيله تلقائياً للخزنة الخاصة:</span>
+                    <span>سيتم ترحيل باقي الدرج تلقائياً للخزنة الخاصة:</span>
                     <span className="font-mono">
-                      {(() => {
-                        const src = settings?.safe_auto_transfer_source || 'BOTH';
-                        const fromD = (src === 'BOTH' || src === 'DRAWER_ONLY') ? Math.max(0, Number(shiftClosingBalance) || 0) : 0;
-                        const fromM = (src === 'BOTH' || src === 'MAIN_SAFE_ONLY') ? Math.max(0, dbService.getSafeBalance('MAIN_SAFE')) : 0;
-                        return (fromD + fromM).toLocaleString('ar-EG');
-                      })()} ج.م
+                      {Math.max(0, Number(shiftClosingBalance) || 0).toLocaleString('ar-EG')} ج.م
                     </span>
                   </div>
                 </div>

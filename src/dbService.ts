@@ -4360,7 +4360,38 @@ export const dbService = {
     };
   },
 
-  // --- Two-Safe Treasury System (الخزنة الرئيسية والخزنة الخاصة) ---
+  // --- Treasury System (الخزنة الخاصة + قسم الإيجار + قسم الجمعية + العجز) ---
+  getSafeArabicLabel: (safeType: SafeType): string => {
+    switch (safeType) {
+      case 'PRIVATE_SAFE':
+        return 'الخزنة الخاصة';
+      case 'RENT_BOX':
+        return 'قسم الإيجار';
+      case 'GAMIA_BOX':
+        return 'قسم الجمعية';
+      case 'MAIN_SAFE':
+        return 'الخزنة الرئيسية';
+      default:
+        return 'الخزنة';
+    }
+  },
+
+  getShortageAccountArabicLabel: (acc: ShortageTargetAccount): string => {
+    switch (acc) {
+      case 'PRIVATE_SAFE':
+        return 'الخزنة الخاصة';
+      case 'RENT_BOX':
+        return 'قسم الإيجار';
+      case 'GAMIA_BOX':
+        return 'قسم الجمعية';
+      case 'MAIN_SAFE':
+        return 'الخزنة الرئيسية';
+      case 'DRAWER':
+      default:
+        return 'درج النقدية';
+    }
+  },
+
   getSafeTransactions: (safeType?: SafeType): SafeTransaction[] => {
     const list = getLocal<SafeTransaction[]>(KEYS.SAFE_TRANSACTIONS, []);
     if (safeType) {
@@ -4455,6 +4486,87 @@ export const dbService = {
     return tx;
   },
 
+  addBoxDailyDeposit: (
+    safeType: 'RENT_BOX' | 'GAMIA_BOX',
+    amount: number,
+    operator?: string,
+    notes?: string,
+    deductFromDrawer = false
+  ): SafeTransaction => {
+    const cu = dbService.getCurrentUser();
+    const boxLabel = dbService.getSafeArabicLabel(safeType);
+    if (cu && cu.role !== 'Admin') {
+      throw new Error(`إضافة المبلغ اليومي في ${boxLabel} متاح للأدمن فقط!`);
+    }
+    const cleanAmount = Math.round((Number(amount) || 0) * 100) / 100;
+    if (cleanAmount <= 0) {
+      throw new Error('يرجى إدخال مبلغ صحيح أكبر من صفر');
+    }
+
+    const op = operator || cu?.name || 'أدمن النظام';
+    const defaultNote =
+      safeType === 'RENT_BOX'
+        ? 'إضافة المبلغ اليومي لقسم الإيجار'
+        : 'إضافة المبلغ اليومي لقسم الجمعية';
+    const finalNote = notes?.trim() || defaultNote;
+
+    if (deductFromDrawer) {
+      const activeDrawer = dbService.getActiveDrawer();
+      const drawerAvail = Math.round((activeDrawer.opening_balance + activeDrawer.cash_in - activeDrawer.cash_out) * 100) / 100;
+      if (cleanAmount > drawerAvail) {
+        throw new Error(`رصيد الدرج الحالي (${drawerAvail} ج.م) لا يكفي لخصم مبلغ ${boxLabel}!`);
+      }
+      dbService.logCashMovement(
+        0,
+        cleanAmount,
+        `استقطاع يومي لـ${boxLabel}: ${finalNote}`,
+        'CASH_ADJUSTMENT_SUB',
+        op,
+        `استقطاع يومي لـ${boxLabel}: ${finalNote}`
+      );
+    }
+
+    const prev = dbService.getSafeBalance(safeType);
+    const next = Math.round((prev + cleanAmount) * 100) / 100;
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    const tx: SafeTransaction = {
+      id: `safe_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      safe_type: safeType,
+      transaction_type: 'DAILY_DEPOSIT',
+      amount: cleanAmount,
+      previous_balance: prev,
+      new_balance: next,
+      date: dateStr,
+      time: timeStr,
+      operator: op,
+      notes: deductFromDrawer ? `${finalNote} (مخصوم من الدرج)` : finalNote,
+      created_at: now.toISOString()
+    };
+
+    const all = dbService.getSafeTransactions();
+    all.push(tx);
+    setLocal(KEYS.SAFE_TRANSACTIONS, all);
+
+    dbService.logAuditAction(
+      safeType === 'RENT_BOX' ? 'RENT_DAILY_DEPOSIT' : 'GAMIA_DAILY_DEPOSIT',
+      `إضافة مبلغ يومي ${cleanAmount} ج.م في ${boxLabel} بواسطة ${op} (الرصيد الجديد: ${next} ج.م). ${tx.notes}`,
+      op
+    );
+
+    if (typeof window !== 'undefined') {
+      if (deductFromDrawer) {
+        window.dispatchEvent(new CustomEvent('shift_updated'));
+      }
+      window.dispatchEvent(new CustomEvent('safe_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
+    return tx;
+  },
+
   withdrawFromSafe: (
     safeType: SafeType,
     amount: number,
@@ -4470,9 +4582,10 @@ export const dbService = {
       throw new Error('يرجى إدخال مبلغ صحيح أكبر من صفر');
     }
 
+    const safeLabel = dbService.getSafeArabicLabel(safeType);
     const prev = dbService.getSafeBalance(safeType);
     if (cleanAmount > prev) {
-      throw new Error(`رصيد ${safeType === 'MAIN_SAFE' ? 'الخزنة الرئيسية' : 'الخزنة الخاصة'} الحالي (${prev} ج.م) لا يكفي لسحب هذا المبلغ!`);
+      throw new Error(`رصيد ${safeLabel} الحالي (${prev} ج.م) لا يكفي لسحب هذا المبلغ!`);
     }
 
     const op = operator || cu?.name || 'أدمن النظام';
@@ -4491,7 +4604,7 @@ export const dbService = {
       date: dateStr,
       time: timeStr,
       operator: op,
-      notes: notes?.trim() || `سحب نقدية من ${safeType === 'MAIN_SAFE' ? 'الخزنة الرئيسية' : 'الخزنة الخاصة'}`,
+      notes: notes?.trim() || `سحب / صرف نقدية من ${safeLabel}`,
       created_at: now.toISOString()
     };
 
@@ -4501,7 +4614,7 @@ export const dbService = {
 
     dbService.logAuditAction(
       'SAFE_WITHDRAWAL',
-      `سحب مبلغ ${cleanAmount} ج.م من ${safeType === 'MAIN_SAFE' ? 'الخزنة الرئيسية' : 'الخزنة الخاصة'} بواسطة ${op} (المتبقي: ${next} ج.م). السبب: ${tx.notes}`,
+      `سحب مبلغ ${cleanAmount} ج.م من ${safeLabel} بواسطة ${op} (المتبقي: ${next} ج.م). السبب: ${tx.notes}`,
       op
     );
 
@@ -4725,26 +4838,21 @@ export const dbService = {
     }
   ): { drawerTransferred: number; mainSafeTransferred: number; totalTransferred: number } => {
     const op = operator || dbService.getCurrentUser()?.name || 'أدمن النظام';
-    const settings = dbService.getSettings();
-    const source = options?.source || settings.safe_auto_transfer_source || 'BOTH';
-
     const activeDrawer = dbService.getActiveDrawer();
     const drawerRem = typeof options?.drawerClosingAmount === 'number'
       ? Math.max(0, Math.round(options.drawerClosingAmount * 100) / 100)
       : Math.max(0, Math.round((activeDrawer.opening_balance + activeDrawer.cash_in - activeDrawer.cash_out) * 100) / 100);
 
-    const mainSafeRem = Math.max(0, dbService.getSafeBalance('MAIN_SAFE'));
-
     let drawerTransferred = 0;
-    let mainSafeTransferred = 0;
+    const mainSafeTransferred = 0;
 
     const all = dbService.getSafeTransactions();
-    let privRunningBalance = dbService.getSafeBalance('PRIVATE_SAFE');
+    const privRunningBalance = dbService.getSafeBalance('PRIVATE_SAFE');
     const now = new Date();
     const dateStr = now.toISOString().split('T')[0];
     const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-    if ((source === 'BOTH' || source === 'DRAWER_ONLY') && drawerRem > 0) {
+    if (drawerRem > 0) {
       const nextPriv = Math.round((privRunningBalance + drawerRem) * 100) / 100;
       all.push({
         id: `safe_${Date.now()}_d_${Math.random().toString(36).substring(2, 5)}`,
@@ -4762,52 +4870,15 @@ export const dbService = {
           : 'ترحيل تلقائي لباقي الدرج نهاية اليوم إلى الخزنة الخاصة',
         created_at: now.toISOString()
       });
-      privRunningBalance = nextPriv;
       drawerTransferred = drawerRem;
     }
 
-    if ((source === 'BOTH' || source === 'MAIN_SAFE_ONLY') && mainSafeRem > 0) {
-      const nextPriv = Math.round((privRunningBalance + mainSafeRem) * 100) / 100;
-      all.push({
-        id: `safe_${Date.now() + 1}_ms_${Math.random().toString(36).substring(2, 5)}`,
-        safe_type: 'MAIN_SAFE',
-        transaction_type: 'AUTO_DAILY_TRANSFER',
-        amount: mainSafeRem,
-        previous_balance: mainSafeRem,
-        new_balance: 0,
-        date: dateStr,
-        time: timeStr,
-        operator: op,
-        related_safe: 'PRIVATE_SAFE',
-        daily_close_id: options?.dailyCloseId,
-        notes: 'ترحيل تلقائي لباقي الخزنة الرئيسية نهاية اليوم إلى الخزنة الخاصة',
-        created_at: new Date(now.getTime() + 1).toISOString()
-      });
-      all.push({
-        id: `safe_${Date.now() + 2}_ps_${Math.random().toString(36).substring(2, 5)}`,
-        safe_type: 'PRIVATE_SAFE',
-        transaction_type: 'AUTO_DAILY_TRANSFER',
-        amount: mainSafeRem,
-        previous_balance: privRunningBalance,
-        new_balance: nextPriv,
-        date: dateStr,
-        time: timeStr,
-        operator: op,
-        related_safe: 'MAIN_SAFE',
-        daily_close_id: options?.dailyCloseId,
-        notes: 'استلام تلقائي لباقي الخزنة الرئيسية نهاية اليوم',
-        created_at: new Date(now.getTime() + 2).toISOString()
-      });
-      privRunningBalance = nextPriv;
-      mainSafeTransferred = mainSafeRem;
-    }
-
-    const totalTransferred = Math.round((drawerTransferred + mainSafeTransferred) * 100) / 100;
+    const totalTransferred = drawerTransferred;
     if (totalTransferred > 0) {
       setLocal(KEYS.SAFE_TRANSACTIONS, all);
       dbService.logAuditAction(
         'AUTO_EOD_PRIVATE_SAFE_TRANSFER',
-        `ترحيل تلقائي نهاية اليوم إلى الخزنة الخاصة بإجمالي ${totalTransferred} ج.م (من الدرج: ${drawerTransferred} ج.م | من الخزنة الرئيسية: ${mainSafeTransferred} ج.م)`,
+        `ترحيل تلقائي نهاية اليوم من الدرج إلى الخزنة الخاصة بإجمالي ${totalTransferred} ج.م`,
         op
       );
     }
@@ -4954,7 +5025,7 @@ export const dbService = {
       throw new Error('يرجى إدخال رصيد صحيح لا يقل عن 0 ج.م');
     }
 
-    const safeLabel = safeType === 'MAIN_SAFE' ? 'الخزنة الرئيسية' : 'الخزنة الخاصة';
+    const safeLabel = dbService.getSafeArabicLabel(safeType);
     const prev = dbService.getSafeBalance(safeType);
     const delta = Math.round((targetBalance - prev) * 100) / 100;
 
@@ -5031,7 +5102,7 @@ export const dbService = {
       safeType,
       0,
       adminCredential,
-      reason || `تصفير رصيد ${safeType === 'MAIN_SAFE' ? 'الخزنة الرئيسية' : 'الخزنة الخاصة'} إلى 0 ج.م`,
+      reason || `تصفير رصيد ${dbService.getSafeArabicLabel(safeType)} إلى 0 ج.م`,
       operatorName,
       'RESET'
     );
@@ -5101,9 +5172,7 @@ export const dbService = {
 
     dbService.logAuditAction(
       'RECORD_DAILY_SHORTAGE',
-      `تسجيل عجز نهاية اليوم بتاريخ ${dateStr} بقيمة ${calcShortage} ج.م (المتوقع: ${expected} | الفعلي: ${actual}). الحساب المستفيد عند السداد: ${
-        defaultTarget === 'PRIVATE_SAFE' ? 'الخزنة الخاصة' : defaultTarget === 'MAIN_SAFE' ? 'الخزنة الرئيسية' : 'درج النقدية'
-      }`,
+      `تسجيل عجز نهاية اليوم بتاريخ ${dateStr} بقيمة ${calcShortage} ج.م (المتوقع: ${expected} | الفعلي: ${actual}). الحساب المستفيد عند السداد: ${dbService.getShortageAccountArabicLabel(defaultTarget)}`,
       cashier
     );
 
@@ -5151,8 +5220,7 @@ export const dbService = {
     const now = new Date();
     const dateStr = now.toISOString().split('T')[0];
     const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const accountLabel =
-      destAccount === 'PRIVATE_SAFE' ? 'الخزنة الخاصة' : destAccount === 'MAIN_SAFE' ? 'الخزنة الرئيسية' : 'درج النقدية';
+    const accountLabel = dbService.getShortageAccountArabicLabel(destAccount);
     const noteText =
       notes?.trim() || `إضافة وسداد عجز يوم ${shortage.business_date} تلقائياً إلى ${accountLabel}`;
 
@@ -5255,8 +5323,7 @@ export const dbService = {
       const now = new Date();
       const dateStr = now.toISOString().split('T')[0];
       const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      const accountLabel =
-        targetAccount === 'PRIVATE_SAFE' ? 'الخزنة الخاصة' : targetAccount === 'MAIN_SAFE' ? 'الخزنة الرئيسية' : 'درج النقدية';
+      const accountLabel = dbService.getShortageAccountArabicLabel(targetAccount);
       const noteText = notes?.trim() || `إضافة مبلغ عجز / تسوية تلقائية إلى ${accountLabel}`;
 
       if (targetAccount === 'DRAWER') {

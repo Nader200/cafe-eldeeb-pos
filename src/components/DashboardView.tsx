@@ -47,7 +47,8 @@ import {
   ArrowLeftRight,
   RotateCcw,
   ShieldCheck,
-  Lock
+  Lock,
+  Home
 } from 'lucide-react';
 import {
   AreaChart,
@@ -129,8 +130,9 @@ export default function DashboardView({
   const expenses = useMemo(() => dbService.getExpenses(), [tick]);
   const customers = useMemo(() => dbService.getCustomers(), [tick]);
   const cashDrawer = useMemo(() => dbService.getActiveDrawer(), [tick]);
-  const mainSafeBalance = useMemo(() => dbService.getSafeBalance('MAIN_SAFE'), [tick]);
   const privateSafeBalance = useMemo(() => dbService.getSafeBalance('PRIVATE_SAFE'), [tick]);
+  const rentBoxBalance = useMemo(() => dbService.getSafeBalance('RENT_BOX'), [tick]);
+  const gamiaBoxBalance = useMemo(() => dbService.getSafeBalance('GAMIA_BOX'), [tick]);
   const totalPendingShortage = useMemo(() => dbService.getTotalPendingShortage(), [tick]);
   const auditLogs = useMemo(() => {
     const logs = dbService.getAuditLogs ? dbService.getAuditLogs() : [];
@@ -990,7 +992,7 @@ export default function DashboardView({
       </div>
 
       {/* ==================================================
-          3.6. ADMIN-ONLY TWO-SAFE TREASURY WIDGET (الخزنة الرئيسية والخاصة)
+          3.6. ADMIN-ONLY TREASURY WIDGET (الخزنة الخاصة وقسما الإيجار والجمعية والعجز)
           ================================================== */}
       {isAdmin && (
         <div className="w-full max-w-lg mx-auto bg-gradient-to-r from-[#0a0d0a] via-[#0d0c09] to-[#110e06] border border-[#D4AF37]/35 rounded-2xl p-3.5 shadow-lg flex flex-col gap-2.5 select-none">
@@ -1000,8 +1002,8 @@ export default function DashboardView({
                 <ShieldCheck className="w-4 h-4" />
               </div>
               <div>
-                <h4 className="text-[11px] font-black text-white">الخزنة الرئيسية والخزنة الخاصة 🔐</h4>
-                <p className="text-[9px] text-gray-400">ترحيل الباقي تلقائياً بنهاية اليوم</p>
+                <h4 className="text-[11px] font-black text-white">الخزنة الخاصة وقسما الإيجار والجمعية 🔐</h4>
+                <p className="text-[9px] text-gray-400">ترحيل باقي الدرج تلقائياً إلى الخزنة الخاصة بنهاية اليوم</p>
               </div>
             </div>
             <button
@@ -1009,20 +1011,11 @@ export default function DashboardView({
               onClick={() => onNavigate('safes')}
               className="px-3 py-1.5 bg-[#D4AF37] hover:bg-[#FFECA1] text-black rounded-xl text-[10px] font-black cursor-pointer transition-all active:scale-95 shrink-0"
             >
-              إدارة الخزن والمبلغ اليومي
+              إدارة الخزنة والأقسام
             </button>
           </div>
 
-          <div className="grid grid-cols-3 gap-2">
-            <div
-              onClick={() => onNavigate('safes')}
-              className="bg-black/60 border border-emerald-500/30 hover:border-emerald-400 rounded-xl p-2.5 cursor-pointer transition-all"
-            >
-              <span className="text-[9px] font-bold text-emerald-400 block">الخزنة الرئيسية</span>
-              <span className="text-sm font-black font-mono text-white">
-                {mainSafeBalance.toLocaleString('ar-EG')} <span className="text-[10px] text-emerald-400 font-sans">ج.م</span>
-              </span>
-            </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div
               onClick={() => onNavigate('safes')}
               className="bg-black/60 border border-[#D4AF37]/35 hover:border-[#D4AF37] rounded-xl p-2.5 cursor-pointer transition-all"
@@ -1033,6 +1026,30 @@ export default function DashboardView({
               </span>
               <span className="text-sm font-black font-mono text-white">
                 {privateSafeBalance.toLocaleString('ar-EG')} <span className="text-[10px] text-[#D4AF37] font-sans">ج.م</span>
+              </span>
+            </div>
+            <div
+              onClick={() => onNavigate('safes')}
+              className="bg-black/60 border border-sky-500/35 hover:border-sky-400 rounded-xl p-2.5 cursor-pointer transition-all"
+            >
+              <span className="text-[9px] font-bold text-sky-400 flex items-center gap-1">
+                <Home className="w-2.5 h-2.5" />
+                قسم الإيجار
+              </span>
+              <span className="text-sm font-black font-mono text-white">
+                {rentBoxBalance.toLocaleString('ar-EG')} <span className="text-[10px] text-sky-400 font-sans">ج.م</span>
+              </span>
+            </div>
+            <div
+              onClick={() => onNavigate('safes')}
+              className="bg-black/60 border border-purple-500/35 hover:border-purple-400 rounded-xl p-2.5 cursor-pointer transition-all"
+            >
+              <span className="text-[9px] font-bold text-purple-400 flex items-center gap-1">
+                <Users className="w-2.5 h-2.5" />
+                قسم الجمعية
+              </span>
+              <span className="text-sm font-black font-mono text-white">
+                {gamiaBoxBalance.toLocaleString('ar-EG')} <span className="text-[10px] text-purple-400 font-sans">ج.م</span>
               </span>
             </div>
             <div
@@ -1285,7 +1302,7 @@ export default function DashboardView({
                   <span className="text-xs font-black text-white">التحكم بالدرج</span>
                 </button>
 
-                {/* 3.5 الخزنة الرئيسية والخاصة (أدمن فقط) */}
+                {/* 3.5 الخزنة الخاصة والإيجار والجمعية (أدمن فقط) */}
                 {isAdmin && (
                   <button
                     onClick={() => {
@@ -1295,7 +1312,7 @@ export default function DashboardView({
                     className="flex items-center justify-center gap-2 p-3 bg-zinc-950 border border-[#D4AF37]/30 rounded-2xl hover:border-[#D4AF37] transition-all text-center cursor-pointer"
                   >
                     <ShieldCheck className="w-5 h-5 text-[#D4AF37]" />
-                    <span className="text-xs font-black text-[#D4AF37]">الخزن (الرئيسية والخاصة)</span>
+                    <span className="text-xs font-black text-[#D4AF37]">الخزنة الخاصة والإيجار والجمعية</span>
                   </button>
                 )}
 
