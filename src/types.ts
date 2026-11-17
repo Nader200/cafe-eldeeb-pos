@@ -551,6 +551,7 @@ export interface EmployeeTransaction {
   notes: string;
   date: string; // YYYY-MM-DD
   created_at: string;
+  expense_id?: string; // Linked expense ID if deducted from cash drawer
   products?: { product_id: string; product_name_ar: string; quantity: number; selling_price: number; cost_price: number }[];
 }
 

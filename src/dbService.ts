@@ -6831,12 +6831,58 @@ export const dbService = {
     const txs = dbService.getEmployeeTransactions();
     txs.push(tx);
     setLocal(KEYS.EMPLOYEE_TRANSACTIONS, txs);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
   },
-  deleteEmployeeTransaction: (id: string): void => {
+  findLinkedExpenseForEmployeeTx: (tx: EmployeeTransaction): Expense | undefined => {
+    if (tx.type !== 'WAGE_PAYMENT' && tx.type !== 'LOAN') return undefined;
+    const expenses = dbService.getExpenses();
+    if (tx.expense_id) {
+      const exact = expenses.find(e => e.id === tx.expense_id);
+      if (exact) return exact;
+    }
+    const expectedCategory = tx.type === 'WAGE_PAYMENT' ? 'Salaries' : 'Miscellaneous';
+    const candidates = expenses.filter(e =>
+      e.expense_category === expectedCategory &&
+      Math.abs(Number(e.amount) - Number(tx.amount)) < 0.01 &&
+      (e.description || '').includes(tx.employee_name)
+    );
+    if (candidates.length === 0) return undefined;
+    // Prefer exact same date or closest timestamp
+    const txTime = new Date(tx.created_at).getTime();
+    return [...candidates].sort((a, b) => {
+      const aDateMatch = a.expense_date === tx.date ? 0 : 1;
+      const bDateMatch = b.expense_date === tx.date ? 0 : 1;
+      if (aDateMatch !== bDateMatch) return aDateMatch - bDateMatch;
+      const aDiff = Math.abs(new Date(a.created_at).getTime() - txTime);
+      const bDiff = Math.abs(new Date(b.created_at).getTime() - txTime);
+      return aDiff - bDiff;
+    })[0];
+  },
+  deleteEmployeeTransaction: (
+    id: string,
+    reverseLinkedExpense = false
+  ): { deletedTx?: EmployeeTransaction; reversedExpense: boolean } => {
     const txs = dbService.getEmployeeTransactions();
+    const targetTx = txs.find(t => t.id === id);
     const filtered = txs.filter(t => t.id !== id);
     firebaseSyncService.recordDeletion(KEYS.EMPLOYEE_TRANSACTIONS, id);
     setLocal(KEYS.EMPLOYEE_TRANSACTIONS, filtered);
+
+    let reversedExpense = false;
+    if (reverseLinkedExpense && targetTx && (targetTx.type === 'WAGE_PAYMENT' || targetTx.type === 'LOAN')) {
+      const linkedExp = dbService.findLinkedExpenseForEmployeeTx(targetTx);
+      if (linkedExp) {
+        dbService.deleteExpense(linkedExp.id);
+        reversedExpense = true;
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+    return { deletedTx: targetTx, reversedExpense };
   },
 
   recordEmployeeConsumption: (
@@ -6844,7 +6890,8 @@ export const dbService = {
     employeeName: string,
     items: { product: Product; quantity: number; unitPrice?: number; custom_price?: number }[],
     policy: 'FREE' | 'DEDUCT',
-    cashierName: string
+    cashierName: string,
+    customDate?: string
   ): void => {
     let totalCost = 0;
     let totalSellingPrice = 0;
@@ -6853,7 +6900,10 @@ export const dbService = {
     const products = dbService.getProducts();
     const rawMaterialsList = dbService.getRawMaterials();
     const inventoryTransactions = getLocal<InventoryTransaction[]>(KEYS.INVENTORY_TRANSACTIONS, []);
-    const dateStr = new Date().toISOString();
+    const now = new Date();
+    const dateStr = now.toISOString();
+    const localDateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const effectiveDate = customDate && /^\d{4}-\d{2}-\d{2}$/.test(customDate) ? customDate : localDateStr;
 
     items.forEach(item => {
       const prodIdx = products.findIndex(p => p.id === item.product.id);
@@ -6962,7 +7012,7 @@ export const dbService = {
           : (i.custom_price !== undefined && !isNaN(i.custom_price) ? i.custom_price : i.product.selling_price);
         return `${i.product.name_ar} (x${i.quantity} × ${pPrice} ج.م)`;
       }).join(', ')} (${policy === 'FREE' ? 'مشروب مجاني للموظف' : 'خصم من الراتب'})`,
-      date: new Date().toISOString().split('T')[0],
+      date: effectiveDate,
       created_at: dateStr,
       products: consumedProductsList
     };

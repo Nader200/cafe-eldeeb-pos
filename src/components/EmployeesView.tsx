@@ -35,6 +35,19 @@ interface EmployeesViewProps {
   onShowWarningAlert: (msg: string) => void;
 }
 
+const getLocalDateStr = (d: Date = new Date()): string => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getRelativeLocalDateStr = (daysOffset: number): string => {
+  const d = new Date();
+  d.setDate(d.getDate() + daysOffset);
+  return getLocalDateStr(d);
+};
+
 export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }: EmployeesViewProps) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [transactions, setTransactions] = useState<EmployeeTransaction[]>([]);
@@ -61,20 +74,32 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
   const [txType, setTxType] = useState<EmployeeTransaction['type']>('ENTITLEMENT');
   const [txAmount, setTxAmount] = useState<number>(100);
   const [txNotes, setTxNotes] = useState<string>('');
+  const [txDate, setTxDate] = useState<string>(() => getLocalDateStr());
   const [deductFromDrawer, setDeductFromDrawer] = useState<boolean>(true);
 
   // Daily Settlement Modal State
   const [showSettlementModal, setShowSettlementModal] = useState<boolean>(false);
   const [settleEmployee, setSettleEmployee] = useState<Employee | null>(null);
+  const [settleDate, setSettleDate] = useState<string>(() => getLocalDateStr());
   const [includeDailyWage, setIncludeDailyWage] = useState<boolean>(true);
   const [settlePayAmount, setSettlePayAmount] = useState<number>(0);
   const [settleNotes, setSettleNotes] = useState<string>('');
   const [settleDeductDrawer, setSettleDeductDrawer] = useState<boolean>(true);
   const [carryOverRemaining, setCarryOverRemaining] = useState<boolean>(true);
 
+  // Employee Statement & Safe Delete Modal State
+  const [statementEmployee, setStatementEmployee] = useState<Employee | null>(null);
+  const [txToDelete, setTxToDelete] = useState<EmployeeTransaction | null>(null);
+  const [reverseExpenseOnDelete, setReverseExpenseOnDelete] = useState<boolean>(true);
+
+  // Archive Filters
+  const [archiveEmployeeFilter, setArchiveEmployeeFilter] = useState<string>('ALL');
+  const [archiveTypeFilter, setArchiveTypeFilter] = useState<string>('ALL');
+
   // Employee consumption modal states
   const [showConsumptionModal, setShowConsumptionModal] = useState<boolean>(false);
   const [selectedEmpForCons, setSelectedEmpForCons] = useState<Employee | null>(null);
+  const [consDate, setConsDate] = useState<string>(() => getLocalDateStr());
   const [consumptionCart, setConsumptionCart] = useState<{ product: Product; quantity: number; unitPrice: number }[]>([]);
   const [productSearch, setProductSearch] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
@@ -194,6 +219,7 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
 
   const handleOpenEmployeeConsumption = (emp: Employee) => {
     setSelectedEmpForCons(emp);
+    setConsDate(getLocalDateStr());
     setConsumptionCart([]);
     setProductSearch('');
     setSelectedCategory('ALL');
@@ -256,10 +282,11 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
         selectedEmpForCons.name,
         consumptionCart,
         policy,
-        settings.owner_name || 'مدير النظام'
+        settings.owner_name || 'مدير النظام',
+        consDate || getLocalDateStr()
       );
 
-      onShowSuccessAlert(`تم تسجيل استهلاك المنتجات للموظف "${selectedEmpForCons.name}" بنجاح وتحديث المخزن!`);
+      onShowSuccessAlert(`تم تسجيل استهلاك المنتجات للموظف "${selectedEmpForCons.name}" بتاريخ ${consDate || getLocalDateStr()} بنجاح وتحديث المخزن!`);
       setShowConsumptionModal(false);
       loadData();
     } catch (error: any) {
@@ -342,6 +369,7 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
     setTxType(type);
     setTxAmount(type === 'ENTITLEMENT' && selectedEmp ? selectedEmp.daily_wage : 100);
     setTxNotes('');
+    setTxDate(getLocalDateStr());
     setDeductFromDrawer(type === 'WAGE_PAYMENT' || type === 'LOAN');
     setShowTxModal(true);
   };
@@ -370,6 +398,16 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
       }
     }
 
+    let linkedExpenseId: string | undefined;
+    // If it's a paid wage or loan, and we requested deducting from cash drawer
+    if (deductFromDrawer && (txType === 'WAGE_PAYMENT' || txType === 'LOAN')) {
+      const expCategory = txType === 'WAGE_PAYMENT' ? 'Salaries' : 'Miscellaneous';
+      const desc = `${txType === 'WAGE_PAYMENT' ? 'يومية منصرفة للموظف' : 'سلفة نقدية للموظف'}: ${selectedEmp.name} (${txNotes || 'دون ملاحظات'})`;
+      const savedExp = dbService.saveExpense(expCategory, desc, txAmount);
+      linkedExpenseId = savedExp.id;
+    }
+
+    const effectiveDate = txDate || getLocalDateStr();
     const txData: EmployeeTransaction = {
       id: `emp_tx_${Date.now()}`,
       employee_id: txEmployeeId,
@@ -377,35 +415,70 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
       type: txType,
       amount: txAmount,
       notes: txNotes.trim() || getDefaultNotes(txType, selectedEmp.daily_wage),
-      date: new Date().toISOString().split('T')[0],
-      created_at: new Date().toISOString()
+      date: effectiveDate,
+      created_at: new Date().toISOString(),
+      ...(linkedExpenseId ? { expense_id: linkedExpenseId } : {})
     };
 
     dbService.addEmployeeTransaction(txData);
-
-    // If it's a paid wage or loan, and we requested deducting from cash drawer
-    if (deductFromDrawer && (txType === 'WAGE_PAYMENT' || txType === 'LOAN')) {
-      const expCategory = txType === 'WAGE_PAYMENT' ? 'Salaries' : 'Miscellaneous';
-      const desc = `${txType === 'WAGE_PAYMENT' ? 'يومية منصرفة للموظف' : 'سلفة نقدية للموظف'}: ${selectedEmp.name} (${txNotes || 'دون ملاحظات'})`;
-      dbService.saveExpense(expCategory, desc, txAmount);
-    }
 
     onShowSuccessAlert('تم تسجيل المعاملة المالية وحساب رصيد الموظف بنجاح!');
     setShowTxModal(false);
     loadData();
   };
 
-  const handleDeleteTransaction = (id: string, empName: string, amount: number) => {
-    if (confirm(`هل تريد بالتأكيد التراجع عن وحذف هذه المعاملة للموظف "${empName}" بقيمة ${amount} ج.م؟`)) {
-      dbService.deleteEmployeeTransaction(id);
-      onShowSuccessAlert('تم حذف المعاملة المالية وتعديل رصيد الموظف.');
-      loadData();
+  const requestDeleteTransaction = (tx: EmployeeTransaction) => {
+    const linkedExp = dbService.findLinkedExpenseForEmployeeTx(tx);
+    setReverseExpenseOnDelete(Boolean(linkedExp));
+    setTxToDelete(tx);
+  };
+
+  const confirmDeleteTransaction = () => {
+    if (!txToDelete) return;
+    const { reversedExpense } = dbService.deleteEmployeeTransaction(txToDelete.id, reverseExpenseOnDelete);
+    if (reversedExpense) {
+      onShowSuccessAlert(`تم التراجع عن الحركة (${txToDelete.amount} ج.م) وتعديل رصيد "${txToDelete.employee_name}" وإرجاع المبلغ لدرج النقدية بنجاح.`);
+    } else {
+      onShowSuccessAlert(`تم حذف المعاملة المالية (${txToDelete.amount} ج.م) وتعديل رصيد "${txToDelete.employee_name}" بنجاح.`);
+    }
+    setTxToDelete(null);
+    loadData();
+  };
+
+  const handleOpenSettlementModal = (emp: Employee) => {
+    const todayStr = getLocalDateStr();
+    const hasEntitlementToday = transactions.some(
+      t => t.employee_id === emp.id && t.date === todayStr && t.type === 'ENTITLEMENT'
+    );
+    setSettleEmployee(emp);
+    setSettleDate(todayStr);
+    setIncludeDailyWage(!hasEntitlementToday);
+    setCarryOverRemaining(true);
+    setSettleNotes('');
+    setSettleDeductDrawer(true);
+    setShowSettlementModal(true);
+  };
+
+  const handleChangeSettleDate = (nextDate: string) => {
+    setSettleDate(nextDate);
+    if (settleEmployee) {
+      const hasEntitlementForDate = transactions.some(
+        t => t.employee_id === settleEmployee.id && t.date === nextDate && t.type === 'ENTITLEMENT'
+      );
+      setIncludeDailyWage(!hasEntitlementForDate);
     }
   };
 
   const handleSaveSettlement = (e: React.FormEvent) => {
     e.preventDefault();
     if (!settleEmployee) return;
+
+    const effectiveDate = settleDate || getLocalDateStr();
+
+    if (!includeDailyWage && settlePayAmount <= 0 && carryOverRemaining) {
+      onShowWarningAlert('لم يتم تحديد إضافة يومية جديدة ولا صرف مبلغ كاش. اختر إضافة اليومية أو أدخل مبلغ الصرف للحفظ.');
+      return;
+    }
 
     if (settleDeductDrawer && settlePayAmount > 0) {
       const drawer = dbService.getActiveDrawer();
@@ -416,11 +489,10 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
       }
     }
 
-    const dateStr = new Date().toISOString();
-    const todayStr = dateStr.split('T')[0];
+    const nowIso = new Date().toISOString();
     const remainingDifference = Number((settlementBreakdown.rawNet - settlePayAmount).toFixed(2));
 
-    // 1. If checked, add daily wage entitlement
+    // 1. If checked, add daily wage entitlement for the selected work date
     if (includeDailyWage) {
       const entitlementTx: EmployeeTransaction = {
         id: `emp_tx_ent_${Date.now()}`,
@@ -428,19 +500,29 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
         employee_name: settleEmployee.name,
         type: 'ENTITLEMENT',
         amount: settleEmployee.daily_wage,
-        notes: `استحقاق يومية الحضور والعمل لليوم (${settleEmployee.daily_wage} ج.م) - تسوية نهاية اليوم`,
-        date: todayStr,
-        created_at: dateStr
+        notes: `استحقاق يومية عمل بتاريخ ${effectiveDate} (${settleEmployee.daily_wage} ج.م) - تسوية يومية`,
+        date: effectiveDate,
+        created_at: nowIso
       };
       dbService.addEmployeeTransaction(entitlementTx);
     }
 
-    // 2. Add wage payment for the net amount paid
+    // 2. Add wage payment ONLY if cash was actually paid (> 0)
     if (settlePayAmount > 0) {
       const defaultPayNote =
         remainingDifference > 0 && carryOverRemaining
-          ? `صرف جزء من اليومية (${settlePayAmount} ج.م) وترحيل المتبقي (${remainingDifference} ج.م) لليوم التالي`
-          : `صرف صافي مستحقات اليومية (${settlePayAmount} ج.م)`;
+          ? `صرف جزء من اليومية عن يوم ${effectiveDate} (${settlePayAmount} ج.م) وترحيل المتبقي (${remainingDifference} ج.م)`
+          : `صرف صافي مستحقات اليومية عن يوم ${effectiveDate} (${settlePayAmount} ج.م)`;
+
+      let linkedExpenseId: string | undefined;
+      if (settleDeductDrawer) {
+        const desc =
+          remainingDifference > 0 && carryOverRemaining
+            ? `صرف يومية الموظف: ${settleEmployee.name} (${settlePayAmount} ج.م - وترحيل ${remainingDifference} ج.م)`
+            : `صرف صافي يومية الموظف: ${settleEmployee.name} (تسوية يوم ${effectiveDate})`;
+        const savedExp = dbService.saveExpense('Salaries', desc, settlePayAmount);
+        linkedExpenseId = savedExp.id;
+      }
 
       const paymentTx: EmployeeTransaction = {
         id: `emp_tx_pay_${Date.now() + 1}`,
@@ -449,19 +531,11 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
         type: 'WAGE_PAYMENT',
         amount: settlePayAmount,
         notes: settleNotes.trim() || defaultPayNote,
-        date: todayStr,
-        created_at: dateStr
+        date: effectiveDate,
+        created_at: nowIso,
+        ...(linkedExpenseId ? { expense_id: linkedExpenseId } : {})
       };
       dbService.addEmployeeTransaction(paymentTx);
-
-      // Deduct from cash drawer
-      if (settleDeductDrawer) {
-        const desc =
-          remainingDifference > 0 && carryOverRemaining
-            ? `صرف يومية الموظف: ${settleEmployee.name} (${settlePayAmount} ج.م - وترحيل ${remainingDifference} ج.م لليوم التالي)`
-            : `صرف صافي يومية الموظف: ${settleEmployee.name} (صافي اليوم بعد خصم السلف والاستهلاكات)`;
-        dbService.saveExpense('Salaries', desc, settlePayAmount);
-      }
     }
 
     // 3. If user explicitly disabled carry-over and there's a positive remaining amount, close the difference
@@ -472,23 +546,27 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
         employee_name: settleEmployee.name,
         type: 'CUSTOM_DEDUCTION',
         amount: remainingDifference,
-        notes: `إغلاق وتسوية نهائية لفرق اليومية بدون ترحيل لليوم التالي (${remainingDifference} ج.م)`,
-        date: todayStr,
-        created_at: dateStr
+        notes: `إغلاق وتسوية نهائية لفرق اليومية بتاريخ ${effectiveDate} بدون ترحيل (${remainingDifference} ج.م)`,
+        date: effectiveDate,
+        created_at: nowIso
       };
       dbService.addEmployeeTransaction(waiveTx);
     }
 
-    if (remainingDifference > 0 && carryOverRemaining) {
+    if (settlePayAmount === 0 && carryOverRemaining) {
       onShowSuccessAlert(
-        `تم إجراء التسوية اليومية للموظف "${settleEmployee.name}": تم صرف ${settlePayAmount} ج.م وترحيل المتبقي (+${remainingDifference} ج.م) إلى اليوم التالي بنجاح!`
+        `تم حفظ تسوية يوم ${effectiveDate} للموظف "${settleEmployee.name}" بدون صرف كاش، والرصيد المرحل الآن: ${remainingDifference >= 0 ? `+${remainingDifference}` : remainingDifference} ج.م.`
+      );
+    } else if (remainingDifference > 0 && carryOverRemaining) {
+      onShowSuccessAlert(
+        `تم إجراء التسوية للموظف "${settleEmployee.name}": تم صرف ${settlePayAmount} ج.م وترحيل المتبقي (+${remainingDifference} ج.م) بنجاح!`
       );
     } else if (remainingDifference < 0 && carryOverRemaining) {
       onShowSuccessAlert(
-        `تم إجراء التسوية للموظف "${settleEmployee.name}": تم صرف ${settlePayAmount} ج.م وترحيل الزيادة/المديونية (${remainingDifference} ج.م) إلى اليوم التالي.`
+        `تم إجراء التسوية للموظف "${settleEmployee.name}": تم صرف ${settlePayAmount} ج.م والرصيد المتبقي (${remainingDifference} ج.م).`
       );
     } else {
-      onShowSuccessAlert(`تم إجراء التسوية اليومية للموظف "${settleEmployee.name}" وصرف صافي المستحقات بقيمة ${settlePayAmount} ج.م بنجاح!`);
+      onShowSuccessAlert(`تم إجراء تسوية يوم ${effectiveDate} للموظف "${settleEmployee.name}" وصرف صافي المستحقات بقيمة ${settlePayAmount} ج.م بنجاح!`);
     }
     setShowSettlementModal(false);
     loadData();
@@ -564,65 +642,83 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
     return { entitlements, loans, drinks, custom, paid, balance };
   }, [employeeStats]);
 
+  const filteredArchiveTransactions = useMemo(() => {
+    return transactions.filter(t => {
+      const matchEmp = archiveEmployeeFilter === 'ALL' || t.employee_id === archiveEmployeeFilter;
+      const matchType = archiveTypeFilter === 'ALL' || t.type === archiveTypeFilter;
+      return matchEmp && matchType;
+    });
+  }, [transactions, archiveEmployeeFilter, archiveTypeFilter]);
+
   const settlementBreakdown = useMemo(() => {
     if (!settleEmployee) {
       return {
         wage: 0,
-        priorCarried: 0,
-        todayEntitlements: 0,
-        todayPaid: 0,
-        loans: 0,
-        consumption: 0,
-        drinks: 0,
-        custom: 0,
+        selectedDateEntitlements: 0,
+        totalEntitlements: 0,
+        entitlementCount: 0,
+        totalLoans: 0,
+        totalConsumption: 0,
+        totalDrinks: 0,
+        totalCustom: 0,
+        totalPaid: 0,
+        selectedDayDeductions: 0,
+        otherDaysDeductions: 0,
+        currentBalanceBeforeAdd: 0,
         rawNet: 0,
         net: 0
       };
     }
-    const todayStr = new Date().toISOString().split('T')[0];
 
-    // Past days balance (all transactions before todayStr)
-    const pastTxs = transactions.filter(t => t.employee_id === settleEmployee.id && t.date < todayStr);
-    const priorCarried = pastTxs.reduce((sum, t) => {
-      if (t.type === 'ENTITLEMENT') return sum + t.amount;
-      return sum - t.amount;
-    }, 0);
-
-    // Get today's transactions for this employee
-    const todayTxs = transactions.filter(t => t.employee_id === settleEmployee.id && t.date === todayStr);
-
+    const effectiveDate = settleDate || getLocalDateStr();
+    const empTxs = transactions.filter(t => t.employee_id === settleEmployee.id);
     const wage = settleEmployee.daily_wage;
-    const todayEntitlements = todayTxs.filter(t => t.type === 'ENTITLEMENT').reduce((sum, t) => sum + t.amount, 0);
-    const todayPaid = todayTxs.filter(t => t.type === 'WAGE_PAYMENT').reduce((sum, t) => sum + t.amount, 0);
-    const loans = todayTxs.filter(t => t.type === 'LOAN').reduce((sum, t) => sum + t.amount, 0);
-    const consumption = todayTxs.filter(t => t.type === 'CONSUMPTION').reduce((sum, t) => sum + t.amount, 0);
-    const drinks = todayTxs.filter(t => t.type === 'DRINK_DEDUCTION').reduce((sum, t) => sum + t.amount, 0);
-    const custom = todayTxs.filter(t => t.type === 'CUSTOM_DEDUCTION').reduce((sum, t) => sum + t.amount, 0);
 
-    const rawNet =
-      priorCarried +
-      todayEntitlements +
-      (includeDailyWage ? wage : 0) -
-      loans -
-      consumption -
-      drinks -
-      custom -
-      todayPaid;
+    const entitlementTxs = empTxs.filter(t => t.type === 'ENTITLEMENT');
+    const totalEntitlements = entitlementTxs.reduce((sum, t) => sum + t.amount, 0);
+    const selectedDateEntitlements = entitlementTxs
+      .filter(t => t.date === effectiveDate)
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    const totalLoans = empTxs.filter(t => t.type === 'LOAN').reduce((sum, t) => sum + t.amount, 0);
+    const totalConsumption = empTxs.filter(t => t.type === 'CONSUMPTION').reduce((sum, t) => sum + t.amount, 0);
+    const totalDrinks = empTxs.filter(t => t.type === 'DRINK_DEDUCTION').reduce((sum, t) => sum + t.amount, 0);
+    const totalCustom = empTxs.filter(t => t.type === 'CUSTOM_DEDUCTION').reduce((sum, t) => sum + t.amount, 0);
+    const totalPaid = empTxs.filter(t => t.type === 'WAGE_PAYMENT').reduce((sum, t) => sum + t.amount, 0);
+
+    const isDeduction = (t: EmployeeTransaction) =>
+      t.type === 'LOAN' || t.type === 'CONSUMPTION' || t.type === 'DRINK_DEDUCTION' || t.type === 'CUSTOM_DEDUCTION';
+
+    const selectedDayDeductions = empTxs
+      .filter(t => t.date === effectiveDate && isDeduction(t))
+      .reduce((sum, t) => sum + t.amount, 0);
+    const otherDaysDeductions = empTxs
+      .filter(t => t.date !== effectiveDate && isDeduction(t))
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    const currentBalanceBeforeAdd =
+      totalEntitlements - totalLoans - totalConsumption - totalDrinks - totalCustom - totalPaid;
+
+    const rawNet = Number((currentBalanceBeforeAdd + (includeDailyWage ? wage : 0)).toFixed(2));
     const net = Math.max(0, rawNet);
 
     return {
       wage,
-      priorCarried,
-      todayEntitlements,
-      todayPaid,
-      loans,
-      consumption,
-      drinks,
-      custom,
+      selectedDateEntitlements,
+      totalEntitlements,
+      entitlementCount: entitlementTxs.length,
+      totalLoans,
+      totalConsumption,
+      totalDrinks,
+      totalCustom,
+      totalPaid,
+      selectedDayDeductions,
+      otherDaysDeductions,
+      currentBalanceBeforeAdd,
       rawNet,
       net
     };
-  }, [settleEmployee, transactions, includeDailyWage]);
+  }, [settleEmployee, transactions, includeDailyWage, settleDate]);
 
   useEffect(() => {
     if (settleEmployee) {
@@ -797,8 +893,13 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                         </div>
                       </div>
 
-                      {/* Ledger Summary inside employee card */}
-                      <div className="grid grid-cols-4 gap-2 text-center text-[10px] bg-black/30 p-2.5 rounded-xl border border-gray-900/40">
+                      {/* Ledger Summary inside employee card (click to view full statement) */}
+                      <button
+                        type="button"
+                        onClick={() => setStatementEmployee(emp)}
+                        className="w-full grid grid-cols-4 gap-2 text-center text-[10px] bg-black/30 hover:bg-black/50 p-2.5 rounded-xl border border-gray-900/40 hover:border-gold-600/40 transition-all cursor-pointer"
+                        title="اضغط لعرض كشف حساب وحركات الموظف بالتفصيل"
+                      >
                         <div>
                           <span className="text-gray-500 block mb-0.5">مكتسب</span>
                           <span className="font-mono text-green-400 font-bold">+{stats.entitlements}</span>
@@ -815,7 +916,7 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                           <span className="text-gray-500 block mb-0.5">منصرف</span>
                           <span className="font-mono text-white font-bold">-{stats.paid}</span>
                         </div>
-                      </div>
+                      </button>
                     </div>
 
                     {/* Bottom Action buttons */}
@@ -837,6 +938,13 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                       </div>
 
                       <div className="flex flex-wrap gap-1.5">
+                        <button
+                          onClick={() => setStatementEmployee(emp)}
+                          className="px-2 py-1 bg-blue-950/30 border border-blue-900/50 text-blue-300 hover:text-white hover:bg-blue-900/60 rounded-lg text-[9px] font-bold cursor-pointer transition-all"
+                          title="عرض وتعديل وحذف حركات الموظف بالتفصيل"
+                        >
+                          📋 كشف الحساب
+                        </button>
                         <button
                           onClick={() => handleOpenTxModal(emp.id, 'ENTITLEMENT')}
                           className="px-2 py-1 bg-green-950/30 border border-green-900/40 text-green-400 hover:text-white hover:bg-green-900 rounded-lg text-[9px] font-bold cursor-pointer transition-all"
@@ -869,20 +977,9 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                           💸 صرف دفعة
                         </button>
                         <button
-                          onClick={() => {
-                            const todayStr = new Date().toISOString().split('T')[0];
-                            const hasEntitlementToday = transactions.some(
-                              t => t.employee_id === emp.id && t.date === todayStr && t.type === 'ENTITLEMENT'
-                            );
-                            setSettleEmployee(emp);
-                            setIncludeDailyWage(!hasEntitlementToday);
-                            setCarryOverRemaining(true);
-                            setSettleNotes('');
-                            setSettleDeductDrawer(true);
-                            setShowSettlementModal(true);
-                          }}
+                          onClick={() => handleOpenSettlementModal(emp)}
                           className="px-2 py-1 bg-amber-500 hover:bg-amber-400 text-black rounded-lg text-[9px] font-black cursor-pointer transition-all"
-                          title="تسوية اليومية وصرف صافي المستحقات وترحيل المتبقي لليوم التالي"
+                          title="تسوية اليومية وصرف صافي المستحقات أو ترحيلها لليوم التالي"
                         >
                           ⚖️ تسوية اليوم
                         </button>
@@ -899,16 +996,45 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
       {/* 2. Sub-tab: Complete Ledger history */}
       {activeSubTab === 'transactions' && (
         <div className="bg-luxury-card border border-luxury-border rounded-3xl overflow-hidden">
-          <div className="p-4 border-b border-gray-900 bg-black/20 flex justify-between items-center">
-            <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
-              <History className="w-4 h-4 text-gold-500" />
-              أرشيف كافة المعاملات المالية للعمال والرواتب
-            </h4>
-            <span className="text-[10px] text-gray-500 font-semibold">تحديث حي ومباشر ومزامن تلقائياً</span>
+          <div className="p-4 border-b border-gray-900 bg-black/20 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <div>
+              <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                <History className="w-4 h-4 text-gold-500" />
+                أرشيف كافة المعاملات المالية للعمال والرواتب ({filteredArchiveTransactions.length})
+              </h4>
+              <span className="text-[10px] text-gray-500 font-semibold">يمكنك الفلترة حسب الموظف أو نوع الحركة والتراجع عن أي حركة مسجلة بالخطأ</span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              <select
+                value={archiveEmployeeFilter}
+                onChange={(e) => setArchiveEmployeeFilter(e.target.value)}
+                className="bg-luxury-bg border border-gray-800 text-white rounded-xl py-1.5 px-3 text-[11px] font-bold focus:outline-none focus:border-gold-600 cursor-pointer"
+              >
+                <option value="ALL">👥 كل الموظفين ({employees.length})</option>
+                {employees.map(emp => (
+                  <option key={emp.id} value={emp.id}>{emp.name}</option>
+                ))}
+              </select>
+
+              <select
+                value={archiveTypeFilter}
+                onChange={(e) => setArchiveTypeFilter(e.target.value)}
+                className="bg-luxury-bg border border-gray-800 text-white rounded-xl py-1.5 px-3 text-[11px] font-bold focus:outline-none focus:border-gold-600 cursor-pointer"
+              >
+                <option value="ALL">كل أنواع الحركات</option>
+                <option value="ENTITLEMENT">استحقاق يومية (+)</option>
+                <option value="WAGE_PAYMENT">صرف نقدي كاش (-)</option>
+                <option value="LOAN">سلفة نقدية (-)</option>
+                <option value="DRINK_DEDUCTION">خصم مشروب (-)</option>
+                <option value="CONSUMPTION">استهلاك منتجات (-)</option>
+                <option value="CUSTOM_DEDUCTION">جزاء / خصم آخر (-)</option>
+              </select>
+            </div>
           </div>
 
-          {transactions.length === 0 ? (
-            <div className="text-center py-12 text-gray-500 text-xs">لا توجد معاملات مالية أو حضور مسجل في الأرشيف المالي للعمال بعد.</div>
+          {filteredArchiveTransactions.length === 0 ? (
+            <div className="text-center py-12 text-gray-500 text-xs">لا توجد معاملات مالية مطابقة للفلاتر المختارة.</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-right text-xs">
@@ -923,7 +1049,7 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-900/50">
-                  {transactions.map(t => (
+                  {filteredArchiveTransactions.map(t => (
                     <tr key={t.id} className="hover:bg-gray-900/20 transition-colors">
                       <td className="py-3.5 px-4 text-[10px] font-mono text-gray-500">{t.date}</td>
                       <td className="py-3.5 px-4 font-bold text-white">{t.employee_name}</td>
@@ -959,7 +1085,7 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                           </span>
                         )}
                       </td>
-                      <td className="py-3.5 px-4 text-gray-400 text-[11px] max-w-xs truncate">{t.notes}</td>
+                      <td className="py-3.5 px-4 text-gray-400 text-[11px] max-w-xs truncate" title={t.notes}>{t.notes}</td>
                       <td className={`py-3.5 px-4 font-mono font-bold text-center ${
                         t.type === 'ENTITLEMENT' ? 'text-emerald-400' : 'text-red-400'
                       }`}>
@@ -967,7 +1093,7 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                       </td>
                       <td className="py-3.5 px-4 text-left">
                         <button
-                          onClick={() => handleDeleteTransaction(t.id, t.employee_name, t.amount)}
+                          onClick={() => requestDeleteTransaction(t)}
                           className="text-red-500 hover:text-red-400 font-bold p-1 hover:bg-red-950/20 rounded-lg transition-all cursor-pointer"
                         >
                           ❌ تراجع
@@ -1457,6 +1583,41 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
               </div>
 
               <div>
+                <label className="text-[11px] text-gray-400 font-bold block mb-1">تاريخ يوم العمل / الحركة</label>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setTxDate(getLocalDateStr())}
+                    className={`px-2.5 py-2 rounded-xl text-[10px] font-bold border cursor-pointer transition-all ${
+                      txDate === getLocalDateStr()
+                        ? 'bg-gold-600 text-black border-gold-500'
+                        : 'bg-black/40 border-gray-800 text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    اليوم
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTxDate(getRelativeLocalDateStr(-1))}
+                    className={`px-2.5 py-2 rounded-xl text-[10px] font-bold border cursor-pointer transition-all ${
+                      txDate === getRelativeLocalDateStr(-1)
+                        ? 'bg-amber-500 text-black border-amber-400'
+                        : 'bg-black/40 border-gray-800 text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    أمس
+                  </button>
+                  <input
+                    type="date"
+                    value={txDate}
+                    onChange={(e) => setTxDate(e.target.value)}
+                    className="flex-1 bg-luxury-bg border border-gray-800 text-white rounded-xl py-1.5 px-2.5 text-[11px] font-mono text-center focus:outline-none focus:border-gold-600"
+                    dir="ltr"
+                  />
+                </div>
+              </div>
+
+              <div>
                 <label className="text-[11px] text-gray-400 font-bold block mb-1">ملاحظات ومراجعة البيان</label>
                 <input
                   type="text"
@@ -1720,6 +1881,40 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
 
                 {/* Bill Summary & Actions */}
                 <div className="mt-4 pt-4 border-t border-gray-900 shrink-0">
+                  <div className="mb-3">
+                    <label className="text-[10px] text-gray-400 font-bold block mb-1">تاريخ الاستهلاك:</label>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setConsDate(getLocalDateStr())}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-bold border cursor-pointer ${
+                          consDate === getLocalDateStr()
+                            ? 'bg-gold-600 text-black border-gold-500'
+                            : 'bg-black/40 border-gray-800 text-gray-400'
+                        }`}
+                      >
+                        اليوم
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConsDate(getRelativeLocalDateStr(-1))}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-bold border cursor-pointer ${
+                          consDate === getRelativeLocalDateStr(-1)
+                            ? 'bg-amber-500 text-black border-amber-400'
+                            : 'bg-black/40 border-gray-800 text-gray-400'
+                        }`}
+                      >
+                        أمس
+                      </button>
+                      <input
+                        type="date"
+                        value={consDate}
+                        onChange={(e) => setConsDate(e.target.value)}
+                        className="flex-1 bg-luxury-bg border border-gray-800 text-white rounded-lg py-1 px-2 text-[10px] font-mono text-center"
+                        dir="ltr"
+                      />
+                    </div>
+                  </div>
                   <div className="space-y-2 text-[11px] mb-4">
                     <div className="flex justify-between">
                       <span className="text-gray-400">إجمالي قطع الاستهلاك:</span>
@@ -1787,7 +1982,7 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                   <span className="text-amber-500">⚖️</span>
                   تسوية اليومية وصرف المستحقات: {settleEmployee.name}
                 </h3>
-                <span className="text-[10px] text-gray-500 font-semibold">{settleEmployee.role}</span>
+                <span className="text-[10px] text-gray-500 font-semibold">{settleEmployee.role} • اليومية الأساسية: {settleEmployee.daily_wage} ج.م</span>
               </div>
               <button
                 onClick={() => setShowSettlementModal(false)}
@@ -1798,19 +1993,69 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
             </div>
 
             {/* Calculations & Breakdown Form */}
-            <form onSubmit={handleSaveSettlement} className="space-y-4">
-              
-              {/* Daily Wage Option */}
-              <div className="bg-black/30 p-3 rounded-xl border border-gray-900 flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-bold text-white block">استحقاق يومية اليوم الحالية</span>
-                  <span className="text-[10px] text-gray-500">
-                    {settlementBreakdown.todayEntitlements > 0
-                      ? 'تم تسجيل يومية اليوم مسبقاً (حدد لإضافة يوم إضافي)'
-                      : 'معدل الأجر اليومي الافتراضي للموظف'}
+            <form onSubmit={handleSaveSettlement} className="space-y-3.5">
+
+              {/* Work Date Selection (Next-Morning Settlement Support) */}
+              <div className="bg-black/40 p-3 rounded-xl border border-gray-900">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-extrabold text-white flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-gold-500" />
+                    تاريخ يوم العمل / التسوية
+                  </span>
+                  <span className="text-[9px] text-gray-400">
+                    للتسوية في صباح اليوم التالي اختر «أمس»
                   </span>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleChangeSettleDate(getLocalDateStr())}
+                    className={`px-3 py-1.5 rounded-xl text-[10px] font-black border cursor-pointer transition-all ${
+                      settleDate === getLocalDateStr()
+                        ? 'bg-gold-600 text-black border-gold-500'
+                        : 'bg-black/50 border-gray-800 text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    اليوم ({getLocalDateStr().slice(5)})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleChangeSettleDate(getRelativeLocalDateStr(-1))}
+                    className={`px-3 py-1.5 rounded-xl text-[10px] font-black border cursor-pointer transition-all ${
+                      settleDate === getRelativeLocalDateStr(-1)
+                        ? 'bg-amber-500 text-black border-amber-400'
+                        : 'bg-black/50 border-gray-800 text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    أمس ({getRelativeLocalDateStr(-1).slice(5)})
+                  </button>
+                  <input
+                    type="date"
+                    value={settleDate}
+                    onChange={(e) => handleChangeSettleDate(e.target.value)}
+                    className="flex-1 bg-luxury-bg border border-gray-800 text-white rounded-xl py-1.5 px-2.5 text-[11px] font-mono text-center focus:outline-none focus:border-gold-600"
+                    dir="ltr"
+                  />
+                </div>
+              </div>
+              
+              {/* Daily Wage Option */}
+              <label className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer ${
+                settlementBreakdown.selectedDateEntitlements > 0
+                  ? 'bg-emerald-950/15 border-emerald-800/40'
+                  : 'bg-black/30 border-gray-900'
+              }`}>
+                <div>
+                  <span className="text-xs font-bold text-white block">
+                    إضافة يومية عمل لتاريخ ({settleDate})
+                  </span>
+                  <span className={`text-[10px] ${settlementBreakdown.selectedDateEntitlements > 0 ? 'text-emerald-400 font-bold' : 'text-gray-500'}`}>
+                    {settlementBreakdown.selectedDateEntitlements > 0
+                      ? `✅ يومية يوم ${settleDate} مسجلة مسبقاً (+${settlementBreakdown.selectedDateEntitlements} ج.م) — لا تفعّلها إلا لإضافة يوم إضافي`
+                      : 'سيتم إضافة أجر اليومية إلى رصيد الموظف عند الحفظ'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2.5 shrink-0">
                   <span className="text-xs font-mono font-black text-green-400">+{settleEmployee.daily_wage} ج.م</span>
                   <input
                     type="checkbox"
@@ -1819,105 +2064,113 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                     className="w-4 h-4 text-amber-500 bg-black border-gray-800 rounded focus:ring-amber-500 focus:ring-2 cursor-pointer"
                   />
                 </div>
+              </label>
+
+              {/* Complete Transparent Account Breakdown (All Days Included) */}
+              <div className="space-y-2 bg-[#060606] p-3.5 rounded-2xl border border-gray-950">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] text-gray-400 font-extrabold uppercase tracking-wider">
+                    ملخص حساب الموظف الكامل (يشمل الأيام السابقة واليوم):
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const emp = settleEmployee;
+                      setShowSettlementModal(false);
+                      setStatementEmployee(emp);
+                    }}
+                    className="text-[10px] text-blue-400 hover:text-blue-300 font-bold underline cursor-pointer"
+                  >
+                    📋 مراجعة / حذف الحركات
+                  </button>
+                </div>
+
+                <div className="flex justify-between text-xs border-b border-gray-900/60 pb-1.5">
+                  <span className="text-gray-300">
+                    ✅ إجمالي اليوميات المسجلة ({settlementBreakdown.entitlementCount} يوم{includeDailyWage ? ' + يوم جديد' : ''}):
+                  </span>
+                  <span className="font-mono text-emerald-400 font-bold">
+                    +{settlementBreakdown.totalEntitlements + (includeDailyWage ? settleEmployee.daily_wage : 0)} ج.م
+                  </span>
+                </div>
+                
+                <div className="flex justify-between text-xs border-b border-gray-900/60 pb-1.5">
+                  <span className="text-gray-400">💵 إجمالي السلفيات:</span>
+                  <span className="font-mono text-red-400 font-bold">-{settlementBreakdown.totalLoans} ج.م</span>
+                </div>
+                
+                <div className="flex justify-between text-xs border-b border-gray-900/60 pb-1.5">
+                  <span className="text-gray-400">
+                    🥤 المشروبات والاستهلاك والخصومات:
+                    {settlementBreakdown.otherDaysDeductions > 0 && (
+                      <span className="text-[9px] text-amber-400/90 mr-1">
+                        (يوم {settleDate.slice(5)}: {settlementBreakdown.selectedDayDeductions} | أيام أخرى: {settlementBreakdown.otherDaysDeductions})
+                      </span>
+                    )}
+                  </span>
+                  <span className="font-mono text-amber-400 font-bold">
+                    -{(settlementBreakdown.totalConsumption + settlementBreakdown.totalDrinks + settlementBreakdown.totalCustom)} ج.م
+                  </span>
+                </div>
+
+                <div className="flex justify-between text-xs border-b border-gray-900/60 pb-1.5">
+                  <span className="text-gray-400">💸 إجمالي المنصرف كاش مسبقاً:</span>
+                  <span className="font-mono text-blue-400 font-bold">-{settlementBreakdown.totalPaid} ج.م</span>
+                </div>
+
+                {/* Final Net Row */}
+                <div className="border-t border-dashed border-gray-800 pt-2 flex justify-between items-center text-xs">
+                  <span className="text-white font-extrabold">
+                    صافي المستحق الفعلي للموظف الآن:
+                  </span>
+                  <span className={`font-mono font-black text-sm ${settlementBreakdown.rawNet >= 0 ? 'text-gold-500' : 'text-red-400'}`}>
+                    {settlementBreakdown.rawNet >= 0 ? `+${settlementBreakdown.rawNet}` : settlementBreakdown.rawNet} ج.م
+                  </span>
+                </div>
+
+                {settlementBreakdown.rawNet < 0 && settlementBreakdown.totalPaid > 0 && (
+                  <div className="p-2 rounded-xl bg-red-950/30 border border-red-900/60 text-[10px] text-red-300 leading-relaxed">
+                    ⚠️ الصافي سالب لوجود مبلغ <b>منصرف كاش (-{settlementBreakdown.totalPaid} ج.م)</b> مسجّل مسبقاً. إذا لم يستلم العامل هذا المبلغ فعلياً اضغط <b>«مراجعة / حذف الحركات»</b> أعلاه للتراجع عنه.
+                  </div>
+                )}
               </div>
 
-              {/* Carried-over Balance from Previous Days / Earlier Today */}
-              {(settlementBreakdown.priorCarried !== 0 || settlementBreakdown.todayEntitlements > 0 || settlementBreakdown.todayPaid > 0) && (
-                <div className={`p-3 rounded-xl border space-y-1.5 ${
-                  settlementBreakdown.priorCarried + settlementBreakdown.todayEntitlements - settlementBreakdown.todayPaid >= 0
-                    ? 'bg-emerald-950/20 border-emerald-500/30'
-                    : 'bg-red-950/20 border-red-500/30'
-                }`}>
-                  {settlementBreakdown.priorCarried !== 0 && (
-                    <div className="flex items-center justify-between text-xs">
-                      <div>
-                        <span className="font-extrabold text-white block">
-                          {settlementBreakdown.priorCarried > 0
-                            ? '🔄 متبقي يومية مرحل من أيام سابقة'
-                            : '📌 رصيد مدين مرحل من أيام سابقة'}
-                        </span>
-                        <span className="text-[10px] text-gray-400">
-                          {settlementBreakdown.priorCarried > 0
-                            ? 'يُضاف تلقائياً إلى مستحقات الموظف اليوم'
-                            : 'يُخصم تلقائياً من مستحقات الموظف اليوم'}
-                        </span>
-                      </div>
-                      <span className={`font-mono font-black ${settlementBreakdown.priorCarried > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {settlementBreakdown.priorCarried > 0 ? `+${settlementBreakdown.priorCarried}` : settlementBreakdown.priorCarried} ج.م
-                      </span>
-                    </div>
-                  )}
-                  {settlementBreakdown.todayEntitlements > 0 && (
-                    <div className="flex items-center justify-between text-xs pt-1 border-t border-gray-900/40">
-                      <span className="text-gray-300 font-semibold">📋 استحقاق يومية مسجل مسبقاً اليوم:</span>
-                      <span className="font-mono font-bold text-emerald-400">+{settlementBreakdown.todayEntitlements} ج.م</span>
-                    </div>
-                  )}
-                  {settlementBreakdown.todayPaid > 0 && (
-                    <div className="flex items-center justify-between text-xs pt-1 border-t border-gray-900/40">
-                      <span className="text-gray-300 font-semibold">💸 مبالغ منصرفة مسبقاً اليوم:</span>
-                      <span className="font-mono font-bold text-blue-400">-{settlementBreakdown.todayPaid} ج.م</span>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Today's Deductions Breakdown */}
-              <div className="space-y-2 bg-[#060606] p-3.5 rounded-2xl border border-gray-950">
-                <span className="text-[10px] text-gray-500 font-extrabold block uppercase tracking-wider mb-1.5">حركات الخصومات والسلفيات المسجلة (اليوم):</span>
-                
-                <div className="flex justify-between text-xs border-b border-gray-900/60 pb-1.5">
-                  <span className="text-gray-400">💵 إجمالي السلفيات (المسحوبات النقدية):</span>
-                  <span className="font-mono text-red-400 font-bold">-{settlementBreakdown.loans} ج.م</span>
-                </div>
-                
-                <div className="flex justify-between text-xs border-b border-gray-900/60 pb-1.5">
-                  <span className="text-gray-400">🥤 استهلاك منتجات ومشروبات الكافيه:</span>
-                  <span className="font-mono text-red-400 font-bold">-{settlementBreakdown.consumption} ج.م</span>
-                </div>
-
-                <div className="flex justify-between text-xs border-b border-gray-900/60 pb-1.5">
-                  <span className="text-gray-400">☕ خصومات مشروبات يدوية:</span>
-                  <span className="font-mono text-red-400 font-bold">-{settlementBreakdown.drinks} ج.م</span>
-                </div>
-
-                <div className="flex justify-between text-xs pb-1">
-                  <span className="text-gray-400">⚠️ جزاءات / عقوبات إدارية مسجلة:</span>
-                  <span className="font-mono text-red-400 font-bold">-{settlementBreakdown.custom} ج.م</span>
-                </div>
-
-                {/* Combined Calculation Formula */}
-                {(() => {
-                  const priorCredit = Math.max(0, settlementBreakdown.priorCarried);
-                  const priorDebt = Math.max(0, -settlementBreakdown.priorCarried);
-                  const totalDeductions =
-                    priorDebt +
-                    settlementBreakdown.loans +
-                    settlementBreakdown.consumption +
-                    settlementBreakdown.drinks +
-                    settlementBreakdown.custom +
-                    settlementBreakdown.todayPaid;
-                  const totalEarned =
-                    (includeDailyWage ? settleEmployee.daily_wage : 0) +
-                    settlementBreakdown.todayEntitlements +
-                    priorCredit;
-                  return (
-                    <div className="border-t border-dashed border-gray-800 mt-2.5 pt-2.5 flex justify-between items-center text-xs">
-                      <span className="text-gray-400 font-bold">
-                        الإجمالي ({totalEarned}) - المستقطع ({totalDeductions}):
-                      </span>
-                      <span className="font-mono font-black text-amber-500">
-                        {settlementBreakdown.net} ج.م
-                      </span>
-                    </div>
-                  );
-                })()}
+              {/* Quick Payout Choice Buttons (Prevent Accidental Cash Payout!) */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSettlePayAmount(settlementBreakdown.net);
+                    setCarryOverRemaining(true);
+                  }}
+                  className={`py-2 px-2.5 rounded-xl text-[10px] font-black border cursor-pointer transition-all ${
+                    settlePayAmount === settlementBreakdown.net && settlementBreakdown.net > 0
+                      ? 'bg-gold-600/20 border-gold-500 text-gold-400'
+                      : 'bg-black/40 border-gray-800 text-gray-400 hover:text-white'
+                  }`}
+                >
+                  💸 صرف الصافي كاش ({settlementBreakdown.net} ج.م)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSettlePayAmount(0);
+                    setCarryOverRemaining(true);
+                  }}
+                  className={`py-2 px-2.5 rounded-xl text-[10px] font-black border cursor-pointer transition-all ${
+                    settlePayAmount === 0
+                      ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300'
+                      : 'bg-black/40 border-gray-800 text-gray-400 hover:text-white'
+                  }`}
+                >
+                  🔄 ترحيل بدون صرف كاش (0 ج.م)
+                </button>
               </div>
 
               {/* Cash Payment Form Fields */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[10px] text-gray-400 font-extrabold block mb-1">المبلغ المصروف كاش (ج.م) *</label>
+                  <label className="text-[10px] text-gray-400 font-extrabold block mb-1">المبلغ المصروف كاش الآن (ج.م) *</label>
                   <input
                     type="number"
                     min="0"
@@ -1932,7 +2185,7 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                   <label className="text-[10px] text-gray-400 font-extrabold block mb-1">بيان وصرف الحركة</label>
                   <input
                     type="text"
-                    placeholder="مثال: تسوية مرتب اليومية..."
+                    placeholder="مثال: تسوية يومية 16/11..."
                     value={settleNotes}
                     onChange={(e) => setSettleNotes(e.target.value)}
                     className="w-full bg-black/45 border border-gray-800 text-white rounded-xl py-2 px-3 text-xs text-right focus:outline-none focus:border-amber-500"
@@ -1966,12 +2219,12 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                         <div>
                           <span className="font-extrabold block">
                             {carryOverRemaining
-                              ? '🔄 المتبقي المرحل إلى اليوم التالي:'
+                              ? (settlePayAmount === 0 ? '🔄 سيتم ترحيل كامل الرصيد (بدون تسجيل منصرف):' : '🔄 المتبقي المرحل إلى اليوم التالي:')
                               : '⚠️ فرق غير مرحل (سيتم تسويته كإغلاق نهائي):'}
                           </span>
                           <span className="text-[10px] opacity-80">
                             {carryOverRemaining
-                              ? 'سيُضاف تلقائياً لاستحقاق الموظف في اليوم التالي'
+                              ? 'سيُضاف تلقائياً لرصيد الموظف دون خصم كاش منه'
                               : 'لن يُرحّل هذا المبلغ لليوم التالي'}
                           </span>
                         </div>
@@ -1984,8 +2237,8 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                     {remainingDiff < 0 && (
                       <div className="p-3 rounded-xl border bg-red-950/25 border-red-500/40 text-red-300 text-xs flex justify-between items-center">
                         <div>
-                          <span className="font-extrabold block">💳 زيادة منصرفة عن المستحق:</span>
-                          <span className="text-[10px] opacity-80">سيُخصم تلقائياً كرصيد مدين من يومية الغد</span>
+                          <span className="font-extrabold block">💳 رصيد مدين متبقي بعد الحفظ:</span>
+                          <span className="text-[10px] opacity-80">سيظهر كرصيد سالب يُخصم من اليوميات التالية</span>
                         </div>
                         <span className="font-mono font-black text-sm">{remainingDiff} ج.م</span>
                       </div>
@@ -1994,16 +2247,18 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                 );
               })()}
 
-              {/* Deduct from Drawer Checkbox */}
-              <div className="bg-black/30 p-2.5 rounded-xl border border-gray-900 flex items-center justify-between">
-                <span className="text-[10px] text-gray-400 font-bold">خصم المبلغ المصروف تلقائياً من درج كاشير الكافيه اليومي</span>
-                <input
-                  type="checkbox"
-                  checked={settleDeductDrawer}
-                  onChange={(e) => setSettleDeductDrawer(e.target.checked)}
-                  className="w-4 h-4 text-gold-500 bg-black border-gray-800 rounded focus:ring-gold-500 focus:ring-2 cursor-pointer"
-                />
-              </div>
+              {/* Deduct from Drawer Checkbox (only relevant when paying cash > 0) */}
+              {settlePayAmount > 0 && (
+                <div className="bg-black/30 p-2.5 rounded-xl border border-gray-900 flex items-center justify-between">
+                  <span className="text-[10px] text-gray-400 font-bold">خصم المبلغ المصروف ({settlePayAmount} ج.م) تلقائياً من درج كاشير الكافيه اليومي</span>
+                  <input
+                    type="checkbox"
+                    checked={settleDeductDrawer}
+                    onChange={(e) => setSettleDeductDrawer(e.target.checked)}
+                    className="w-4 h-4 text-gold-500 bg-black border-gray-800 rounded focus:ring-gold-500 focus:ring-2 cursor-pointer"
+                  />
+                </div>
+              )}
 
               {/* Actions Footer */}
               <div className="grid grid-cols-2 gap-3 mt-4 border-t border-gray-900 pt-3 sticky bottom-0 bg-luxury-card z-10">
@@ -2011,7 +2266,9 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
                   type="submit"
                   className="py-2.5 bg-gold-600 hover:bg-gold-500 text-black font-extrabold rounded-xl transition-all cursor-pointer text-xs"
                 >
-                  ⚖️ تأكيد تسوية وصرف اليومية
+                  {settlePayAmount > 0
+                    ? `💸 تأكيد وصرف (${settlePayAmount} ج.م)`
+                    : '🔄 حفظ وترحيل بدون صرف كاش'}
                 </button>
                 <button
                   type="button"
@@ -2113,6 +2370,220 @@ export default function EmployeesView({ onShowSuccessAlert, onShowWarningAlert }
           </form>
         </div>
       )}
+
+      {/* --- MODAL DIALOG: EMPLOYEE DETAILED STATEMENT --- */}
+      {statementEmployee && (() => {
+        const empStats = employeeStats[statementEmployee.id] || { entitlements: 0, loans: 0, drinks: 0, custom: 0, paid: 0, balance: 0 };
+        const empTxs = transactions.filter(t => t.employee_id === statementEmployee.id);
+        return (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4 animate-fade-in overflow-y-auto" dir="rtl">
+            <div className="bg-luxury-card border border-luxury-border rounded-3xl w-full max-w-2xl p-4 sm:p-5 flex flex-col max-h-[90vh] overflow-hidden my-auto shadow-2xl">
+              <div className="flex justify-between items-start border-b border-gray-900 pb-3 mb-3 shrink-0">
+                <div>
+                  <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
+                    <span>📋 كشف حساب الموظف:</span>
+                    <span className="text-gold-500">{statementEmployee.name}</span>
+                  </h3>
+                  <span className="text-[10px] text-gray-500">
+                    {statementEmployee.role} • اليومية الأساسية: {statementEmployee.daily_wage} ج.م • عدد الحركات: {empTxs.length}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setStatementEmployee(null)}
+                  className="text-gray-500 hover:text-white transition-colors cursor-pointer"
+                >
+                  <XCircle className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Exact Math Formula Bar */}
+              <div className="grid grid-cols-5 gap-2 text-center text-[10px] bg-black/40 p-3 rounded-2xl border border-gray-900 mb-3 shrink-0">
+                <div>
+                  <span className="text-gray-500 block mb-0.5">مكتسب</span>
+                  <span className="font-mono text-emerald-400 font-black text-xs">+{empStats.entitlements}</span>
+                </div>
+                <div>
+                  <span className="text-gray-500 block mb-0.5">سلفيات</span>
+                  <span className="font-mono text-red-400 font-black text-xs">-{empStats.loans}</span>
+                </div>
+                <div>
+                  <span className="text-gray-500 block mb-0.5">خصومات</span>
+                  <span className="font-mono text-amber-400 font-black text-xs">-{(empStats.drinks + empStats.custom)}</span>
+                </div>
+                <div>
+                  <span className="text-gray-500 block mb-0.5">منصرف كاش</span>
+                  <span className="font-mono text-blue-400 font-black text-xs">-{empStats.paid}</span>
+                </div>
+                <div className="border-r border-gray-800 pr-1">
+                  <span className="text-gray-400 block mb-0.5 font-bold">الصافي</span>
+                  <span className={`font-mono font-black text-xs ${empStats.balance >= 0 ? 'text-gold-500' : 'text-red-500'}`}>
+                    {empStats.balance >= 0 ? `+${empStats.balance}` : empStats.balance} ج.م
+                  </span>
+                </div>
+              </div>
+
+              {/* Helpful Diagnostic Notice when negative due to recorded cash payout */}
+              {empStats.paid > 0 && empStats.balance < 0 && (
+                <div className="mb-3 p-3 rounded-2xl bg-amber-950/25 border border-amber-500/40 text-[11px] text-amber-200 leading-relaxed shrink-0">
+                  💡 <b>ملاحظة محاسبية:</b> المعادلة الحالية هي:
+                  <span className="font-mono mx-1 text-white">
+                    (+{empStats.entitlements}) − ({empStats.loans + empStats.drinks + empStats.custom}) − ({empStats.paid} منصرف) = {empStats.balance} ج.م
+                  </span>
+                  — إذا كان مبلغ <b>المنصرف (-{empStats.paid} ج.م)</b> مسجّلاً بالخطأ ولم يستلمه الموظف فعلياً، اضغط <b>«❌ تراجع»</b> بجانب حركة الصرف بالأسفل ليعود الصافي تلقائياً إلى <b className="text-emerald-400 font-mono">+{empStats.balance + empStats.paid} ج.م</b>.
+                </div>
+              )}
+
+              {/* Transactions Table */}
+              <div className="flex-1 overflow-y-auto min-h-0 border border-gray-900 rounded-2xl bg-black/25">
+                {empTxs.length === 0 ? (
+                  <div className="text-center py-10 text-gray-500 text-xs">لا توجد حركات مسجلة لهذا الموظف بعد.</div>
+                ) : (
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-black/60 border-b border-gray-900 text-gray-400 text-[10px] sticky top-0">
+                      <tr>
+                        <th className="py-2.5 px-3">التاريخ</th>
+                        <th className="py-2.5 px-3">النوع</th>
+                        <th className="py-2.5 px-3">البيان</th>
+                        <th className="py-2.5 px-3 text-center">المبلغ</th>
+                        <th className="py-2.5 px-3 text-left">تعديل</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-900/60">
+                      {empTxs.map(t => (
+                        <tr key={t.id} className="hover:bg-gray-900/30">
+                          <td className="py-2.5 px-3 text-[10px] font-mono text-gray-400 whitespace-nowrap">{t.date}</td>
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            {t.type === 'ENTITLEMENT' && <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-900 text-[9px] font-bold">يومية (+)</span>}
+                            {t.type === 'WAGE_PAYMENT' && <span className="px-2 py-0.5 rounded bg-blue-950 text-blue-400 border border-blue-900 text-[9px] font-bold">منصرف كاش (-)</span>}
+                            {t.type === 'LOAN' && <span className="px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-900 text-[9px] font-bold">سلفة (-)</span>}
+                            {t.type === 'DRINK_DEDUCTION' && <span className="px-2 py-0.5 rounded bg-amber-950 text-amber-400 border border-amber-900 text-[9px] font-bold">خصم مشروب (-)</span>}
+                            {t.type === 'CONSUMPTION' && <span className="px-2 py-0.5 rounded bg-purple-950 text-purple-400 border border-purple-900 text-[9px] font-bold">استهلاك (-)</span>}
+                            {t.type === 'CUSTOM_DEDUCTION' && <span className="px-2 py-0.5 rounded bg-rose-950 text-rose-400 border border-rose-900 text-[9px] font-bold">خصم آخر (-)</span>}
+                          </td>
+                          <td className="py-2.5 px-3 text-[11px] text-gray-300">{t.notes}</td>
+                          <td className={`py-2.5 px-3 font-mono font-bold text-center whitespace-nowrap ${t.type === 'ENTITLEMENT' ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {t.type === 'ENTITLEMENT' ? `+${t.amount}` : `-${t.amount}`} ج.م
+                          </td>
+                          <td className="py-2.5 px-3 text-left whitespace-nowrap">
+                            <button
+                              type="button"
+                              onClick={() => requestDeleteTransaction(t)}
+                              className="px-2 py-1 rounded-lg bg-red-950/40 hover:bg-red-900/60 text-red-400 hover:text-white text-[10px] font-bold cursor-pointer transition-all"
+                            >
+                              ❌ تراجع
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <div className="flex justify-between items-center gap-2 mt-3 pt-3 border-t border-gray-900 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const emp = statementEmployee;
+                    setStatementEmployee(null);
+                    handleOpenSettlementModal(emp);
+                  }}
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black font-black rounded-xl text-xs cursor-pointer transition-all"
+                >
+                  ⚖️ الذهاب لتسوية اليومية
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatementEmployee(null)}
+                  className="px-4 py-2 bg-luxury-bg border border-gray-800 hover:bg-gray-900 text-gray-300 font-bold rounded-xl text-xs cursor-pointer transition-all"
+                >
+                  إغلاق
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* --- MODAL DIALOG: CONFIRM DELETE / REVERSAL OF EMPLOYEE TRANSACTION --- */}
+      {txToDelete && (() => {
+        const linkedExpense = dbService.findLinkedExpenseForEmployeeTx(txToDelete);
+        return (
+          <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-[60] p-4 animate-fade-in" dir="rtl">
+            <div className="bg-luxury-card border border-red-900/60 rounded-3xl w-full max-w-md p-5 shadow-2xl">
+              <div className="flex items-start justify-between border-b border-gray-900 pb-3 mb-3">
+                <h4 className="text-sm font-extrabold text-red-400 flex items-center gap-2">
+                  <Trash2 className="w-4 h-4" />
+                  تأكيد التراجع وحذف المعاملة
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setTxToDelete(null)}
+                  className="text-gray-500 hover:text-white cursor-pointer"
+                >
+                  <XCircle className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-2.5 text-xs bg-black/40 p-3.5 rounded-2xl border border-gray-900 mb-4">
+                <div className="flex justify-between">
+                  <span className="text-gray-400">الموظف:</span>
+                  <strong className="text-white">{txToDelete.employee_name}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">التاريخ:</span>
+                  <strong className="text-gray-300 font-mono">{txToDelete.date}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">القيمة:</span>
+                  <strong className={`font-mono ${txToDelete.type === 'ENTITLEMENT' ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {txToDelete.type === 'ENTITLEMENT' ? `+${txToDelete.amount}` : `-${txToDelete.amount}`} ج.م
+                  </strong>
+                </div>
+                <div className="pt-1.5 border-t border-gray-900 text-[11px] text-gray-400">
+                  البيان: <span className="text-gray-200">{txToDelete.notes}</span>
+                </div>
+              </div>
+
+              {(txToDelete.type === 'WAGE_PAYMENT' || txToDelete.type === 'LOAN') && linkedExpense && (
+                <label className="mb-4 p-3 rounded-2xl bg-emerald-950/20 border border-emerald-700/40 flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={reverseExpenseOnDelete}
+                    onChange={(e) => setReverseExpenseOnDelete(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 text-emerald-500 bg-black border-gray-700 rounded cursor-pointer"
+                  />
+                  <div className="text-[11px] leading-relaxed">
+                    <span className="text-emerald-300 font-extrabold block">
+                      💰 إرجاع مبلغ {linkedExpense.amount} ج.م إلى درج النقدية وحذف المصروف المرتبط
+                    </span>
+                    <span className="text-[10px] text-gray-400 block mt-0.5">
+                      تم العثور على مصروف مطابق بتاريخ {linkedExpense.expense_date}: «{linkedExpense.description}»
+                    </span>
+                  </div>
+                </label>
+              )}
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={confirmDeleteTransaction}
+                  className="py-2.5 bg-red-600 hover:bg-red-500 text-white font-black rounded-xl text-xs cursor-pointer transition-all"
+                >
+                  ✅ تأكيد الحذف والتعديل
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTxToDelete(null)}
+                  className="py-2.5 bg-luxury-bg border border-gray-800 hover:bg-gray-900 text-gray-300 font-bold rounded-xl text-xs cursor-pointer transition-all"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );
