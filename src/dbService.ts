@@ -6984,6 +6984,8 @@ export const dbService = {
       purchase_price?: number;
       raw_material_qty?: number;
       yield_capacity?: number;
+      desired_remaining_quantity?: number;
+      reset_consumed?: boolean;
       yield_unit?: string;
       unit?: string;
     },
@@ -6996,108 +6998,403 @@ export const dbService = {
     }
 
     const b = { ...list[idx] };
-    const isConsumed = (b.consumed_quantity || 0) > 0;
     const oldYieldCap = b.yield_capacity || b.original_quantity || 0;
-    const oldRawQty = b.raw_material_qty || 1;
+    const oldRemaining = b.remaining_quantity ?? Math.max(0, oldYieldCap - (b.consumed_quantity || 0));
+    const oldRawQty = b.raw_material_qty ?? 1;
 
-    if (isConsumed) {
-      // Safe fields edit ONLY when batch is already consumed
-      if (updatedData.supplier !== undefined) b.supplier = updatedData.supplier.trim();
-      if (updatedData.purchase_date !== undefined) b.purchase_date = updatedData.purchase_date;
-      if (updatedData.expiry_date !== undefined) b.expiry_date = updatedData.expiry_date;
-      if (updatedData.invoice_number !== undefined) b.invoice_number = updatedData.invoice_number.trim();
-      if (updatedData.notes !== undefined) b.notes = updatedData.notes.trim();
-    } else {
-      // Full fields edit allowed when batch has not been used yet
-      if (updatedData.item_name !== undefined && updatedData.item_name.trim()) {
-        b.item_name = updatedData.item_name.trim();
-      }
-      if (updatedData.supplier !== undefined) b.supplier = updatedData.supplier.trim();
-      if (updatedData.purchase_date !== undefined) b.purchase_date = updatedData.purchase_date;
-      if (updatedData.expiry_date !== undefined) b.expiry_date = updatedData.expiry_date;
-      if (updatedData.invoice_number !== undefined) b.invoice_number = updatedData.invoice_number.trim();
-      if (updatedData.notes !== undefined) b.notes = updatedData.notes.trim();
+    if (updatedData.item_name !== undefined && updatedData.item_name.trim()) {
+      b.item_name = updatedData.item_name.trim();
+    }
+    if (updatedData.supplier !== undefined) b.supplier = updatedData.supplier.trim();
+    if (updatedData.purchase_date !== undefined) b.purchase_date = updatedData.purchase_date;
+    if (updatedData.expiry_date !== undefined) b.expiry_date = updatedData.expiry_date;
+    if (updatedData.invoice_number !== undefined) b.invoice_number = updatedData.invoice_number.trim();
+    if (updatedData.notes !== undefined) b.notes = updatedData.notes.trim();
 
-      if (updatedData.purchase_price !== undefined && !isNaN(updatedData.purchase_price) && updatedData.purchase_price >= 0) {
-        b.purchase_price = updatedData.purchase_price;
-      }
-
-      if (updatedData.raw_material_qty !== undefined && !isNaN(updatedData.raw_material_qty) && updatedData.raw_material_qty > 0) {
-        const newRawQty = updatedData.raw_material_qty;
-        // Adjust Raw Material stock if linked
-        if (b.item_id || b.item_name) {
-          const rawMaterials = dbService.getRawMaterials();
-          const rm = rawMaterials.find(r =>
-            r.id === b.item_id ||
-            r.name.trim().toLowerCase() === b.item_name.trim().toLowerCase()
-          );
-          if (rm) {
-            const diff = newRawQty - oldRawQty;
-            const newRmQty = Math.max(0, rm.current_quantity + diff);
-            const newUnitCost = b.purchase_price > 0 && newRawQty > 0 ? b.purchase_price / newRawQty : rm.unit_cost;
-            dbService.saveRawMaterial({
-              ...rm,
-              current_quantity: newRmQty,
-              unit_cost: newUnitCost
-            });
-          }
-        }
-        b.raw_material_qty = newRawQty;
-      }
-
-      if (updatedData.yield_capacity !== undefined && !isNaN(updatedData.yield_capacity) && updatedData.yield_capacity > 0) {
-        b.yield_capacity = updatedData.yield_capacity;
-        b.original_quantity = updatedData.yield_capacity;
-      }
-
-      if (updatedData.yield_unit !== undefined && updatedData.yield_unit.trim()) {
-        b.yield_unit = updatedData.yield_unit.trim();
-      }
-
-      if (updatedData.unit !== undefined && updatedData.unit.trim()) {
-        b.unit = updatedData.unit.trim();
-      }
+    if (updatedData.reset_consumed) {
+      b.consumed_quantity = 0;
     }
 
-    // Recalculate remaining quantities and financial metrics
-    const cap = b.yield_capacity || b.original_quantity;
-    b.remaining_quantity = Math.max(0, cap - (b.consumed_quantity || 0));
-    b.remaining_cups = b.remaining_quantity;
+    if (updatedData.purchase_price !== undefined && !isNaN(updatedData.purchase_price) && updatedData.purchase_price >= 0) {
+      b.purchase_price = updatedData.purchase_price;
+    }
 
+    if (updatedData.unit !== undefined && updatedData.unit.trim()) {
+      b.unit = updatedData.unit.trim();
+    }
+    if (updatedData.yield_unit !== undefined && updatedData.yield_unit.trim()) {
+      b.yield_unit = updatedData.yield_unit.trim();
+    }
+
+    if (updatedData.raw_material_qty !== undefined && !isNaN(updatedData.raw_material_qty) && updatedData.raw_material_qty >= 0) {
+      const newRawQty = updatedData.raw_material_qty;
+      if (b.item_id || b.item_name) {
+        const rawMaterials = dbService.getRawMaterials();
+        const rm = rawMaterials.find(r =>
+          r.id === b.item_id ||
+          r.name.trim().toLowerCase() === b.item_name.trim().toLowerCase()
+        );
+        if (rm) {
+          const diff = newRawQty - oldRawQty;
+          const newRmQty = Math.max(0, rm.current_quantity + diff);
+          const newUnitCost = b.purchase_price > 0 && newRawQty > 0 ? b.purchase_price / newRawQty : rm.unit_cost;
+          dbService.saveRawMaterial({
+            ...rm,
+            current_quantity: newRmQty,
+            unit: b.unit || rm.unit,
+            unit_cost: newUnitCost
+          });
+        }
+      }
+      b.raw_material_qty = newRawQty;
+    }
+
+    if (
+      updatedData.desired_remaining_quantity !== undefined &&
+      !isNaN(updatedData.desired_remaining_quantity) &&
+      updatedData.desired_remaining_quantity >= 0
+    ) {
+      const desiredRem = updatedData.desired_remaining_quantity;
+      const newCap = (b.consumed_quantity || 0) + desiredRem;
+      b.original_quantity = newCap;
+      if (b.item_type === 'raw_material' || b.yield_capacity !== undefined) {
+        b.yield_capacity = newCap;
+        b.remaining_cups = desiredRem;
+      }
+      b.remaining_quantity = desiredRem;
+    } else if (
+      updatedData.yield_capacity !== undefined &&
+      !isNaN(updatedData.yield_capacity) &&
+      updatedData.yield_capacity >= 0
+    ) {
+      const newCap = updatedData.yield_capacity;
+      b.original_quantity = newCap;
+      if (b.item_type === 'raw_material' || b.yield_capacity !== undefined) {
+        b.yield_capacity = newCap;
+      }
+      b.remaining_quantity = Math.max(0, newCap - (b.consumed_quantity || 0));
+      b.remaining_cups = b.remaining_quantity;
+    } else {
+      const cap = b.yield_capacity || b.original_quantity || 0;
+      b.remaining_quantity = Math.max(0, cap - (b.consumed_quantity || 0));
+      b.remaining_cups = b.remaining_quantity;
+    }
+
+    const finalCap = b.yield_capacity || b.original_quantity || 0;
     const isSugar = isSugarMaterial(b.item_name);
     b.total_revenue = isSugar ? 0 : (b.total_revenue || 0);
     b.net_profit = isSugar ? 0 : (b.total_revenue - b.purchase_price);
     b.profit_margin = isSugar ? 0 : (b.purchase_price > 0 ? ((b.total_revenue - b.purchase_price) / b.purchase_price) * 100 : 0);
+    b.updated_at = new Date().toISOString();
 
-    // Auto status
     if (b.remaining_quantity <= 0) {
       b.status = 'COMPLETED';
       if (!b.ended_at) b.ended_at = new Date().toISOString();
-    } else if (b.remaining_quantity / cap <= 0.2) {
-      b.status = 'LOW';
     } else {
-      b.status = 'ACTIVE';
+      b.ended_at = undefined;
+      if (finalCap > 0 && b.remaining_quantity / finalCap <= 0.2) {
+        b.status = 'LOW';
+      } else {
+        b.status = 'ACTIVE';
+      }
     }
 
     list[idx] = b;
     setLocal(KEYS.INVENTORY_BATCHES, list);
 
-    // Log edit operation
+    // Keep linked ready/direct-sale product stock in sync
+    const products = dbService.getProducts();
+    const norm = (s: string) =>
+      (s || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي');
+    const bNorm = norm(b.item_name);
+    const matchingProd = products.find(p =>
+      !p.is_raw_material &&
+      (p.id === b.item_id || (bNorm && norm(p.name_ar) === bNorm))
+    );
+    if (matchingProd && (!matchingProd.recipe_ingredients || matchingProd.recipe_ingredients.length === 0)) {
+      const totalProdRemaining = list
+        .filter(nb =>
+          nb.status !== 'COMPLETED' &&
+          (nb.id === b.id || nb.item_id === matchingProd.id || norm(nb.item_name) === norm(matchingProd.name_ar))
+        )
+        .reduce((sum, nb) => sum + Math.max(0, nb.remaining_quantity || 0), 0);
+      dbService.saveProduct({
+        ...matchingProd,
+        current_stock: totalProdRemaining,
+        updated_at: new Date().toISOString()
+      });
+    }
+
     dbService.addInventoryBatchLog({
       batch_id: b.id,
       batch_serial: b.batch_serial,
       item_name: b.item_name,
       action_type: 'EDIT_BATCH',
-      quantity_changed: (b.yield_capacity || b.original_quantity) - oldYieldCap,
-      previous_quantity: oldYieldCap,
-      new_quantity: b.yield_capacity || b.original_quantity,
+      quantity_changed: b.remaining_quantity - oldRemaining,
+      previous_quantity: oldRemaining,
+      new_quantity: b.remaining_quantity,
       operator: operator || 'المالك',
-      reason: isConsumed
-        ? `تعديل معلومات عامة آمنة للدفعة المستهلكة (المورد: ${b.supplier || 'بدون'}, التوريد: ${b.purchase_date})`
-        : `تعديل كافة بيانات الدفعة غير المستهلكة (التكلفة: ${b.purchase_price} ج.م, السعة: ${b.original_quantity} ${b.yield_unit || 'كوب'})`
+      reason: `تعديل بيانات وكمية الدفعة (المخزن: ${b.raw_material_qty ?? 0} ${b.unit || 'وحدة'}, المتبقي: ${b.remaining_quantity} ${b.yield_unit || 'كوب'}, التكلفة: ${b.purchase_price} ج.م)`
     });
 
     return { success: true, list, batch: b };
+  },
+
+  setDailyRawMaterialAllocations: (
+    entries: Array<{
+      itemName: string;
+      itemType: 'raw_material' | 'ready_product';
+      rawMaterialId?: string;
+      productId?: string;
+      batchId?: string;
+      rawQty: number;
+      rawUnit: string;
+      dailyYieldQty: number;
+      yieldUnit: string;
+      batchCost?: number;
+      mode: 'SET_REMAINING' | 'ADD_NEW';
+      date?: string;
+    }>,
+    operator: string = 'المالك'
+  ): { success: boolean; updatedCount: number } => {
+    if (!entries || entries.length === 0) {
+      return { success: false, updatedCount: 0 };
+    }
+
+    const norm = (s: string) =>
+      (s || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي');
+
+    const todayStr = entries[0].date || new Date().toISOString().split('T')[0];
+    let updatedCount = 0;
+
+    const existingSession = dbService.getDailyRawMaterialsSession(todayStr);
+    const sessionItemsMap = new Map<string, DailyRawMaterialItem>();
+    if (existingSession?.items) {
+      existingSession.items.forEach(it => {
+        sessionItemsMap.set(norm(it.name_ar), { ...it });
+      });
+    }
+
+    for (const entry of entries) {
+      const cleanName = entry.itemName.trim();
+      if (!cleanName) continue;
+      const nName = norm(cleanName);
+      const safeRawQty = Math.max(0, isNaN(entry.rawQty) ? 0 : entry.rawQty);
+      const safeYieldQty = Math.max(0, isNaN(entry.dailyYieldQty) ? 0 : entry.dailyYieldQty);
+      const safeCost = entry.batchCost !== undefined && !isNaN(entry.batchCost) && entry.batchCost >= 0 ? entry.batchCost : undefined;
+
+      // Sync or create RawMaterial record for raw materials
+      const rawMaterials = dbService.getRawMaterials();
+      let resolvedItemId = entry.rawMaterialId || entry.productId || '';
+      if (entry.itemType === 'raw_material') {
+        let rm = rawMaterials.find(r =>
+          (entry.rawMaterialId && r.id === entry.rawMaterialId) || norm(r.name) === nName
+        );
+        if (rm) {
+          const nextRmQty = entry.mode === 'SET_REMAINING' ? safeRawQty : (rm.current_quantity || 0) + safeRawQty;
+          const nextUnitCost = safeCost !== undefined && safeCost > 0 && safeRawQty > 0
+            ? safeCost / safeRawQty
+            : rm.unit_cost;
+          dbService.saveRawMaterial({
+            ...rm,
+            current_quantity: nextRmQty,
+            unit: entry.rawUnit || rm.unit,
+            unit_cost: nextUnitCost
+          });
+          resolvedItemId = rm.id;
+        } else {
+          const newRm: RawMaterial = {
+            id: `raw_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+            name: cleanName,
+            unit: entry.rawUnit || 'كجم',
+            current_quantity: safeRawQty,
+            add_quantity: 0,
+            unit_cost: safeCost && safeRawQty > 0 ? safeCost / safeRawQty : 0,
+            total_cost: safeCost || 0,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+          dbService.saveRawMaterial(newRm);
+          resolvedItemId = newRm.id;
+        }
+      }
+
+      const batches = dbService.getInventoryBatches();
+      const matchingOpenBatches = batches.filter(b =>
+        b.status !== 'COMPLETED' &&
+        ((entry.batchId && b.id === entry.batchId) ||
+          (resolvedItemId && b.item_id === resolvedItemId) ||
+          norm(b.item_name) === nName)
+      ).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      if (entry.mode === 'SET_REMAINING') {
+        const targetBatch = (entry.batchId ? batches.find(b => b.id === entry.batchId) : null) || matchingOpenBatches[0];
+        if (targetBatch) {
+          dbService.editInventoryBatch(
+            targetBatch.id,
+            {
+              item_name: cleanName,
+              raw_material_qty: safeRawQty,
+              desired_remaining_quantity: safeYieldQty,
+              unit: entry.rawUnit || targetBatch.unit,
+              yield_unit: entry.yieldUnit || targetBatch.yield_unit || 'كوب',
+              purchase_price: safeCost !== undefined ? safeCost : targetBatch.purchase_price,
+              purchase_date: todayStr
+            },
+            operator
+          );
+
+          // If there are leftover duplicate auto "(بيع مباشر)" batches for the same item, mark them completed so total matches daily allocation
+          const afterEdit = dbService.getInventoryBatches();
+          let closedDuplicates = false;
+          const cleaned = afterEdit.map(b => {
+            if (
+              b.id !== targetBatch.id &&
+              b.status !== 'COMPLETED' &&
+              (b.batch_serial.includes('بيع مباشر') || b.batch_serial.includes('تشغيل فوري')) &&
+              norm(b.item_name) === nName
+            ) {
+              closedDuplicates = true;
+              return {
+                ...b,
+                remaining_quantity: 0,
+                remaining_cups: 0,
+                status: 'COMPLETED' as const,
+                ended_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              };
+            }
+            return b;
+          });
+          if (closedDuplicates) {
+            setLocal(KEYS.INVENTORY_BATCHES, cleaned);
+          }
+        } else if (safeYieldQty > 0 || safeRawQty > 0) {
+          const isSugar = isSugarMaterial(cleanName);
+          const costVal = safeCost ?? 0;
+          const capVal = safeYieldQty > 0 ? safeYieldQty : safeRawQty;
+          const nextNum = dbService.getNextBatchNumber(cleanName);
+          const newBatch: InventoryBatch = {
+            id: `batch_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+            batch_serial: `دفعة ${cleanName} رقم ${nextNum} (يومي ${todayStr})`,
+            item_type: entry.itemType,
+            item_id: resolvedItemId || `item_${Date.now()}`,
+            item_name: cleanName,
+            raw_material_qty: safeRawQty,
+            unit: entry.rawUnit || 'كجم',
+            original_quantity: capVal,
+            consumed_quantity: 0,
+            remaining_quantity: capVal,
+            yield_capacity: entry.itemType === 'raw_material' ? capVal : undefined,
+            remaining_cups: entry.itemType === 'raw_material' ? capVal : undefined,
+            yield_unit: entry.yieldUnit || (entry.itemType === 'raw_material' ? 'كوب' : 'قطعة'),
+            purchase_price: costVal,
+            supplier: 'تخصيص يومي',
+            purchase_date: todayStr,
+            status: 'ACTIVE',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            total_revenue: 0,
+            net_profit: isSugar ? 0 : -costVal,
+            profit_margin: isSugar ? 0 : (costVal > 0 ? -100 : 0)
+          };
+          dbService.saveInventoryBatch(newBatch);
+          dbService.addInventoryBatchLog({
+            batch_id: newBatch.id,
+            batch_serial: newBatch.batch_serial,
+            item_name: newBatch.item_name,
+            action_type: 'ADD_BATCH',
+            quantity_changed: capVal,
+            previous_quantity: 0,
+            new_quantity: capVal,
+            operator,
+            reason: `تحديد كمية يومية (${capVal} ${newBatch.yield_unit || newBatch.unit}) ليوم ${todayStr}`
+          });
+        }
+      } else {
+        // ADD_NEW: add a new daily batch on top of existing remaining stock
+        if (safeYieldQty > 0 || safeRawQty > 0) {
+          const isSugar = isSugarMaterial(cleanName);
+          const costVal = safeCost ?? 0;
+          const capVal = safeYieldQty > 0 ? safeYieldQty : safeRawQty;
+          const nextNum = dbService.getNextBatchNumber(cleanName);
+          const newBatch: InventoryBatch = {
+            id: `batch_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+            batch_serial: `دفعة ${cleanName} رقم ${nextNum} (يومي ${todayStr})`,
+            item_type: entry.itemType,
+            item_id: resolvedItemId || `item_${Date.now()}`,
+            item_name: cleanName,
+            raw_material_qty: safeRawQty,
+            unit: entry.rawUnit || 'كجم',
+            original_quantity: capVal,
+            consumed_quantity: 0,
+            remaining_quantity: capVal,
+            yield_capacity: entry.itemType === 'raw_material' ? capVal : undefined,
+            remaining_cups: entry.itemType === 'raw_material' ? capVal : undefined,
+            yield_unit: entry.yieldUnit || (entry.itemType === 'raw_material' ? 'كوب' : 'قطعة'),
+            purchase_price: costVal,
+            supplier: 'تخصيص يومي إضافي',
+            purchase_date: todayStr,
+            status: 'ACTIVE',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            total_revenue: 0,
+            net_profit: isSugar ? 0 : -costVal,
+            profit_margin: isSugar ? 0 : (costVal > 0 ? -100 : 0)
+          };
+          dbService.saveInventoryBatch(newBatch);
+          dbService.addInventoryBatchLog({
+            batch_id: newBatch.id,
+            batch_serial: newBatch.batch_serial,
+            item_name: newBatch.item_name,
+            action_type: 'MANUAL_ADD',
+            quantity_changed: capVal,
+            previous_quantity: 0,
+            new_quantity: capVal,
+            operator,
+            reason: `إضافة كمية يومية جديدة (+${capVal} ${newBatch.yield_unit || newBatch.unit}) ليوم ${todayStr}`
+          });
+        }
+      }
+
+      // Sync Ready/Direct product stock
+      const products = dbService.getProducts();
+      const matchingProd = products.find(p =>
+        !p.is_raw_material &&
+        ((entry.productId && p.id === entry.productId) || norm(p.name_ar) === nName)
+      );
+      if (matchingProd && (!matchingProd.recipe_ingredients || matchingProd.recipe_ingredients.length === 0)) {
+        const latestBatches = dbService.getInventoryBatches();
+        const totalProdRemaining = latestBatches
+          .filter(nb => nb.status !== 'COMPLETED' && (nb.item_id === matchingProd.id || norm(nb.item_name) === nName))
+          .reduce((sum, nb) => sum + Math.max(0, nb.remaining_quantity || 0), 0);
+        dbService.saveProduct({
+          ...matchingProd,
+          current_stock: totalProdRemaining,
+          updated_at: new Date().toISOString()
+        });
+      }
+
+      sessionItemsMap.set(nName, {
+        raw_material_id: resolvedItemId || `item_${nName}`,
+        name_ar: cleanName,
+        quantity: safeYieldQty,
+        cost: safeCost ?? 0,
+        unit: entry.yieldUnit || entry.rawUnit || 'وحدة'
+      });
+
+      updatedCount++;
+    }
+
+    dbService.saveDailyRawMaterialsSession({
+      id: existingSession?.id || `rm_sess_${Date.now()}`,
+      business_date: todayStr,
+      items: Array.from(sessionItemsMap.values()),
+      created_at: existingSession?.created_at || new Date().toISOString(),
+      is_active: true
+    });
+
+    return { success: true, updatedCount };
   },
 
   getInventoryBatchLogs: (): InventoryBatchLog[] => {

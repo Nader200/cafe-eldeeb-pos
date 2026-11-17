@@ -631,6 +631,7 @@ export interface InventoryBatch {
   net_profit?: number; // صافي ربح الدفعة (الإيرادات - تكلفة الدفعة الثابتة)
   profit_margin?: number; // نسبة ربح الدفعة %
   notes?: string; // ملاحظات الشراء أو الدفعة
+  updated_at?: string;
 }
 
 export interface InventoryBatchLog {

@@ -48,7 +48,7 @@ export default function ProductionBatchesView({
   onShowWarningAlert
 }: ProductionBatchesViewProps) {
   // Main Screen Sub-Tabs
-  const [activeMainTab, setActiveMainTab] = useState<'raw_batches' | 'ready_products' | 'general_reports'>('raw_batches');
+  const [activeMainTab, setActiveMainTab] = useState<'raw_batches' | 'daily_allocation' | 'ready_products' | 'general_reports'>('raw_batches');
 
   // Database State
   const [batches, setBatches] = useState<InventoryBatch[]>([]);
@@ -64,6 +64,26 @@ export default function ProductionBatchesView({
   const [showAddBatchModal, setShowAddBatchModal] = useState<boolean>(false);
   const [selectedBatchForReport, setSelectedBatchForReport] = useState<InventoryBatch | null>(null);
   const [batchToDeleteConfirm, setBatchToDeleteConfirm] = useState<InventoryBatch | null>(null);
+
+  // Daily Allocation State
+  const [dailyDate, setDailyDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [dailyMode, setDailyMode] = useState<'SET_REMAINING' | 'ADD_NEW'>('SET_REMAINING');
+  const [dailySearchQuery, setDailySearchQuery] = useState<string>('');
+  const [dailyDrafts, setDailyDrafts] = useState<Record<string, {
+    rawQty: string;
+    dailyYieldQty: string;
+    batchCost: string;
+    rawUnit: string;
+    yieldUnit: string;
+    dirty?: boolean;
+  }>>({});
+  const [newDailyItemName, setNewDailyItemName] = useState<string>('');
+  const [newDailyItemType, setNewDailyItemType] = useState<'raw_material' | 'ready_product'>('raw_material');
+  const [newDailyRawQty, setNewDailyRawQty] = useState<string>('1');
+  const [newDailyRawUnit, setNewDailyRawUnit] = useState<string>('كجم');
+  const [newDailyYieldQty, setNewDailyYieldQty] = useState<string>('50');
+  const [newDailyYieldUnit, setNewDailyYieldUnit] = useState<string>('كوب');
+  const [newDailyCost, setNewDailyCost] = useState<string>('0');
 
   // New Batch Form State
   const [selectedRmId, setSelectedRmId] = useState<string>('');
@@ -104,8 +124,11 @@ export default function ProductionBatchesView({
   const [editNotes, setEditNotes] = useState<string>('');
   const [editPurchasePrice, setEditPurchasePrice] = useState<string>('');
   const [editRawMaterialQty, setEditRawMaterialQty] = useState<string>('');
+  const [editRawUnit, setEditRawUnit] = useState<string>('كجم');
   const [editYieldCapacity, setEditYieldCapacity] = useState<string>('');
+  const [editRemainingQty, setEditRemainingQty] = useState<string>('');
   const [editYieldUnit, setEditYieldUnit] = useState<string>('');
+  const [editResetConsumed, setEditResetConsumed] = useState<boolean>(false);
 
   // Load Database Data
   const loadAllData = () => {
@@ -303,6 +326,9 @@ export default function ProductionBatchesView({
   };
 
   const handleOpenEditBatchModal = (batch: InventoryBatch) => {
+    const cap = batch.yield_capacity || batch.original_quantity || 50;
+    const consumed = batch.consumed_quantity || 0;
+    const rem = batch.remaining_quantity !== undefined ? batch.remaining_quantity : Math.max(0, cap - consumed);
     setEditingBatch(batch);
     setEditItemName(batch.item_name || '');
     setEditSupplier(batch.supplier || '');
@@ -310,35 +336,60 @@ export default function ProductionBatchesView({
     setEditExpiryDate(batch.expiry_date || '');
     setEditInvoiceNumber(batch.invoice_number || '');
     setEditNotes(batch.notes || '');
-    setEditPurchasePrice(batch.purchase_price ? batch.purchase_price.toString() : '0');
-    setEditRawMaterialQty(batch.raw_material_qty ? batch.raw_material_qty.toString() : '1');
-    setEditYieldCapacity((batch.yield_capacity || batch.original_quantity || 50).toString());
-    setEditYieldUnit(batch.yield_unit || 'كوب');
+    setEditPurchasePrice(batch.purchase_price !== undefined ? batch.purchase_price.toString() : '0');
+    setEditRawMaterialQty(batch.raw_material_qty !== undefined ? batch.raw_material_qty.toString() : '1');
+    setEditRawUnit(batch.unit || 'كجم');
+    setEditYieldCapacity(cap.toString());
+    setEditRemainingQty(rem.toString());
+    setEditYieldUnit(batch.yield_unit || (batch.item_type === 'ready_product' ? 'قطعة' : 'كوب'));
+    setEditResetConsumed(false);
     setShowEditBatchModal(true);
+  };
+
+  const handleEditRemainingChange = (val: string) => {
+    setEditRemainingQty(val);
+    if (!editingBatch) return;
+    const remNum = parseFloat(val);
+    const consumed = editResetConsumed ? 0 : (editingBatch.consumed_quantity || 0);
+    if (!isNaN(remNum) && remNum >= 0) {
+      setEditYieldCapacity((consumed + remNum).toString());
+    }
+  };
+
+  const handleEditYieldCapacityChange = (val: string) => {
+    setEditYieldCapacity(val);
+    if (!editingBatch) return;
+    const capNum = parseFloat(val);
+    const consumed = editResetConsumed ? 0 : (editingBatch.consumed_quantity || 0);
+    if (!isNaN(capNum) && capNum >= 0) {
+      setEditRemainingQty(Math.max(0, capNum - consumed).toString());
+    }
   };
 
   const handleSaveEditBatch = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingBatch) return;
 
-    const isConsumed = (editingBatch.consumed_quantity || 0) > 0;
     const priceNum = parseFloat(editPurchasePrice);
     const rawQtyNum = parseFloat(editRawMaterialQty);
     const yieldNum = parseFloat(editYieldCapacity);
+    const remNum = parseFloat(editRemainingQty);
 
-    if (!isConsumed) {
-      if (isNaN(priceNum) || priceNum < 0) {
-        onShowWarningAlert('يرجى إدخال تكلفة شراء صحيحة!');
-        return;
-      }
-      if (isNaN(rawQtyNum) || rawQtyNum <= 0) {
-        onShowWarningAlert('يرجى إدخال كمية مادة خام أكبر من الصفر!');
-        return;
-      }
-      if (isNaN(yieldNum) || yieldNum <= 0) {
-        onShowWarningAlert('يرجى إدخال سعة إنتاجية أكبر من الصفر!');
-        return;
-      }
+    if (isNaN(priceNum) || priceNum < 0) {
+      onShowWarningAlert('يرجى إدخال تكلفة شراء صحيحة (صفر أو أكثر)!');
+      return;
+    }
+    if (isNaN(rawQtyNum) || rawQtyNum < 0) {
+      onShowWarningAlert('يرجى إدخال كمية مادة بالمخزن صحيحة!');
+      return;
+    }
+    if (isNaN(remNum) || remNum < 0) {
+      onShowWarningAlert('يرجى إدخال الكمية المتبقية المتاحة بشكل صحيح!');
+      return;
+    }
+    if (isNaN(yieldNum) || yieldNum < 0) {
+      onShowWarningAlert('يرجى إدخال سعة إنتاجية صحيحة!');
+      return;
     }
 
     const res = dbService.editInventoryBatch(
@@ -350,16 +401,19 @@ export default function ProductionBatchesView({
         expiry_date: editExpiryDate,
         invoice_number: editInvoiceNumber,
         notes: editNotes,
-        purchase_price: isConsumed ? undefined : priceNum,
-        raw_material_qty: isConsumed ? undefined : rawQtyNum,
-        yield_capacity: isConsumed ? undefined : yieldNum,
+        purchase_price: priceNum,
+        raw_material_qty: rawQtyNum,
+        unit: editRawUnit,
+        yield_capacity: yieldNum,
+        desired_remaining_quantity: remNum,
+        reset_consumed: editResetConsumed,
         yield_unit: editYieldUnit
       },
       'مدير الإنتاج'
     );
 
     if (res.success) {
-      onShowSuccessAlert(`تم تعديل الدفعة "${editingBatch.batch_serial}" بنجاح!`);
+      onShowSuccessAlert(`تم تعديل الدفعة "${editingBatch.batch_serial}" وتحديث الكمية المتبقية إلى ${remNum} ${editYieldUnit || 'وحدة'} بنجاح! ✅`);
       setShowEditBatchModal(false);
       setEditingBatch(null);
       loadAllData();
@@ -432,7 +486,7 @@ export default function ProductionBatchesView({
 
     dbService.saveProduct(prodData);
 
-    if (stock > 0 && !editingProduct) {
+    if (!editingProduct && stock > 0) {
       const nextNum = dbService.getNextBatchNumber(name);
       const batchSerial = `دفعة ${name} رقم ${nextNum}`;
       const newBatch: InventoryBatch = {
@@ -450,9 +504,24 @@ export default function ProductionBatchesView({
         supplier: 'مورد عام',
         purchase_date: new Date().toISOString().split('T')[0],
         status: 'ACTIVE',
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       };
       dbService.saveInventoryBatch(newBatch);
+    } else if (editingProduct) {
+      dbService.setDailyRawMaterialAllocations([
+        {
+          itemName: name,
+          itemType: 'ready_product',
+          productId: prodData.id,
+          rawQty: stock,
+          rawUnit: prodData.unit || 'قطعة',
+          dailyYieldQty: stock,
+          yieldUnit: prodData.unit || 'قطعة',
+          batchCost: costPrice * stock,
+          mode: 'SET_REMAINING'
+        }
+      ], 'مدير الإنتاج');
     }
 
     onShowSuccessAlert(`تم حفظ المنتج الجاهز "${name}" بنجاح! 🥤`);
@@ -588,6 +657,288 @@ export default function ProductionBatchesView({
     };
   }, [batches, readyProductsList, readyProductMetrics]);
 
+  // Unified Daily Item List (Raw Materials + Batches + Direct-Sale Products)
+  const dailyAllocationItems = useMemo(() => {
+    const norm = (s: string) =>
+      (s || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي');
+
+    interface UnifiedDailyItem {
+      key: string;
+      itemName: string;
+      itemType: 'raw_material' | 'ready_product';
+      rawMaterialId?: string;
+      productId?: string;
+      primaryBatchId?: string;
+      currentRawQty: number;
+      rawUnit: string;
+      currentRemainingQty: number;
+      consumedTodayOrTotal: number;
+      yieldUnit: string;
+      lastCost: number;
+      hasUnlimitedPlaceholder: boolean;
+      lastDate?: string;
+    }
+
+    const map = new Map<string, UnifiedDailyItem>();
+
+    // 1. From RawMaterials
+    rawMaterials.forEach(rm => {
+      const k = norm(rm.name);
+      if (!k) return;
+      map.set(k, {
+        key: k,
+        itemName: rm.name.trim(),
+        itemType: 'raw_material',
+        rawMaterialId: rm.id,
+        currentRawQty: rm.current_quantity || 0,
+        rawUnit: rm.unit || 'كجم',
+        currentRemainingQty: 0,
+        consumedTodayOrTotal: 0,
+        yieldUnit: 'كوب',
+        lastCost: rm.total_cost || 0,
+        hasUnlimitedPlaceholder: (rm.current_quantity || 0) >= 9999
+      });
+    });
+
+    // 2. From Batches (aggregate open batches or retain latest metadata)
+    const sortedBatches = [...batches].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    sortedBatches.forEach(b => {
+      const k = norm(b.item_name);
+      if (!k) return;
+      const isUnlimited = (b.remaining_quantity || 0) >= 9999 || (b.raw_material_qty || 0) >= 9999;
+      const cap = b.yield_capacity || b.original_quantity || 0;
+      const rem = b.status === 'COMPLETED'
+        ? 0
+        : (b.remaining_quantity !== undefined ? b.remaining_quantity : Math.max(0, cap - (b.consumed_quantity || 0)));
+
+      const existing = map.get(k);
+      if (existing) {
+        if (!existing.primaryBatchId && b.status !== 'COMPLETED') {
+          existing.primaryBatchId = b.id;
+          existing.rawUnit = b.unit || existing.rawUnit;
+          existing.yieldUnit = b.yield_unit || existing.yieldUnit;
+          existing.lastCost = b.purchase_price ?? existing.lastCost;
+          existing.lastDate = b.purchase_date;
+          if (b.raw_material_qty !== undefined) {
+            existing.currentRawQty = b.raw_material_qty;
+          }
+        }
+        if (b.status !== 'COMPLETED') {
+          existing.currentRemainingQty += rem;
+          if (isUnlimited) existing.hasUnlimitedPlaceholder = true;
+        }
+        existing.consumedTodayOrTotal += (b.consumed_quantity || 0);
+        if (!existing.lastDate) existing.lastDate = b.purchase_date;
+      } else {
+        map.set(k, {
+          key: k,
+          itemName: b.item_name.trim(),
+          itemType: b.item_type || 'raw_material',
+          rawMaterialId: b.item_type === 'raw_material' ? b.item_id : undefined,
+          productId: b.item_type === 'ready_product' ? b.item_id : undefined,
+          primaryBatchId: b.status !== 'COMPLETED' ? b.id : undefined,
+          currentRawQty: b.raw_material_qty ?? 0,
+          rawUnit: b.unit || (b.item_type === 'ready_product' ? 'قطعة' : 'كجم'),
+          currentRemainingQty: b.status === 'COMPLETED' ? 0 : rem,
+          consumedTodayOrTotal: b.consumed_quantity || 0,
+          yieldUnit: b.yield_unit || (b.item_type === 'ready_product' ? 'قطعة' : 'كوب'),
+          lastCost: b.purchase_price || 0,
+          hasUnlimitedPlaceholder: b.status !== 'COMPLETED' && isUnlimited,
+          lastDate: b.purchase_date
+        });
+      }
+    });
+
+    // 3. Include direct-sale ready products (not PlayStation / service items)
+    products.forEach(p => {
+      if (p.is_raw_material) return;
+      if (p.id === 'service_playstation' || p.id === 'prod_playstation' || p.id.startsWith('service_')) return;
+      if (p.recipe_ingredients && p.recipe_ingredients.length > 0) return;
+      const k = norm(p.name_ar);
+      if (!k) return;
+      const existing = map.get(k);
+      if (existing) {
+        if (!existing.productId) existing.productId = p.id;
+        if (existing.currentRemainingQty === 0 && p.current_stock > 0 && !existing.primaryBatchId) {
+          existing.currentRemainingQty = p.current_stock;
+          existing.currentRawQty = p.current_stock;
+        }
+      } else {
+        map.set(k, {
+          key: k,
+          itemName: p.name_ar.trim(),
+          itemType: 'ready_product',
+          productId: p.id,
+          currentRawQty: p.current_stock || 0,
+          rawUnit: p.unit || 'قطعة',
+          currentRemainingQty: p.current_stock || 0,
+          consumedTodayOrTotal: 0,
+          yieldUnit: p.unit || 'قطعة',
+          lastCost: p.cost_price || 0,
+          hasUnlimitedPlaceholder: (p.current_stock || 0) >= 9999
+        });
+      }
+    });
+
+    const q = dailySearchQuery.trim().toLowerCase();
+    return Array.from(map.values())
+      .filter(it => !q || it.itemName.toLowerCase().includes(q))
+      .sort((a, b) => {
+        if (a.hasUnlimitedPlaceholder !== b.hasUnlimitedPlaceholder) {
+          return a.hasUnlimitedPlaceholder ? -1 : 1;
+        }
+        return a.itemName.localeCompare(b.itemName, 'ar');
+      });
+  }, [batches, rawMaterials, products, dailySearchQuery]);
+
+  const getDailyDraft = (item: (typeof dailyAllocationItems)[number]) => {
+    const existing = dailyDrafts[item.key];
+    if (existing) return existing;
+    return {
+      rawQty: item.hasUnlimitedPlaceholder ? '0' : item.currentRawQty.toString(),
+      dailyYieldQty: item.hasUnlimitedPlaceholder ? '0' : item.currentRemainingQty.toString(),
+      batchCost: item.lastCost.toString(),
+      rawUnit: item.rawUnit,
+      yieldUnit: item.yieldUnit,
+      dirty: false
+    };
+  };
+
+  const updateDailyDraft = (
+    item: (typeof dailyAllocationItems)[number],
+    patch: Partial<{ rawQty: string; dailyYieldQty: string; batchCost: string; rawUnit: string; yieldUnit: string; dirty: boolean }>
+  ) => {
+    setDailyDrafts(prev => {
+      const base = prev[item.key] || {
+        rawQty: item.hasUnlimitedPlaceholder ? '0' : item.currentRawQty.toString(),
+        dailyYieldQty: item.hasUnlimitedPlaceholder ? '0' : item.currentRemainingQty.toString(),
+        batchCost: item.lastCost.toString(),
+        rawUnit: item.rawUnit,
+        yieldUnit: item.yieldUnit,
+        dirty: false
+      };
+      return {
+        ...prev,
+        [item.key]: { ...base, ...patch, dirty: true }
+      };
+    });
+  };
+
+  const handleSaveSingleDailyItem = (item: (typeof dailyAllocationItems)[number]) => {
+    const d = getDailyDraft(item);
+    const yieldNum = parseFloat(d.dailyYieldQty);
+    const rawNum = parseFloat(d.rawQty);
+    const costNum = parseFloat(d.batchCost);
+
+    if (isNaN(yieldNum) || yieldNum < 0 || isNaN(rawNum) || rawNum < 0) {
+      onShowWarningAlert(`يرجى إدخال كمية صحيحة للصنف "${item.itemName}"`);
+      return;
+    }
+
+    const res = dbService.setDailyRawMaterialAllocations([
+      {
+        itemName: item.itemName,
+        itemType: item.itemType,
+        rawMaterialId: item.rawMaterialId,
+        productId: item.productId,
+        batchId: item.primaryBatchId,
+        rawQty: rawNum,
+        rawUnit: d.rawUnit || item.rawUnit,
+        dailyYieldQty: yieldNum,
+        yieldUnit: d.yieldUnit || item.yieldUnit,
+        batchCost: isNaN(costNum) ? undefined : costNum,
+        mode: dailyMode,
+        date: dailyDate
+      }
+    ], 'المدير / المسؤول');
+
+    if (res.success) {
+      setDailyDrafts(prev => {
+        const next = { ...prev };
+        delete next[item.key];
+        return next;
+      });
+      onShowSuccessAlert(
+        dailyMode === 'SET_REMAINING'
+          ? `تم تحديد كمية اليوم للصنف "${item.itemName}" لتصبح ${yieldNum} ${d.yieldUnit || item.yieldUnit} ✅`
+          : `تم إضافة ${yieldNum} ${d.yieldUnit || item.yieldUnit} جديدة للصنف "${item.itemName}" ✅`
+      );
+      loadAllData();
+    }
+  };
+
+  const handleSaveAllDirtyDailyItems = () => {
+    const dirtyItems = dailyAllocationItems.filter(it => dailyDrafts[it.key]?.dirty);
+    const targets = dirtyItems.length > 0 ? dirtyItems : dailyAllocationItems;
+    if (targets.length === 0) {
+      onShowWarningAlert('لا توجد أصناف لتحديثها!');
+      return;
+    }
+
+    const entries = targets.map(item => {
+      const d = getDailyDraft(item);
+      const yieldNum = Math.max(0, parseFloat(d.dailyYieldQty) || 0);
+      const rawNum = Math.max(0, parseFloat(d.rawQty) || 0);
+      const costNum = parseFloat(d.batchCost);
+      return {
+        itemName: item.itemName,
+        itemType: item.itemType,
+        rawMaterialId: item.rawMaterialId,
+        productId: item.productId,
+        batchId: item.primaryBatchId,
+        rawQty: rawNum,
+        rawUnit: d.rawUnit || item.rawUnit,
+        dailyYieldQty: yieldNum,
+        yieldUnit: d.yieldUnit || item.yieldUnit,
+        batchCost: isNaN(costNum) ? undefined : costNum,
+        mode: dailyMode,
+        date: dailyDate
+      };
+    });
+
+    const res = dbService.setDailyRawMaterialAllocations(entries, 'المدير / المسؤول');
+    if (res.success) {
+      setDailyDrafts({});
+      onShowSuccessAlert(`تم اعتماد وحفظ الكميات اليومية لعدد (${res.updatedCount}) صنف ليوم ${dailyDate} بنجاح! 📅✅`);
+      loadAllData();
+    }
+  };
+
+  const handleAddNewDailyItem = (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = newDailyItemName.trim();
+    if (!clean) {
+      onShowWarningAlert('يرجى كتابة اسم الصنف أو المادة الخام!');
+      return;
+    }
+    const rawNum = Math.max(0, parseFloat(newDailyRawQty) || 0);
+    const yieldNum = Math.max(0, parseFloat(newDailyYieldQty) || 0);
+    const costNum = Math.max(0, parseFloat(newDailyCost) || 0);
+
+    const res = dbService.setDailyRawMaterialAllocations([
+      {
+        itemName: clean,
+        itemType: newDailyItemType,
+        rawQty: rawNum,
+        rawUnit: newDailyRawUnit.trim() || 'وحدة',
+        dailyYieldQty: yieldNum,
+        yieldUnit: newDailyYieldUnit.trim() || 'وحدة',
+        batchCost: costNum,
+        mode: 'SET_REMAINING',
+        date: dailyDate
+      }
+    ], 'المدير / المسؤول');
+
+    if (res.success) {
+      onShowSuccessAlert(`تم إضافة الصنف "${clean}" وتحديد كميته اليومية (${yieldNum} ${newDailyYieldUnit}) ✅`);
+      setNewDailyItemName('');
+      setNewDailyRawQty('1');
+      setNewDailyYieldQty('50');
+      setNewDailyCost('0');
+      loadAllData();
+    }
+  };
+
   const formatEGP = (num: number) => {
     return `${num.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ج.م`;
   };
@@ -609,13 +960,23 @@ export default function ProductionBatchesView({
               </span>
             </h1>
             <p className="text-xs text-gray-400 mt-0.5">
-              نظام محمي محاسبياً: المواد الخام بنظام دفعات الإنتاج (1 كجم = 50 كوب = تكلفة ثابتة)، والمنتجات الجاهزة بالوحدة
+              إدارة دفعات المواد الخام، تعديل الكميات بحرية، وتحديد الكميات اليومية المتاحة لكل صنف
             </p>
           </div>
         </div>
 
         {/* Action Buttons based on active main tab */}
-        <div className="flex items-center gap-2 z-10">
+        <div className="flex flex-wrap items-center gap-2 z-10">
+          {activeMainTab !== 'daily_allocation' && (
+            <button
+              onClick={() => setActiveMainTab('daily_allocation')}
+              className="px-3.5 py-2.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 font-black rounded-xl text-xs shadow-lg cursor-pointer transition-all flex items-center gap-2 active:scale-95"
+            >
+              <Calendar className="w-4 h-4" />
+              <span>تحديد الكميات اليومية</span>
+            </button>
+          )}
+
           {activeMainTab === 'raw_batches' && (
             <button
               onClick={() => {
@@ -700,7 +1061,7 @@ export default function ProductionBatchesView({
       </div>
 
       {/* --- MAIN TABS SWITCHER --- */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-black/60 p-1.5 rounded-2xl border border-gray-800">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-black/60 p-1.5 rounded-2xl border border-gray-800">
         <button
           onClick={() => setActiveMainTab('raw_batches')}
           className={`w-full py-2.5 px-3 rounded-xl text-xs font-black cursor-pointer transition-all flex items-center justify-center gap-2 ${
@@ -711,8 +1072,23 @@ export default function ProductionBatchesView({
         >
           <Layers className="w-4 h-4 shrink-0" />
           <span className="truncate">المواد الخام (Batches)</span>
-          <span className="text-[10px] bg-black/30 text-black/80 px-2 py-0.5 rounded-full font-mono shrink-0">
+          <span className="text-[10px] bg-black/30 px-2 py-0.5 rounded-full font-mono shrink-0">
             {batches.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveMainTab('daily_allocation')}
+          className={`w-full py-2.5 px-3 rounded-xl text-xs font-black cursor-pointer transition-all flex items-center justify-center gap-2 ${
+            activeMainTab === 'daily_allocation'
+              ? 'bg-gradient-to-r from-emerald-600 to-teal-500 text-white shadow-lg scale-[1.01]'
+              : 'text-emerald-300/80 hover:text-white hover:bg-emerald-950/40'
+          }`}
+        >
+          <Calendar className="w-4 h-4 shrink-0" />
+          <span className="truncate">تحديد الكمية اليومية</span>
+          <span className="text-[10px] bg-black/30 px-2 py-0.5 rounded-full font-mono shrink-0">
+            {dailyAllocationItems.length}
           </span>
         </button>
 
@@ -735,7 +1111,7 @@ export default function ProductionBatchesView({
           onClick={() => setActiveMainTab('general_reports')}
           className={`w-full py-2.5 px-3 rounded-xl text-xs font-black cursor-pointer transition-all flex items-center justify-center gap-2 ${
             activeMainTab === 'general_reports'
-              ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-lg scale-[1.01]'
+              ? 'bg-gradient-to-r from-amber-600 to-amber-500 text-black shadow-lg scale-[1.01]'
               : 'text-gray-400 hover:text-white hover:bg-gray-900/40'
           }`}
         >
@@ -743,6 +1119,314 @@ export default function ProductionBatchesView({
           <span className="truncate">التقارير الشاملة والأرباح</span>
         </button>
       </div>
+
+      {/* ========================================================================= */}
+      {/* TAB 1.5: DAILY RAW MATERIAL & ITEM QUANTITY ALLOCATION                    */}
+      {/* ========================================================================= */}
+      {activeMainTab === 'daily_allocation' && (
+        <div className="space-y-4">
+          {/* Top Guide + Controls */}
+          <div className="bg-gradient-to-r from-emerald-950/40 via-black to-teal-950/30 border border-emerald-800/50 rounded-2xl p-4 space-y-3">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <Calendar className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                <div>
+                  <h2 className="text-sm font-black text-emerald-300">
+                    تحديد الكمية اليومية للمواد الخام ولكل صنف
+                  </h2>
+                  <p className="text-[11px] text-gray-300 mt-0.5">
+                    حدد يومياً الكمية المتاحة لكل صنف (أكواب، قطع، حجر، جرام...) ليتم الخصم منها مع كل فاتورة مبيعات، مع إمكانية تعديل أي كمية حتى لو كانت 99999 أو مستهلكة جزئياً.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <label className="text-[11px] text-gray-400 font-bold">التاريخ:</label>
+                <input
+                  type="date"
+                  value={dailyDate}
+                  onChange={(e) => setDailyDate(e.target.value)}
+                  className="bg-black/70 border border-gray-700 text-white rounded-xl px-3 py-1.5 text-xs font-mono focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+            </div>
+
+            {/* Mode Switcher + Search + Save All */}
+            <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 pt-2 border-t border-emerald-900/40">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDailyMode('SET_REMAINING')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all border ${
+                    dailyMode === 'SET_REMAINING'
+                      ? 'bg-emerald-600 text-white border-emerald-400 shadow-lg'
+                      : 'bg-black/60 text-gray-400 border-gray-800 hover:text-white'
+                  }`}
+                >
+                  تعيين المتبقي اليوم بالضبط
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDailyMode('ADD_NEW')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all border ${
+                    dailyMode === 'ADD_NEW'
+                      ? 'bg-gold-600 text-black border-gold-400 shadow-lg'
+                      : 'bg-black/60 text-gray-400 border-gray-800 hover:text-white'
+                  }`}
+                >
+                  إضافة كمية جديدة على المتبقي (+)
+                </button>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <div className="relative w-full sm:w-64">
+                  <Search className="w-4 h-4 text-gray-500 absolute right-3 top-2" />
+                  <input
+                    type="text"
+                    placeholder="بحث باسم الصنف..."
+                    value={dailySearchQuery}
+                    onChange={(e) => setDailySearchQuery(e.target.value)}
+                    className="w-full bg-black/60 border border-gray-800 text-white rounded-xl pr-9 pl-3 py-1.5 text-xs focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSaveAllDirtyDailyItems}
+                  className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white font-black rounded-xl text-xs shadow-lg cursor-pointer transition-all flex items-center justify-center gap-2 active:scale-95"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>
+                    {(() => {
+                      const dirtyCount = Object.keys(dailyDrafts).filter(k => dailyDrafts[k]?.dirty).length;
+                      return dirtyCount > 0 ? `اعتماد التعديلات (${dirtyCount})` : 'اعتماد كميات اليوم للجميع';
+                    })()}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Add New Daily Item Form */}
+          <form
+            onSubmit={handleAddNewDailyItem}
+            className="bg-luxury-card border border-luxury-border rounded-2xl p-3.5 grid grid-cols-2 sm:grid-cols-6 gap-2 items-end"
+          >
+            <div className="col-span-2 sm:col-span-2">
+              <label className="text-[10px] text-gold-400 font-bold block mb-1">إضافة صنف / مادة خام جديدة لليوم</label>
+              <input
+                type="text"
+                placeholder="مثال: بن، شاي، لى طبى، حجر سلوم..."
+                value={newDailyItemName}
+                onChange={(e) => setNewDailyItemName(e.target.value)}
+                className="w-full bg-black/60 border border-gray-800 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-gold-500"
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] text-gray-400 font-bold block mb-1">الكمية بالمخزن</label>
+              <div className="flex gap-1">
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  value={newDailyRawQty}
+                  onChange={(e) => setNewDailyRawQty(e.target.value)}
+                  className="w-full bg-black/60 border border-gray-800 text-blue-300 font-mono font-bold rounded-xl px-2 py-2 text-xs text-center focus:outline-none focus:border-gold-500"
+                />
+                <input
+                  type="text"
+                  value={newDailyRawUnit}
+                  onChange={(e) => setNewDailyRawUnit(e.target.value)}
+                  className="w-14 bg-black/60 border border-gray-800 text-gray-300 rounded-xl px-1.5 py-2 text-[10px] text-center focus:outline-none"
+                  placeholder="وحدة"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] text-emerald-400 font-bold block mb-1">كمية البيع اليوم</label>
+              <div className="flex gap-1">
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  value={newDailyYieldQty}
+                  onChange={(e) => setNewDailyYieldQty(e.target.value)}
+                  className="w-full bg-black/60 border border-emerald-800/60 text-emerald-300 font-mono font-bold rounded-xl px-2 py-2 text-xs text-center focus:outline-none focus:border-emerald-500"
+                />
+                <input
+                  type="text"
+                  value={newDailyYieldUnit}
+                  onChange={(e) => setNewDailyYieldUnit(e.target.value)}
+                  className="w-14 bg-black/60 border border-gray-800 text-gray-300 rounded-xl px-1.5 py-2 text-[10px] text-center focus:outline-none"
+                  placeholder="كوب"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] text-amber-400 font-bold block mb-1">التكلفة / النوع</label>
+              <div className="flex gap-1">
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  value={newDailyCost}
+                  onChange={(e) => setNewDailyCost(e.target.value)}
+                  className="w-full bg-black/60 border border-gray-800 text-amber-300 font-mono font-bold rounded-xl px-2 py-2 text-xs text-center focus:outline-none"
+                  placeholder="0"
+                />
+                <select
+                  value={newDailyItemType}
+                  onChange={(e) => setNewDailyItemType(e.target.value as 'raw_material' | 'ready_product')}
+                  className="bg-black/60 border border-gray-800 text-gray-200 rounded-xl px-1.5 py-2 text-[10px] focus:outline-none"
+                >
+                  <option value="raw_material">خام</option>
+                  <option value="ready_product">جاهز</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <button
+                type="submit"
+                className="w-full py-2 px-3 bg-gradient-to-r from-gold-600 to-gold-500 hover:from-gold-500 hover:to-gold-400 text-black font-black rounded-xl text-xs cursor-pointer transition-all flex items-center justify-center gap-1"
+              >
+                <PlusCircle className="w-4 h-4" />
+                <span>إضافة لليوم</span>
+              </button>
+            </div>
+          </form>
+
+          {/* Items Allocation Cards / Table */}
+          {dailyAllocationItems.length === 0 ? (
+            <div className="bg-luxury-card border border-luxury-border rounded-3xl p-10 text-center text-gray-400 text-sm font-bold">
+              لا توجد أصناف مطابقة للبحث! استخدم النموذج بالأعلى لإضافة صنف وتحديد كميته اليومية.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {dailyAllocationItems.map(item => {
+                const draft = getDailyDraft(item);
+                const isDirty = !!draft.dirty;
+                return (
+                  <div
+                    key={item.key}
+                    className={`bg-luxury-card rounded-2xl p-4 border transition-all space-y-3 shadow-lg ${
+                      item.hasUnlimitedPlaceholder
+                        ? 'border-amber-500/60 bg-amber-950/10'
+                        : isDirty
+                        ? 'border-emerald-500/80 bg-emerald-950/10'
+                        : 'border-luxury-border'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="text-sm font-black text-white">{item.itemName}</h3>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold border ${
+                            item.itemType === 'raw_material'
+                              ? 'bg-gold-500/15 text-gold-400 border-gold-500/30'
+                              : 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+                          }`}>
+                            {item.itemType === 'raw_material' ? 'مادة خام' : 'منتج جاهز'}
+                          </span>
+                          {item.hasUnlimitedPlaceholder && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-md font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                              رصيد مفتوح (99999) — حدد الكمية
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 text-[11px] text-gray-400 mt-1">
+                          <span>
+                            المتبقي حالياً:{' '}
+                            <strong className={`font-mono ${item.currentRemainingQty > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {item.currentRemainingQty} {item.yieldUnit}
+                            </strong>
+                          </span>
+                          <span>
+                            المباع: <strong className="text-gray-200 font-mono">{item.consumedTodayOrTotal}</strong>
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleSaveSingleDailyItem(item)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black cursor-pointer transition-all flex items-center gap-1 shrink-0 ${
+                          isDirty
+                            ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md'
+                            : 'bg-gray-800 hover:bg-gray-700 text-gray-200'
+                        }`}
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>حفظ</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="text-[10px] text-emerald-400 font-bold block mb-1">
+                          {dailyMode === 'SET_REMAINING' ? `المتاح اليوم (${draft.yieldUnit})` : `إضافة (+) (${draft.yieldUnit})`}
+                        </label>
+                        <input
+                          type="number"
+                          step="any"
+                          min="0"
+                          value={draft.dailyYieldQty}
+                          onChange={(e) => updateDailyDraft(item, { dailyYieldQty: e.target.value })}
+                          className="w-full bg-black/70 border border-emerald-700/60 text-emerald-300 font-black font-mono rounded-xl py-2 px-2 text-xs text-center focus:outline-none focus:border-emerald-400"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] text-blue-400 font-bold block mb-1">
+                          كمية المخزن ({draft.rawUnit})
+                        </label>
+                        <input
+                          type="number"
+                          step="any"
+                          min="0"
+                          value={draft.rawQty}
+                          onChange={(e) => updateDailyDraft(item, { rawQty: e.target.value })}
+                          className="w-full bg-black/70 border border-gray-800 text-blue-300 font-bold font-mono rounded-xl py-2 px-2 text-xs text-center focus:outline-none focus:border-blue-400"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] text-amber-400 font-bold block mb-1">التكلفة (ج.م)</label>
+                        <input
+                          type="number"
+                          step="any"
+                          min="0"
+                          value={draft.batchCost}
+                          onChange={(e) => updateDailyDraft(item, { batchCost: e.target.value })}
+                          className="w-full bg-black/70 border border-gray-800 text-amber-300 font-bold font-mono rounded-xl py-2 px-2 text-xs text-center focus:outline-none focus:border-amber-400"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Quick Preset Chips */}
+                    <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                      <span className="text-[10px] text-gray-500 font-bold">تعيين سريع:</span>
+                      {[0, 10, 20, 30, 50, 100].map(preset => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => updateDailyDraft(item, { dailyYieldQty: preset.toString(), rawQty: preset === 0 ? '0' : (draft.rawQty === '0' ? '1' : draft.rawQty) })}
+                          className="px-2 py-0.5 rounded-lg bg-black/60 hover:bg-emerald-950/60 border border-gray-800 hover:border-emerald-600/50 text-[10px] font-mono font-bold text-gray-300 cursor-pointer transition-all"
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ========================================================================= */}
       {/* TAB 1: RAW MATERIAL BATCHES (Production Batch System)                     */}
@@ -1588,14 +2272,16 @@ export default function ProductionBatchesView({
               </div>
             </div>
 
-            {/* Consumed Batch status notice */}
+            {/* Consumed Batch status notice (Unlocked editing) */}
             {(editingBatch.consumed_quantity || 0) > 0 ? (
-              <div className="bg-amber-950/40 border border-amber-800/60 rounded-2xl p-3 flex items-start gap-2 text-xs text-amber-300">
-                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div className="bg-blue-950/40 border border-blue-700/60 rounded-2xl p-3 flex items-start gap-2 text-xs text-blue-200">
+                <AlertCircle className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
                 <div>
-                  <span className="font-bold block">دفعة مستهلكة جزئياً أو كلياً:</span>
-                  <p className="text-[10px] text-amber-200/80 mt-0.5 leading-relaxed">
-                    تم استهلاك ({editingBatch.consumed_quantity} كوب/وحدة) من هذه الدفعة. حُظِر تعديل التكلفة والسعة الإنتاجية للحفاظ على التوازن المحاسبي. يمكنك تعديل المورد، التاريخ، الفاتورة والملاحظات بأمان.
+                  <span className="font-bold block text-blue-300">
+                    تم بيع/استهلاك ({editingBatch.consumed_quantity} {editingBatch.yield_unit || 'وحدة'}) من هذه الدفعة:
+                  </span>
+                  <p className="text-[10px] text-blue-200/80 mt-0.5 leading-relaxed">
+                    يمكنك الآن تعديل كمية المادة بالمخزن، الكمية المتبقية المتاحة حالياً، السعة الكلية، والتكلفة بحرية مع الحفاظ على سجل المبيعات السابقة.
                   </p>
                 </div>
               </div>
@@ -1605,7 +2291,7 @@ export default function ProductionBatchesView({
                 <div>
                   <span className="font-bold block">دفعة جديدة لم تُستغل بعد:</span>
                   <p className="text-[10px] text-emerald-200/80 mt-0.5 leading-relaxed">
-                    يمكنك تعديل التكلفة المادية، السعة الإنتاجية، المورد، التاريخ، والملاحظات بحرية وسوف تتحدث الأرقام الحسابية فوراً.
+                    يمكنك تعديل التكلفة المادية، كمية المخزن، السعة الإنتاجية، المورد، والملاحظات بحرية وسوف تتحدث الأرقام فوراً.
                   </p>
                 </div>
               </div>
@@ -1617,12 +2303,9 @@ export default function ProductionBatchesView({
                 <input
                   type="text"
                   required
-                  disabled={(editingBatch.consumed_quantity || 0) > 0}
                   value={editItemName}
                   onChange={(e) => setEditItemName(e.target.value)}
-                  className={`w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-500 ${
-                    (editingBatch.consumed_quantity || 0) > 0 ? 'opacity-60 cursor-not-allowed bg-gray-900' : ''
-                  }`}
+                  className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-500"
                 />
               </div>
 
@@ -1672,49 +2355,92 @@ export default function ProductionBatchesView({
                 </div>
               </div>
 
-              {/* Cost and Capacity Fields (Editable only if unused) */}
-              <div className="grid grid-cols-3 gap-2 bg-black/40 p-3 rounded-2xl border border-gold-500/10">
-                <div>
-                  <label className="text-[10px] text-amber-400 font-bold block mb-1">تكلفة الشراء (EGP)</label>
-                  <input
-                    type="number"
-                    step="any"
-                    disabled={(editingBatch.consumed_quantity || 0) > 0}
-                    value={editPurchasePrice}
-                    onChange={(e) => setEditPurchasePrice(e.target.value)}
-                    className={`w-full bg-luxury-bg border border-gray-800 text-amber-300 font-bold font-mono rounded-xl py-2 px-2 text-xs text-center focus:outline-none focus:border-gold-500 ${
-                      (editingBatch.consumed_quantity || 0) > 0 ? 'opacity-60 cursor-not-allowed bg-gray-900' : ''
-                    }`}
-                  />
+              {/* Cost, Stock Qty, Remaining Qty & Capacity Fields (Always Editable) */}
+              <div className="bg-black/50 p-3.5 rounded-2xl border border-gold-500/25 space-y-3">
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="text-[10px] text-emerald-400 font-extrabold block mb-1">
+                      الكمية المتبقية المتاحة حالياً ({editYieldUnit || 'وحدة'}) *
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={editRemainingQty}
+                      onChange={(e) => handleEditRemainingChange(e.target.value)}
+                      className="w-full bg-luxury-bg border border-emerald-600/60 text-emerald-300 font-black font-mono rounded-xl py-2 px-2 text-sm text-center focus:outline-none focus:border-emerald-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-blue-400 font-bold block mb-1">
+                      كمية المادة بالمخزن ({editRawUnit || 'وحدة'})
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={editRawMaterialQty}
+                      onChange={(e) => setEditRawMaterialQty(e.target.value)}
+                      className="w-full bg-luxury-bg border border-blue-700/50 text-blue-300 font-bold font-mono rounded-xl py-2 px-2 text-sm text-center focus:outline-none focus:border-blue-400"
+                    />
+                  </div>
                 </div>
 
-                <div>
-                  <label className="text-[10px] text-blue-400 font-bold block mb-1">كمية المادة بالمخزن</label>
-                  <input
-                    type="number"
-                    step="any"
-                    disabled={(editingBatch.consumed_quantity || 0) > 0}
-                    value={editRawMaterialQty}
-                    onChange={(e) => setEditRawMaterialQty(e.target.value)}
-                    className={`w-full bg-luxury-bg border border-gray-800 text-blue-300 font-bold font-mono rounded-xl py-2 px-2 text-xs text-center focus:outline-none focus:border-gold-500 ${
-                      (editingBatch.consumed_quantity || 0) > 0 ? 'opacity-60 cursor-not-allowed bg-gray-900' : ''
-                    }`}
-                  />
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="text-[10px] text-amber-400 font-bold block mb-1">تكلفة الشراء (EGP)</label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={editPurchasePrice}
+                      onChange={(e) => setEditPurchasePrice(e.target.value)}
+                      className="w-full bg-luxury-bg border border-gray-800 text-amber-300 font-bold font-mono rounded-xl py-2 px-2 text-xs text-center focus:outline-none focus:border-gold-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-gray-300 font-bold block mb-1">السعة الكلية</label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={editYieldCapacity}
+                      onChange={(e) => handleEditYieldCapacityChange(e.target.value)}
+                      className="w-full bg-luxury-bg border border-gray-800 text-white font-bold font-mono rounded-xl py-2 px-2 text-xs text-center focus:outline-none focus:border-gold-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-gray-300 font-bold block mb-1">وحدة الصنف</label>
+                    <input
+                      type="text"
+                      value={editYieldUnit}
+                      onChange={(e) => setEditYieldUnit(e.target.value)}
+                      placeholder="كوب / قطعة"
+                      className="w-full bg-luxury-bg border border-gray-800 text-white font-bold rounded-xl py-2 px-2 text-xs text-center focus:outline-none focus:border-gold-500"
+                    />
+                  </div>
                 </div>
 
-                <div>
-                  <label className="text-[10px] text-emerald-400 font-bold block mb-1">السعة الإنتاجية (أكواب)</label>
-                  <input
-                    type="number"
-                    step="any"
-                    disabled={(editingBatch.consumed_quantity || 0) > 0}
-                    value={editYieldCapacity}
-                    onChange={(e) => setEditYieldCapacity(e.target.value)}
-                    className={`w-full bg-luxury-bg border border-gray-800 text-emerald-300 font-bold font-mono rounded-xl py-2 px-2 text-xs text-center focus:outline-none focus:border-gold-500 ${
-                      (editingBatch.consumed_quantity || 0) > 0 ? 'opacity-60 cursor-not-allowed bg-gray-900' : ''
-                    }`}
-                  />
-                </div>
+                {(editingBatch.consumed_quantity || 0) > 0 && (
+                  <label className="flex items-center gap-2 text-[11px] text-gray-300 cursor-pointer pt-1">
+                    <input
+                      type="checkbox"
+                      checked={editResetConsumed}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setEditResetConsumed(checked);
+                        const rem = parseFloat(editRemainingQty) || 0;
+                        const consumed = checked ? 0 : (editingBatch.consumed_quantity || 0);
+                        setEditYieldCapacity((consumed + rem).toString());
+                      }}
+                      className="rounded border-gray-700 bg-black text-gold-500"
+                    />
+                    <span>تصفير عداد المباع سابقاً ({editingBatch.consumed_quantity}) لهذه الدفعة</span>
+                  </label>
+                )}
               </div>
 
               <div>
