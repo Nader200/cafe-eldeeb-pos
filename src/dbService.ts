@@ -1353,9 +1353,13 @@ export const dbService = {
       setLocal(KEYS.CUSTOMERS, customers);
     }
 
-    // Automatically record a cash movement for Deposits and Withdrawals to keep cash drawer synced
+    // Automatically record a cash or Vodafone Cash movement for Deposits and Withdrawals
     if (tx.transaction_type === 'DEPOSIT') {
-      dbService.logCashMovement(tx.amount, 0, `إيداع محفظة عميل: ${tx.customer_name} - ${tx.notes}`);
+      if (tx.payment_method === 'VODAFONE_CASH') {
+        dbService.logVodafoneCashMovement(tx.amount, 0, `إيداع محفظة عميل (فودافون كاش): ${tx.customer_name} - ${tx.notes}`);
+      } else {
+        dbService.logCashMovement(tx.amount, 0, `إيداع محفظة عميل: ${tx.customer_name} - ${tx.notes}`);
+      }
     } else if (tx.transaction_type === 'WITHDRAWAL') {
       dbService.logCashMovement(0, tx.amount, `سحب من محفظة عميل: ${tx.customer_name} - ${tx.notes}`);
     }
@@ -2157,25 +2161,43 @@ export const dbService = {
       }
     }
 
-    // 5. Update Cash Drawer Immediately (Net of Wallet Deduction + Any Previous Credit Paid)
+    // 5. Update Cash Drawer or Vodafone Cash Wallet Immediately (Net of Wallet Deduction + Any Previous Credit Paid)
     const netCashPaid = Math.max(0, actualPaid - walletDeduction) + actualCreditPaid;
     if (netCashPaid > 0) {
-      dbService.logCashMovement(
-        netCashPaid,
-        0,
-        actualCreditPaid > 0
-          ? `مبيعات نقداً فاتورة رقم ${invoiceNum} + سداد آجل سابق (${actualCreditPaid} ج.م)`
-          : `مبيعات نقداً فاتورة رقم ${invoiceNum}`
-      );
+      if (sanitizedMethod === 'VODAFONE_CASH') {
+        dbService.logVodafoneCashMovement(
+          netCashPaid,
+          0,
+          actualCreditPaid > 0
+            ? `تحويل فودافون كاش فاتورة رقم ${invoiceNum} + سداد آجل سابق (${actualCreditPaid} ج.م)`
+            : `تحويل فودافون كاش فاتورة رقم ${invoiceNum}`
+        );
+      } else {
+        dbService.logCashMovement(
+          netCashPaid,
+          0,
+          actualCreditPaid > 0
+            ? `مبيعات نقداً فاتورة رقم ${invoiceNum} + سداد آجل سابق (${actualCreditPaid} ج.م)`
+            : `مبيعات نقداً فاتورة رقم ${invoiceNum}`
+        );
+      }
     }
 
     // 5.1 Record Cash Kept in Drawer for Change Transferred to Customer Wallet (keeps Drawer & Shift 100% synced)
     if (safeChangeToWallet > 0 && changeDepositCustomerName) {
-      dbService.logCashMovement(
-        safeChangeToWallet,
-        0,
-        `إيداع محفظة عميل: ${changeDepositCustomerName} - ترحيل باقي فاتورة رقم ${invoiceNum}`
-      );
+      if (sanitizedMethod === 'VODAFONE_CASH') {
+        dbService.logVodafoneCashMovement(
+          safeChangeToWallet,
+          0,
+          `إيداع محفظة عميل (فودافون كاش): ${changeDepositCustomerName} - ترحيل باقي فاتورة رقم ${invoiceNum}`
+        );
+      } else {
+        dbService.logCashMovement(
+          safeChangeToWallet,
+          0,
+          `إيداع محفظة عميل: ${changeDepositCustomerName} - ترحيل باقي فاتورة رقم ${invoiceNum}`
+        );
+      }
     }
 
     // Save All back to storage (Atomic Commit)
@@ -2885,25 +2907,43 @@ export const dbService = {
       }
     }
 
-    // Update Cash Drawer Immediately (Net of Wallet Deduction + Any Previous Credit Paid)
+    // Update Cash Drawer or Vodafone Cash Wallet Immediately (Net of Wallet Deduction + Any Previous Credit Paid)
     const netCashPaid = Math.max(0, actualPaid - walletDeduction) + actualCreditPaid;
     if (netCashPaid > 0) {
-      dbService.logCashMovement(
-        netCashPaid,
-        0,
-        actualCreditPaid > 0
-          ? `مبيعات نقداً فاتورة رقم ${existingInvoice.invoice_number} + سداد آجل سابق (${actualCreditPaid} ج.م)`
-          : `مبيعات نقداً فاتورة رقم ${existingInvoice.invoice_number}`
-      );
+      if (sanitizedMethod === 'VODAFONE_CASH') {
+        dbService.logVodafoneCashMovement(
+          netCashPaid,
+          0,
+          actualCreditPaid > 0
+            ? `تحويل فودافون كاش فاتورة رقم ${existingInvoice.invoice_number} + سداد آجل سابق (${actualCreditPaid} ج.م)`
+            : `تحويل فودافون كاش فاتورة رقم ${existingInvoice.invoice_number}`
+        );
+      } else {
+        dbService.logCashMovement(
+          netCashPaid,
+          0,
+          actualCreditPaid > 0
+            ? `مبيعات نقداً فاتورة رقم ${existingInvoice.invoice_number} + سداد آجل سابق (${actualCreditPaid} ج.م)`
+            : `مبيعات نقداً فاتورة رقم ${existingInvoice.invoice_number}`
+        );
+      }
     }
 
     // Record Cash Kept in Drawer for Change Transferred to Customer Wallet (keeps Drawer & Shift 100% synced)
     if (safeChangeToWallet > 0 && changeDepositCustomerName) {
-      dbService.logCashMovement(
-        safeChangeToWallet,
-        0,
-        `إيداع محفظة عميل: ${changeDepositCustomerName} - ترحيل باقي فاتورة رقم ${existingInvoice.invoice_number}`
-      );
+      if (sanitizedMethod === 'VODAFONE_CASH') {
+        dbService.logVodafoneCashMovement(
+          safeChangeToWallet,
+          0,
+          `إيداع محفظة عميل (فودافون كاش): ${changeDepositCustomerName} - ترحيل باقي فاتورة رقم ${existingInvoice.invoice_number}`
+        );
+      } else {
+        dbService.logCashMovement(
+          safeChangeToWallet,
+          0,
+          `إيداع محفظة عميل: ${changeDepositCustomerName} - ترحيل باقي فاتورة رقم ${existingInvoice.invoice_number}`
+        );
+      }
     }
 
     // Record timeline & audit events for payment/credit closure BEFORE saving to storage & server
@@ -3019,7 +3059,11 @@ export const dbService = {
     }
 
     if (invoice.paid_amount > 0) {
-      dbService.logCashMovement(0, invoice.paid_amount, `إعادة فتح الفاتورة رقم ${invoice.invoice_number}`);
+      if (invoice.payment_method === 'VODAFONE_CASH') {
+        dbService.logVodafoneCashMovement(0, invoice.paid_amount, `إعادة فتح الفاتورة رقم ${invoice.invoice_number}`);
+      } else {
+        dbService.logCashMovement(0, invoice.paid_amount, `إعادة فتح الفاتورة رقم ${invoice.invoice_number}`);
+      }
     }
 
     invoices[invIdx].invoice_status = 'OPEN';
@@ -3106,9 +3150,13 @@ export const dbService = {
       }
     }
 
-    // 3. Deduct Cash Out of cash drawer
+    // 3. Deduct Cash Out of cash drawer (or Vodafone Cash if originally paid via Vodafone Cash)
     if (invoice.paid_amount > 0) {
-      dbService.logCashMovement(0, invoice.paid_amount, `إلغاء فاتورة مرتجع مبيعات رقم ${invoice.invoice_number}`);
+      if (invoice.payment_method === 'VODAFONE_CASH') {
+        dbService.logVodafoneCashMovement(0, invoice.paid_amount, `إلغاء فاتورة مرتجع مبيعات رقم ${invoice.invoice_number}`);
+      } else {
+        dbService.logCashMovement(0, invoice.paid_amount, `إلغاء فاتورة مرتجع مبيعات رقم ${invoice.invoice_number}`);
+      }
     }
 
     // 4. Mark Cancelled
@@ -3737,14 +3785,22 @@ export const dbService = {
     setLocal(KEYS.INVOICES, invoices);
     setLocal(KEYS.INVOICE_ITEMS, allItems);
 
-    // Log cash movement
-    dbService.logCashMovement(
-      itemPayAmount,
-      0,
-      `سداد صنف منفرد ${item.product_name_ar} من الفاتورة رقم ${originalInvoice.invoice_number}`,
-      'CASH_SALE',
-      operator
-    );
+    // Log cash or Vodafone Cash movement
+    if (paymentMethod === 'VODAFONE_CASH') {
+      dbService.logVodafoneCashMovement(
+        itemPayAmount,
+        0,
+        `سداد صنف منفرد (فودافون كاش) ${item.product_name_ar} من الفاتورة رقم ${originalInvoice.invoice_number}`
+      );
+    } else {
+      dbService.logCashMovement(
+        itemPayAmount,
+        0,
+        `سداد صنف منفرد ${item.product_name_ar} من الفاتورة رقم ${originalInvoice.invoice_number}`,
+        'CASH_SALE',
+        operator
+      );
+    }
 
     dbService.logAuditAction(
       'PAY_SELECTED_ITEM',
@@ -4127,7 +4183,13 @@ export const dbService = {
 
   // --- Credit Payments ---
   getCreditPayments: (): CreditPayment[] => getLocal<CreditPayment[]>(KEYS.CREDIT_PAYMENTS, []),
-  addCreditPayment: (customerId: string, amount: number, notes: string, operator = 'أمين الصندوق'): CreditPayment | null => {
+  addCreditPayment: (
+    customerId: string,
+    amount: number,
+    notes: string,
+    operator = 'أمين الصندوق',
+    paymentMethod: 'CASH' | 'VODAFONE_CASH' | 'WALLET' = 'CASH'
+  ): CreditPayment | null => {
     const customersList = dbService.getCustomers();
     const custIdx = customersList.findIndex(c => c.id === customerId);
     if (custIdx === -1) return null;
@@ -4138,6 +4200,7 @@ export const dbService = {
       customer_id: customerId,
       amount,
       payment_date: new Date().toISOString(),
+      payment_method: paymentMethod,
       notes,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -4148,12 +4211,18 @@ export const dbService = {
 
     // Add transaction to the customer credit transaction ledger
     const creditTxs = getLocal<CustomerCreditTransaction[]>(KEYS.CREDIT_TRANSACTIONS, []);
+    const defaultNote =
+      paymentMethod === 'VODAFONE_CASH'
+        ? 'سداد مديونية العميل عبر فودافون كاش'
+        : paymentMethod === 'WALLET'
+          ? 'سداد مديونية العميل من رصيد المحفظة'
+          : 'سداد مديونية العميل نقداً';
     recordCreditTransactionInternal(creditTxs, customersList, {
       customer_id: customerId,
       customer_name: customersList[custIdx].full_name,
       transaction_type: 'PAYMENT',
       amount,
-      notes: notes || 'سداد مديونية العميل نقداً',
+      notes: notes || defaultNote,
       created_by: operator
     });
     setLocal(KEYS.CREDIT_TRANSACTIONS, creditTxs);
@@ -4186,8 +4255,12 @@ export const dbService = {
     }
     setLocal(KEYS.INVOICES, invoices);
 
-    // Add to cash drawer
-    dbService.logCashMovement(amount, 0, `سداد مديونية عميل: ${customersList[custIdx].full_name}`);
+    // Add to Vodafone Cash wallet tracker or physical cash drawer
+    if (paymentMethod === 'VODAFONE_CASH') {
+      dbService.logVodafoneCashMovement(amount, 0, `سداد مديونية عميل (فودافون كاش): ${customersList[custIdx].full_name}`);
+    } else {
+      dbService.logCashMovement(amount, 0, `سداد مديونية عميل: ${customersList[custIdx].full_name}`);
+    }
     syncToServer();
 
     if (typeof window !== 'undefined') {
@@ -4212,6 +4285,7 @@ export const dbService = {
       id: `cd_${Date.now()}`,
       opening_balance: 0, // standard default for empty database
       cash_in: 0,
+      vodafone_cash_in: 0,
       cash_out: 0,
       closing_balance: null,
       business_date: todayStr,
@@ -4236,6 +4310,7 @@ export const dbService = {
       id: `cd_${Date.now()}`,
       opening_balance: openingBalance,
       cash_in: 0,
+      vodafone_cash_in: 0,
       cash_out: 0,
       closing_balance: null,
       business_date: todayStr,
@@ -4322,6 +4397,37 @@ export const dbService = {
       user: user || 'Administrator',
       notes: notes || reason
     });
+  },
+
+  logVodafoneCashMovement: (
+    amountIn: number,
+    amountOut: number,
+    _reason: string
+  ) => {
+    const list = dbService.getCashDrawers();
+    const activeIdx = list.findIndex(d => d.closing_balance === null);
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    if (activeIdx > -1) {
+      const currentVf = list[activeIdx].vodafone_cash_in || 0;
+      list[activeIdx].vodafone_cash_in = Math.max(0, Math.round((currentVf + amountIn - amountOut) * 100) / 100);
+      list[activeIdx].updated_at = new Date().toISOString();
+      setLocal(KEYS.CASH_DRAWERS, list);
+    } else {
+      const newDrawer: CashDrawer = {
+        id: `cd_${Date.now()}`,
+        opening_balance: 0,
+        cash_in: 0,
+        vodafone_cash_in: Math.max(0, Math.round((amountIn - amountOut) * 100) / 100),
+        cash_out: 0,
+        closing_balance: null,
+        business_date: todayStr,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      list.push(newDrawer);
+      setLocal(KEYS.CASH_DRAWERS, list);
+    }
   },
 
   getCashHistory: (): CashMovement[] => getLocal<CashMovement[]>(KEYS.CASH_HISTORY, []),
@@ -4458,6 +4564,7 @@ export const dbService = {
       id: `cd_${Date.now()}`,
       opening_balance: 0,
       cash_in: 0,
+      vodafone_cash_in: 0,
       cash_out: 0,
       closing_balance: null,
       business_date: todayStr,
@@ -4493,6 +4600,7 @@ export const dbService = {
         status: 'OPEN',
         opening_balance: 0,
         cash_in: 0,
+        vodafone_cash_in: 0,
         cash_out: 0,
         expected_cash: 0,
         declared_cash: undefined,
@@ -8667,12 +8775,15 @@ export const dbService = {
     allInvoices.forEach(inv => invoiceById.set(inv.id, inv));
 
     let cashIn = 0;
+    let vodafoneCashIn = 0;
     let cashOut = 0;
 
-    // 1. Cash from Invoices (including open invoices closed during this shift & partial item payments)
+    // 1. Cash & Vodafone Cash from Invoices (including open invoices closed during this shift & partial item payments)
     allInvoices.forEach(inv => {
       if (inv.invoice_status === 'CANCELLED') return;
       if (inv.payment_method === 'WALLET') return;
+
+      const isVodafone = inv.payment_method === 'VODAFONE_CASH';
 
       if (isOpenOrDraftStatus(inv.invoice_status)) {
         // Unclosed OPEN/DRAFT invoices only count if single-item payments (paySelectedItem) occurred during the shift
@@ -8684,12 +8795,14 @@ export const dbService = {
         if (payItemEntries.length > 0) {
           const latestPayTs = new Date(payItemEntries[payItemEntries.length - 1].timestamp).getTime();
           if (latestPayTs >= startTime && latestPayTs <= endTime) {
-            cashIn += paidAmt;
+            if (isVodafone) vodafoneCashIn += paidAmt;
+            else cashIn += paidAmt;
           }
         } else if (inv.updated_at) {
           const updTs = new Date(inv.updated_at).getTime();
           if (updTs >= startTime && updTs <= endTime) {
-            cashIn += paidAmt;
+            if (isVodafone) vodafoneCashIn += paidAmt;
+            else cashIn += paidAmt;
           }
         }
         return;
@@ -8722,21 +8835,40 @@ export const dbService = {
         const walletDeducted = inv.payment_method === 'WALLET_SPLIT'
           ? (walletDeductionsByInvNum.get(inv.invoice_number) || 0)
           : 0;
+        let netPaid = 0;
         if (inv.payment_type === 'CASH') {
           const grossPaid = inv.paid_amount ?? inv.total;
-          cashIn += Math.max(0, grossPaid - walletDeducted);
+          netPaid = Math.max(0, grossPaid - walletDeducted);
         } else if (inv.payment_type === 'SPLIT') {
           const grossPaid = inv.paid_amount || 0;
-          cashIn += Math.max(0, grossPaid - walletDeducted);
+          netPaid = Math.max(0, grossPaid - walletDeducted);
+        }
+        if (netPaid > 0) {
+          if (isVodafone) vodafoneCashIn += netPaid;
+          else cashIn += netPaid;
         }
       }
     });
 
-    // 2. Cash from Debt Repayments
+    // 2. Debt Repayments (split between physical cash drawer vs Vodafone Cash wallet)
     creditPayments.forEach(cp => {
       const pTime = new Date(cp.payment_date).getTime();
       if (pTime >= startTime && pTime <= endTime) {
-        cashIn += cp.amount;
+        if (cp.payment_method === 'VODAFONE_CASH') {
+          vodafoneCashIn += cp.amount;
+        } else {
+          cashIn += cp.amount;
+        }
+      }
+    });
+
+    // 2.5 Customer Wallet Deposits made via Vodafone Cash
+    walletTxs.forEach(wtx => {
+      if (wtx.transaction_type === 'DEPOSIT' && wtx.payment_method === 'VODAFONE_CASH' && wtx.created_at) {
+        const wTime = new Date(wtx.created_at).getTime();
+        if (wTime >= startTime && wTime <= endTime) {
+          vodafoneCashIn += wtx.amount;
+        }
       }
     });
 
@@ -8772,15 +8904,19 @@ export const dbService = {
       }
     });
 
-    // 5. Cash Refunds from Returns (only when original invoice involved cash)
+    // 5. Refunds from Returns (deduct from Vodafone Cash if original invoice was Vodafone Cash, else cashOut)
     returns.forEach(ret => {
       const retTime = new Date(ret.created_at || ret.return_date).getTime();
       if (retTime >= startTime && retTime <= endTime) {
         const origInv = invoiceById.get(ret.original_invoice_id);
+        const origWasVodafone = origInv?.payment_method === 'VODAFONE_CASH';
         if (!origInv || origInv.payment_type === 'CASH') {
-          cashOut += ret.total_return_amount;
+          if (origWasVodafone) vodafoneCashIn = Math.max(0, vodafoneCashIn - ret.total_return_amount);
+          else cashOut += ret.total_return_amount;
         } else if (origInv.payment_type === 'SPLIT' && (origInv.paid_amount || 0) > 0) {
-          cashOut += Math.min(origInv.paid_amount || 0, ret.total_return_amount);
+          const refundAmt = Math.min(origInv.paid_amount || 0, ret.total_return_amount);
+          if (origWasVodafone) vodafoneCashIn = Math.max(0, vodafoneCashIn - refundAmt);
+          else cashOut += refundAmt;
         }
       }
     });
@@ -8790,6 +8926,7 @@ export const dbService = {
     return {
       ...shift,
       cash_in: Math.round(cashIn * 100) / 100,
+      vodafone_cash_in: Math.round(vodafoneCashIn * 100) / 100,
       cash_out: Math.round(cashOut * 100) / 100,
       expected_cash: expectedCash
     };
@@ -8810,6 +8947,7 @@ export const dbService = {
       status: 'OPEN',
       opening_balance: openingBalance,
       cash_in: 0,
+      vodafone_cash_in: 0,
       cash_out: 0,
       expected_cash: openingBalance,
       started_at: now,

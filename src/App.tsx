@@ -844,7 +844,12 @@ function AppContent() {
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               <div className="text-right">
                 <span className="text-[9px] text-gray-500 block">درج النقدية المفتوح:</span>
-                <span className="font-mono font-bold text-gold-500 text-[11px]">{drawerBalance.toLocaleString()} {settings?.currency || 'ج.م'}</span>
+                <span className="font-mono font-bold text-gold-500 text-[11px] block">{drawerBalance.toLocaleString()} {settings?.currency || 'ج.م'}</span>
+                {(activeDrawer?.vodafone_cash_in || 0) > 0 && (
+                  <span className="font-mono font-bold text-fuchsia-300 text-[9px] block">
+                    📱 محفظة: +{(activeDrawer?.vodafone_cash_in || 0).toLocaleString()}
+                  </span>
+                )}
               </div>
             </div>
 

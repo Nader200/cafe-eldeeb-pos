@@ -234,6 +234,7 @@ export interface CreditPayment {
   customer_id: string;
   amount: number;
   payment_date: string;
+  payment_method?: 'CASH' | 'VODAFONE_CASH' | 'WALLET';
   notes: string;
   created_at: string;
   updated_at: string;
@@ -243,6 +244,7 @@ export interface CashDrawer {
   id: string;
   opening_balance: number;
   cash_in: number;
+  vodafone_cash_in?: number;
   cash_out: number;
   closing_balance: number | null; // Null if open
   business_date: string; // YYYY-MM-DD
@@ -479,6 +481,7 @@ export interface WalletTransaction {
   previous_balance: number;
   new_balance: number;
   notes: string;
+  payment_method?: 'CASH' | 'VODAFONE_CASH';
   date: string; // YYYY-MM-DD
   time: string; // HH:MM:SS
   user: string;
@@ -722,6 +725,7 @@ export interface Shift {
   status: ShiftStatus;
   opening_balance: number;
   cash_in: number;
+  vodafone_cash_in?: number;
   cash_out: number;
   expected_cash: number;
   declared_cash?: number;

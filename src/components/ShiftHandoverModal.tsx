@@ -349,29 +349,42 @@ export default function ShiftHandoverModal({
                 </span>
               </div>
 
-              {/* Financial Metrics Grid */}
-              <div className="grid grid-cols-4 gap-2 text-center">
-                <div className="bg-black/40 p-2.5 rounded-xl border border-gray-800">
-                  <span className="block text-[10px] font-bold text-gray-400">الافتتاحي</span>
-                  <span className="text-xs font-black text-amber-400 font-mono">{currentMetrics.opening_balance} ج.م</span>
-                </div>
-                <div className="bg-black/40 p-2.5 rounded-xl border border-gray-800">
-                  <span className="block text-[10px] font-bold text-emerald-400 flex items-center justify-center gap-0.5">
-                    <TrendingUp className="w-3 h-3" /> مبيعات
-                  </span>
-                  <span className="text-xs font-black text-emerald-400 font-mono">+{currentMetrics.cash_in} ج.م</span>
-                </div>
-                <div className="bg-black/40 p-2.5 rounded-xl border border-gray-800">
-                  <span className="block text-[10px] font-bold text-rose-400 flex items-center justify-center gap-0.5">
-                    <TrendingDown className="w-3 h-3" /> مصروفات
-                  </span>
-                  <span className="text-xs font-black text-rose-400 font-mono">-{currentMetrics.cash_out} ج.م</span>
-                </div>
-                <div className="bg-black/60 p-2.5 rounded-xl border border-gold-500/40">
-                  <span className="block text-[10px] font-bold text-gold-400">المتوقع بالدرج</span>
-                  <span className="text-xs font-black text-gold-300 font-mono">{currentMetrics.expected_cash} ج.م</span>
-                </div>
-              </div>
+              {/* Financial Metrics Grid: الافتتاحي - وارد خزنة - وارد محفظة - الإجمالي - منصرف */}
+              {(() => {
+                const vfIn = currentMetrics.vodafone_cash_in || 0;
+                const totalIn = Math.round(((currentMetrics.opening_balance || 0) + (currentMetrics.cash_in || 0) + vfIn) * 100) / 100;
+                return (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-5 gap-1.5 text-center">
+                      <div className="bg-black/40 p-2 rounded-xl border border-gray-800">
+                        <span className="block text-[9px] font-bold text-gray-400">الافتتاحي</span>
+                        <span className="text-[11px] font-black text-amber-400 font-mono">{currentMetrics.opening_balance}</span>
+                      </div>
+                      <div className="bg-black/40 p-2 rounded-xl border border-emerald-900/60">
+                        <span className="block text-[9px] font-bold text-emerald-400">وارد خزنة</span>
+                        <span className="text-[11px] font-black text-emerald-400 font-mono">+{currentMetrics.cash_in}</span>
+                      </div>
+                      <div className="bg-black/40 p-2 rounded-xl border border-fuchsia-900/60">
+                        <span className="block text-[9px] font-bold text-fuchsia-300">وارد محفظة</span>
+                        <span className="text-[11px] font-black text-fuchsia-300 font-mono">+{vfIn}</span>
+                      </div>
+                      <div className="bg-black/50 p-2 rounded-xl border border-gold-500/40">
+                        <span className="block text-[9px] font-bold text-gold-400">الإجمالي</span>
+                        <span className="text-[11px] font-black text-gold-300 font-mono">{totalIn}</span>
+                      </div>
+                      <div className="bg-black/40 p-2 rounded-xl border border-rose-900/60">
+                        <span className="block text-[9px] font-bold text-rose-400">منصرف</span>
+                        <span className="text-[11px] font-black text-rose-400 font-mono">-{currentMetrics.cash_out}</span>
+                      </div>
+                    </div>
+
+                    <div className="bg-black/60 px-3 py-2 rounded-xl border border-gold-500/40 flex items-center justify-between text-xs">
+                      <span className="font-bold text-gold-400">💵 صافي الكاش المتوقع بالدرج (للعد اليدوي):</span>
+                      <span className="font-black text-gold-300 font-mono">{currentMetrics.expected_cash} ج.م</span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {isAdmin && (
                 <div className="mt-3 pt-3 border-t border-gray-800/80 flex items-center justify-between gap-2">

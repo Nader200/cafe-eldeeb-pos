@@ -72,6 +72,7 @@ export default function EnterpriseCustomersView({
   const [showCreditModal, setShowCreditModal] = useState(false);
   const [creditPayAmount, setCreditPayAmount] = useState<number>(0);
   const [creditNotes, setCreditNotes] = useState('');
+  const [creditPayMethod, setCreditPayMethod] = useState<'CASH' | 'VODAFONE_CASH'>('CASH');
 
   // Admin-Only Credit Adjustment Modal States (تعديل مديونية العميل للأدمن فقط)
   const [showCreditAdjustModal, setShowCreditAdjustModal] = useState(false);
@@ -1068,11 +1069,16 @@ export default function EnterpriseCustomersView({
 
     // 1. Process credit payment for the owed amount
     if (paidAmount > 0) {
+      const defaultPayNote =
+        creditPayMethod === 'VODAFONE_CASH'
+          ? 'سداد جزء من الحساب الآجل عبر فودافون كاش'
+          : 'سداد جزء من الحساب الآجل للعميل نقداً';
       dbService.addCreditPayment(
         selectedCustomer.id,
         paidAmount,
-        creditNotes.trim() || 'سداد جزء من الحساب الآجل للعميل',
-        cashierName
+        creditNotes.trim() || defaultPayNote,
+        cashierName,
+        creditPayMethod
       );
     }
 
@@ -1088,17 +1094,23 @@ export default function EnterpriseCustomersView({
         amount: excessAmount,
         previous_balance: currentWallet,
         new_balance: newWalletBal,
-        notes: `رصيد زائد متبقي من دفعة سداد آجل بقيمة ${amountToPay} ج.م`,
+        payment_method: creditPayMethod,
+        notes: `رصيد زائد متبقي من دفعة سداد آجل بقيمة ${amountToPay} ج.م${creditPayMethod === 'VODAFONE_CASH' ? ' (فودافون كاش)' : ''}`,
         date: new Date().toISOString().split('T')[0],
         time: new Date().toTimeString().split(' ')[0],
         user: cashierName
       });
     }
 
-    onShowSuccessAlert('تمت عملية سداد المديونية بنجاح وتحديث الحساب الجاري ملوكي!');
+    onShowSuccessAlert(
+      creditPayMethod === 'VODAFONE_CASH'
+        ? 'تم سداد المديونية عبر فودافون كاش وإضافتها إلى (وارد محفظة) بنجاح!'
+        : 'تمت عملية سداد المديونية نقداً وإضافتها إلى (وارد خزنة) بنجاح!'
+    );
     setShowCreditModal(false);
     setCreditPayAmount(0);
     setCreditNotes('');
+    setCreditPayMethod('CASH');
     loadData();
   };
 
@@ -2948,6 +2960,40 @@ export default function EnterpriseCustomersView({
               </div>
 
               <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-bold text-gray-400">طريقة السداد *</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCreditPayMethod('CASH')}
+                    className={`py-2 px-2.5 rounded-xl text-[11px] font-black border transition-all cursor-pointer ${
+                      creditPayMethod === 'CASH'
+                        ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300'
+                        : 'bg-luxury-bg border-luxury-border text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    💵 نقدي (وارد خزنة)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCreditPayMethod('VODAFONE_CASH')}
+                    className={`py-2 px-2.5 rounded-xl text-[11px] font-black border transition-all cursor-pointer ${
+                      creditPayMethod === 'VODAFONE_CASH'
+                        ? 'bg-fuchsia-600/20 border-fuchsia-500 text-fuchsia-300'
+                        : 'bg-luxury-bg border-luxury-border text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    📱 فودافون كاش (محفظة)
+                  </button>
+                </div>
+                {creditPayMethod === 'VODAFONE_CASH' && (
+                  <div className="text-[10px] font-bold text-fuchsia-300 bg-fuchsia-950/25 border border-fuchsia-700/40 rounded-lg px-2.5 py-1.5 flex items-center justify-between">
+                    <span>رقم التحويل:</span>
+                    <span className="font-mono text-white" dir="ltr">{dbService.getSettings().vodafone_cash_number || '01094793701'}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-1.5">
                 <label className="text-[10px] font-bold text-gray-400">ملاحظات ومرجع الاستلام</label>
                 <input
                   type="text"
@@ -2958,8 +3004,10 @@ export default function EnterpriseCustomersView({
                 />
               </div>
 
-              <p className="text-[9px] text-gray-500 leading-relaxed bg-luxury-bg/50 p-2.5 rounded-lg border border-luxury-border">
-                💡 معلومة: سيتم إضافة المبلغ المسدد مباشرة إلى إيرادات درج الكاشير الحالي لدعم مطابقة حسابات النقدية عند نهاية الوردية اليومية.
+              <p className="text-[9px] text-gray-400 leading-relaxed bg-luxury-bg/50 p-2.5 rounded-lg border border-luxury-border">
+                {creditPayMethod === 'VODAFONE_CASH'
+                  ? '📱 سيتم تسجيل هذا التحويل مباشرة في خانة (وارد محفظة - فودافون كاش) بالوردية الحالية دون إضافته للكاش اليدوي بالدرج.'
+                  : '💡 سيتم إضافة المبلغ المسدد نقداً مباشرة إلى خانة (وارد خزنة) بالدرج الحالي لدعم مطابقة النقدية عند نهاية الوردية.'}
               </p>
 
               {/* Action buttons */}

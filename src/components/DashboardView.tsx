@@ -273,23 +273,42 @@ export default function DashboardView({
   const shiftCashMetrics = useMemo(() => {
     const shift = dbService.getActiveShift() || activeShift;
     if (shift) {
+      const opening = shift.opening_balance || 0;
+      const cashIn = shift.cash_in || 0;
+      const vodafoneIn = shift.vodafone_cash_in || 0;
+      const cashOut = shift.cash_out || 0;
+      const totalIn = Math.round((opening + cashIn + vodafoneIn) * 100) / 100;
+      const totalBookBalance = Math.round((totalIn - cashOut) * 100) / 100;
       return {
-        opening_balance: shift.opening_balance,
-        cash_in: shift.cash_in,
-        cash_out: shift.cash_out,
-        expected_cash: shift.expected_cash
+        opening_balance: opening,
+        cash_in: cashIn,
+        vodafone_cash_in: vodafoneIn,
+        total_in: totalIn,
+        cash_out: cashOut,
+        expected_cash: shift.expected_cash,
+        total_book_balance: totalBookBalance
       };
     }
     const drawer = cashDrawer;
+    const opening = drawer?.opening_balance || 0;
+    const cashIn = drawer?.cash_in || 0;
+    const vodafoneIn = drawer?.vodafone_cash_in || 0;
+    const cashOut = drawer?.cash_out || 0;
+    const totalIn = Math.round((opening + cashIn + vodafoneIn) * 100) / 100;
+    const expectedCash = Math.round((opening + cashIn - cashOut) * 100) / 100;
+    const totalBookBalance = Math.round((totalIn - cashOut) * 100) / 100;
     return {
-      opening_balance: drawer?.opening_balance || 0,
-      cash_in: drawer?.cash_in || 0,
-      cash_out: drawer?.cash_out || 0,
-      expected_cash: drawer ? (drawer.opening_balance + drawer.cash_in - drawer.cash_out) : 0
+      opening_balance: opening,
+      cash_in: cashIn,
+      vodafone_cash_in: vodafoneIn,
+      total_in: totalIn,
+      cash_out: cashOut,
+      expected_cash: expectedCash,
+      total_book_balance: totalBookBalance
     };
   }, [activeShift, cashDrawer, tick]);
 
-  const activeShiftCash = shiftCashMetrics.expected_cash;
+  const activeShiftCash = shiftCashMetrics.total_book_balance;
 
   // 3. Core Calculations for Stats Grid
   const metrics = useMemo(() => {
@@ -918,28 +937,53 @@ export default function DashboardView({
           </button>
         </div>
 
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-1">
-          {/* Big Total Book Balance */}
-          <div className="flex flex-col">
-            <span className="text-[10px] font-bold text-gray-400">الرصيد الدفتري المتوقع:</span>
-            <span className="text-xl sm:text-2xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-r from-[#FFECA1] via-[#D4AF37] to-[#AA7C11] drop-shadow-[0_2px_8px_rgba(212,175,55,0.3)]">
-              {activeShiftCash.toLocaleString('ar-EG')} <span className="text-xs text-[#D4AF37] font-sans">ج.م</span>
-            </span>
+        <div className="flex flex-col gap-3 pt-1">
+          {/* Big Total Book Balance + Live Cash/Wallet Split */}
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div className="flex flex-col">
+              <span className="text-[10px] font-bold text-gray-400">الرصيد الدفتري المتوقع:</span>
+              <span className="text-xl sm:text-2xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-r from-[#FFECA1] via-[#D4AF37] to-[#AA7C11] drop-shadow-[0_2px_8px_rgba(212,175,55,0.3)]">
+                {activeShiftCash.toLocaleString('ar-EG')} <span className="text-xs text-[#D4AF37] font-sans">ج.م</span>
+              </span>
+            </div>
+
+            {shiftCashMetrics.vodafone_cash_in > 0 && (
+              <div className="flex items-center gap-1.5 flex-wrap text-[9px] font-extrabold">
+                <span className="px-2 py-1 rounded-lg bg-emerald-950/40 border border-emerald-700/40 text-emerald-300 font-mono">
+                  💵 كاش الدرج: {shiftCashMetrics.expected_cash.toLocaleString('ar-EG')} ج
+                </span>
+                <span className="px-2 py-1 rounded-lg bg-fuchsia-950/40 border border-fuchsia-600/40 text-fuchsia-300 font-mono">
+                  📱 فودافون كاش: {shiftCashMetrics.vodafone_cash_in.toLocaleString('ar-EG')} ج
+                </span>
+              </div>
+            )}
           </div>
 
-          {/* Breakdown pill badges */}
-          <div className="flex items-center gap-1.5 flex-wrap text-[10px] font-bold font-mono">
-            <div className="bg-black/60 border border-gray-800 rounded-lg px-2 py-1 text-gray-300" title="الرصيد الافتتاحي للوردية الحالية">
-              <span className="text-gray-500 text-[9px] block">الافتتاحي:</span>
-              <span className="text-gold-300">{shiftCashMetrics.opening_balance.toLocaleString('ar-EG')} ج</span>
+          {/* 5-Column Ordered Breakdown: الافتتاحي - وارد خزنة - وارد محفظة - الإجمالي - منصرف */}
+          <div className="grid grid-cols-5 gap-1 sm:gap-1.5 w-full text-center font-bold font-mono">
+            <div className="bg-black/60 border border-gray-800 rounded-lg px-1 py-1.5 text-gray-300" title="الرصيد الافتتاحي للوردية الحالية">
+              <span className="text-gray-400 text-[8.5px] sm:text-[9px] font-sans font-bold block leading-tight mb-0.5">الافتتاحي</span>
+              <span className="text-gold-300 text-[10px] sm:text-[11px] font-black">{shiftCashMetrics.opening_balance.toLocaleString('ar-EG')}</span>
             </div>
-            <div className="bg-emerald-950/40 border border-emerald-800/60 rounded-lg px-2 py-1 text-emerald-400" title="إجمالي المقبوضات النقدية للوردية الحالية">
-              <span className="text-emerald-500/80 text-[9px] block">وارد (+):</span>
-              <span>+{shiftCashMetrics.cash_in.toLocaleString('ar-EG')} ج</span>
+
+            <div className="bg-emerald-950/40 border border-emerald-800/60 rounded-lg px-1 py-1.5 text-emerald-400" title="إجمالي المقبوضات النقدية بالدرج/الخزنة">
+              <span className="text-emerald-400/90 text-[8.5px] sm:text-[9px] font-sans font-bold block leading-tight mb-0.5">وارد خزنة</span>
+              <span className="text-[10px] sm:text-[11px] font-black">+{shiftCashMetrics.cash_in.toLocaleString('ar-EG')}</span>
             </div>
-            <div className="bg-red-950/40 border border-red-800/60 rounded-lg px-2 py-1 text-red-400" title="إجمالي المصروفات النقدية للوردية الحالية">
-              <span className="text-red-500/80 text-[9px] block">منصرف (-):</span>
-              <span>-{shiftCashMetrics.cash_out.toLocaleString('ar-EG')} ج</span>
+
+            <div className="bg-fuchsia-950/35 border border-fuchsia-700/60 rounded-lg px-1 py-1.5 text-fuchsia-300" title="إجمالي التحويلات الواردة على محفظة فودافون كاش (فواتير وسداد ديون)">
+              <span className="text-fuchsia-300/90 text-[8.5px] sm:text-[9px] font-sans font-bold block leading-tight mb-0.5">وارد محفظة</span>
+              <span className="text-[10px] sm:text-[11px] font-black">+{shiftCashMetrics.vodafone_cash_in.toLocaleString('ar-EG')}</span>
+            </div>
+
+            <div className="bg-amber-950/35 border border-gold-500/50 rounded-lg px-1 py-1.5 text-gold-300" title="إجمالي الافتتاحي + وارد خزنة + وارد محفظة">
+              <span className="text-gold-400 text-[8.5px] sm:text-[9px] font-sans font-bold block leading-tight mb-0.5">الإجمالي</span>
+              <span className="text-[10px] sm:text-[11px] font-black">{shiftCashMetrics.total_in.toLocaleString('ar-EG')}</span>
+            </div>
+
+            <div className="bg-red-950/40 border border-red-800/60 rounded-lg px-1 py-1.5 text-red-400" title="إجمالي المصروفات النقدية للوردية الحالية">
+              <span className="text-red-400/90 text-[8.5px] sm:text-[9px] font-sans font-bold block leading-tight mb-0.5">منصرف</span>
+              <span className="text-[10px] sm:text-[11px] font-black">-{shiftCashMetrics.cash_out.toLocaleString('ar-EG')}</span>
             </div>
           </div>
         </div>
