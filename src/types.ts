@@ -462,7 +462,7 @@ export interface CreditAdjustment {
 export interface CashMovement {
   id: string;
   previous_balance: number;
-  transaction_type: 'OPENING_CASH' | 'CASH_SALE' | 'CUSTOMER_PAYMENT' | 'EXPENSE' | 'CASH_WITHDRAWAL' | 'ADD_CASH' | 'CASH_ADJUSTMENT_ADD' | 'CASH_ADJUSTMENT_SUB' | 'MANUAL_ADD' | 'MANUAL_SUB' | 'DRAWER_RESET' | 'SHORTAGE_SETTLEMENT';
+  transaction_type: 'OPENING_CASH' | 'CASH_SALE' | 'CUSTOMER_PAYMENT' | 'EXPENSE' | 'CASH_WITHDRAWAL' | 'ADD_CASH' | 'CASH_ADJUSTMENT_ADD' | 'CASH_ADJUSTMENT_SUB' | 'MANUAL_ADD' | 'MANUAL_SUB' | 'DRAWER_RESET' | 'SHORTAGE_SETTLEMENT' | 'VODAFONE_ADJUSTMENT_ADD' | 'VODAFONE_ADJUSTMENT_SUB';
   amount: number;
   new_balance: number;
   date: string; // YYYY-MM-DD
@@ -470,6 +470,15 @@ export interface CashMovement {
   user: string;
   notes: string;
   created_at: string;
+}
+
+export interface VodafoneCashBreakdownItem {
+  id: string;
+  timestamp: string;
+  category: 'INVOICE' | 'CREDIT_PAYMENT' | 'WALLET_DEPOSIT' | 'RETURN_REFUND' | 'ADJUSTMENT';
+  label: string;
+  sublabel?: string;
+  amount: number;
 }
 
 export interface WalletTransaction {

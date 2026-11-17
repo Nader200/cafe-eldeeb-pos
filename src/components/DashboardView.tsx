@@ -69,6 +69,7 @@ import SyncStatusIndicator from './SyncStatusIndicator';
 import { EldeebLogoFull } from './EldeebLogo';
 import ShiftHandoverModal from './ShiftHandoverModal';
 import ResetCashDrawerModal from './ResetCashDrawerModal';
+import VodafoneCashModal from './VodafoneCashModal';
 import { useAuth } from '../contexts/AuthContext';
 
 interface DashboardViewProps {
@@ -101,6 +102,7 @@ export default function DashboardView({
   const [activeShift, setActiveShift] = useState<Shift | null>(() => dbService.getActiveShift());
   const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
   const [showResetDrawerModal, setShowResetDrawerModal] = useState(false);
+  const [showVodafoneModal, setShowVodafoneModal] = useState(false);
 
   const refreshShiftState = () => {
     setActiveShift(dbService.getActiveShift());
@@ -952,9 +954,14 @@ export default function DashboardView({
                 <span className="px-2 py-1 rounded-lg bg-emerald-950/40 border border-emerald-700/40 text-emerald-300 font-mono">
                   💵 كاش الدرج: {shiftCashMetrics.expected_cash.toLocaleString('ar-EG')} ج
                 </span>
-                <span className="px-2 py-1 rounded-lg bg-fuchsia-950/40 border border-fuchsia-600/40 text-fuchsia-300 font-mono">
+                <button
+                  type="button"
+                  onClick={() => setShowVodafoneModal(true)}
+                  className="px-2 py-1 rounded-lg bg-fuchsia-950/40 hover:bg-fuchsia-900/60 border border-fuchsia-600/40 text-fuchsia-300 font-mono cursor-pointer transition-all active:scale-95"
+                  title="اضغط لعرض كشف تحويلات فودافون كاش وتسوية الرصيد"
+                >
                   📱 فودافون كاش: {shiftCashMetrics.vodafone_cash_in.toLocaleString('ar-EG')} ج
-                </span>
+                </button>
               </div>
             )}
           </div>
@@ -971,10 +978,15 @@ export default function DashboardView({
               <span className="text-[10px] sm:text-[11px] font-black">+{shiftCashMetrics.cash_in.toLocaleString('ar-EG')}</span>
             </div>
 
-            <div className="bg-fuchsia-950/35 border border-fuchsia-700/60 rounded-lg px-1 py-1.5 text-fuchsia-300" title="إجمالي التحويلات الواردة على محفظة فودافون كاش (فواتير وسداد ديون)">
-              <span className="text-fuchsia-300/90 text-[8.5px] sm:text-[9px] font-sans font-bold block leading-tight mb-0.5">وارد محفظة</span>
+            <button
+              type="button"
+              onClick={() => setShowVodafoneModal(true)}
+              className="bg-fuchsia-950/35 hover:bg-fuchsia-900/50 border border-fuchsia-700/60 hover:border-fuchsia-400 rounded-lg px-1 py-1.5 text-fuchsia-300 cursor-pointer transition-all active:scale-95"
+              title="اضغط لعرض تفاصيل تحويلات محفظة فودافون كاش وتسوية الرصيد"
+            >
+              <span className="text-fuchsia-300/90 text-[8.5px] sm:text-[9px] font-sans font-bold block leading-tight mb-0.5">وارد محفظة ↗</span>
               <span className="text-[10px] sm:text-[11px] font-black">+{shiftCashMetrics.vodafone_cash_in.toLocaleString('ar-EG')}</span>
-            </div>
+            </button>
 
             <div className="bg-amber-950/35 border border-gold-500/50 rounded-lg px-1 py-1.5 text-gold-300" title="إجمالي الافتتاحي + وارد خزنة + وارد محفظة">
               <span className="text-gold-400 text-[8.5px] sm:text-[9px] font-sans font-bold block leading-tight mb-0.5">الإجمالي</span>
@@ -1587,6 +1599,19 @@ export default function DashboardView({
         isOpen={showResetDrawerModal}
         onClose={() => setShowResetDrawerModal(false)}
         onSuccess={() => {
+          refreshShiftState();
+          setTick(t => t + 1);
+        }}
+      />
+
+      {/* Vodafone Cash Breakdown & Reconciliation Modal */}
+      <VodafoneCashModal
+        isOpen={showVodafoneModal}
+        onClose={() => setShowVodafoneModal(false)}
+        isAdmin={isAdmin}
+        operatorName={currentUser?.name || 'الأدمن'}
+        currency={settings.currency || 'ج.م'}
+        onAdjusted={() => {
           refreshShiftState();
           setTick(t => t + 1);
         }}

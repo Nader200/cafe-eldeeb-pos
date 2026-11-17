@@ -49,7 +49,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import { dbService, seedDatabase } from './dbService';
-import { AppSettings, CashDrawer, ShortageTargetAccount } from './types';
+import { AppSettings, CashDrawer, Shift, ShortageTargetAccount } from './types';
 import { safeStorage } from './lib/safeStorage';
 import { uploadUnifiedCloudBackup } from './lib/cloudBackupUnifiedService';
 import { checkAndExpirePSSessions, ExpiredSessionNotification } from './lib/playstationNotifier';
@@ -216,6 +216,15 @@ function AppContent() {
     seedDatabase(); // ensure initialized
     return dbService.getActiveDrawer();
   });
+  const [activeShift, setActiveShift] = useState<Shift | null>(() => {
+    seedDatabase();
+    return dbService.getActiveShift();
+  });
+
+  useEffect(() => {
+    setActiveDrawer(dbService.getActiveDrawer());
+    setActiveShift(dbService.getActiveShift());
+  }, [activeTab]);
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   
   // Dropdown menus
@@ -451,6 +460,7 @@ function AppContent() {
     });
     setSettings(freshSettings);
     setActiveDrawer(dbService.getActiveDrawer());
+    setActiveShift(dbService.getActiveShift());
   };
 
   useEffect(() => {
@@ -482,11 +492,21 @@ function AppContent() {
     setTimeout(() => setAlertMsg(null), 4000);
   };
 
-  // Drawer cash ratio & calculations
+  // Drawer cash & Vodafone Cash Single Source of Truth (matches DashboardView 100%)
   const drawerBalance = useMemo(() => {
+    if (activeShift) {
+      return activeShift.expected_cash;
+    }
     if (!activeDrawer) return 0;
-    return activeDrawer.opening_balance + activeDrawer.cash_in - activeDrawer.cash_out;
-  }, [activeDrawer]);
+    return Math.round((activeDrawer.opening_balance + activeDrawer.cash_in - activeDrawer.cash_out) * 100) / 100;
+  }, [activeShift, activeDrawer]);
+
+  const headerVodafoneIn = useMemo(() => {
+    if (activeShift) {
+      return activeShift.vodafone_cash_in || 0;
+    }
+    return activeDrawer?.vodafone_cash_in || 0;
+  }, [activeShift, activeDrawer]);
 
   // Notifications warnings
   const notificationsList = useMemo(() => {
@@ -845,9 +865,9 @@ function AppContent() {
               <div className="text-right">
                 <span className="text-[9px] text-gray-500 block">درج النقدية المفتوح:</span>
                 <span className="font-mono font-bold text-gold-500 text-[11px] block">{drawerBalance.toLocaleString()} {settings?.currency || 'ج.م'}</span>
-                {(activeDrawer?.vodafone_cash_in || 0) > 0 && (
+                {headerVodafoneIn > 0 && (
                   <span className="font-mono font-bold text-fuchsia-300 text-[9px] block">
-                    📱 محفظة: +{(activeDrawer?.vodafone_cash_in || 0).toLocaleString()}
+                    📱 محفظة: +{headerVodafoneIn.toLocaleString()}
                   </span>
                 )}
               </div>

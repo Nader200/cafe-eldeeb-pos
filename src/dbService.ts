@@ -62,7 +62,8 @@ import {
   SafeTransaction,
   ShortageTargetAccount,
   ShortageSettlement,
-  DailyShortage
+  DailyShortage,
+  VodafoneCashBreakdownItem
 } from './types';
 import { sanitizePaymentMethod } from './utils/paymentUtils';
 import { playOrderReadySound } from './lib/audioService';
@@ -2005,6 +2006,7 @@ export const dbService = {
         customer_id: customerId,
         amount: actualCreditPaid,
         payment_date: invoiceDate,
+        payment_method: sanitizedMethod === 'VODAFONE_CASH' ? 'VODAFONE_CASH' : 'CASH',
         notes: `تحصيل الحساب الآجل السابق مع الفاتورة رقم ${invoiceNum}`,
         created_at: invoiceDate,
         updated_at: invoiceDate,
@@ -2141,6 +2143,7 @@ export const dbService = {
           amount: safeChangeToWallet,
           previous_balance: oldBal,
           new_balance: newBal,
+          payment_method: sanitizedMethod === 'VODAFONE_CASH' ? 'VODAFONE_CASH' : 'CASH',
           notes: `ترحيل باقي فاتورة مبيعات رقم ${invoiceNum} إلى محفظة العميل`,
           date: new Date().toISOString().split('T')[0],
           time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
@@ -2752,6 +2755,7 @@ export const dbService = {
         customer_id: customerId,
         amount: actualCreditPaid,
         payment_date: dateStr,
+        payment_method: sanitizedMethod === 'VODAFONE_CASH' ? 'VODAFONE_CASH' : 'CASH',
         notes: `تحصيل الحساب الآجل السابق مع إغلاق الفاتورة رقم ${existingInvoice.invoice_number}`,
         created_at: dateStr,
         updated_at: dateStr,
@@ -2887,6 +2891,7 @@ export const dbService = {
           amount: safeChangeToWallet,
           previous_balance: oldBal,
           new_balance: newBal,
+          payment_method: sanitizedMethod === 'VODAFONE_CASH' ? 'VODAFONE_CASH' : 'CASH',
           notes: `ترحيل باقي فاتورة مبيعات رقم ${existingInvoice.invoice_number} إلى محفظة العميل`,
           date: new Date().toISOString().split('T')[0],
           time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
@@ -2907,8 +2912,9 @@ export const dbService = {
       }
     }
 
-    // Update Cash Drawer or Vodafone Cash Wallet Immediately (Net of Wallet Deduction + Any Previous Credit Paid)
-    const netCashPaid = Math.max(0, actualPaid - walletDeduction) + actualCreditPaid;
+    // Update Cash Drawer or Vodafone Cash Wallet Immediately (Net of prior single-item payments + Wallet Deduction + Any Previous Credit Paid)
+    const priorPaidOnOpenInv = Math.max(0, existingInvoice.paid_amount || 0);
+    const netCashPaid = Math.max(0, actualPaid - priorPaidOnOpenInv - walletDeduction) + actualCreditPaid;
     if (netCashPaid > 0) {
       if (sanitizedMethod === 'VODAFONE_CASH') {
         dbService.logVodafoneCashMovement(
@@ -8772,7 +8778,29 @@ export const dbService = {
     });
 
     const invoiceById = new Map<string, Invoice>();
-    allInvoices.forEach(inv => invoiceById.set(inv.id, inv));
+    const invoiceByNum = new Map<string, Invoice>();
+    allInvoices.forEach(inv => {
+      invoiceById.set(inv.id, inv);
+      if (inv.invoice_number) invoiceByNum.set(inv.invoice_number, inv);
+    });
+
+    const isCreditPaymentVodafone = (cp: CreditPayment): boolean => {
+      if (cp.payment_method === 'VODAFONE_CASH') return true;
+      if (cp.payment_method) return false;
+      if (cp.notes && cp.notes.includes('فودافون كاش')) return true;
+      const m = cp.notes?.match(/INV-\d+-\d+/);
+      if (m && invoiceByNum.get(m[0])?.payment_method === 'VODAFONE_CASH') return true;
+      return false;
+    };
+
+    const isWalletDepositVodafone = (wtx: WalletTransaction): boolean => {
+      if (wtx.payment_method === 'VODAFONE_CASH') return true;
+      if (wtx.payment_method) return false;
+      if (wtx.notes && wtx.notes.includes('فودافون كاش')) return true;
+      const m = wtx.notes?.match(/INV-\d+-\d+/);
+      if (m && invoiceByNum.get(m[0])?.payment_method === 'VODAFONE_CASH') return true;
+      return false;
+    };
 
     let cashIn = 0;
     let vodafoneCashIn = 0;
@@ -8793,10 +8821,28 @@ export const dbService = {
           ? inv.timeline.filter(t => t && t.status === 'PAY_ITEM' && t.timestamp)
           : [];
         if (payItemEntries.length > 0) {
-          const latestPayTs = new Date(payItemEntries[payItemEntries.length - 1].timestamp).getTime();
-          if (latestPayTs >= startTime && latestPayTs <= endTime) {
-            if (isVodafone) vodafoneCashIn += paidAmt;
-            else cashIn += paidAmt;
+          let parsedAny = false;
+          payItemEntries.forEach(entry => {
+            const ts = new Date(entry.timestamp).getTime();
+            if (ts >= startTime && ts <= endTime) {
+              const amtMatch = entry.notes?.match(/بمبلغ\s+([\d.]+)/);
+              if (amtMatch) {
+                const entryAmt = parseFloat(amtMatch[1]) || 0;
+                const entryIsVf = Boolean(entry.notes?.includes('VODAFONE_CASH'));
+                if (entryAmt > 0) {
+                  parsedAny = true;
+                  if (entryIsVf) vodafoneCashIn += entryAmt;
+                  else cashIn += entryAmt;
+                }
+              }
+            }
+          });
+          if (!parsedAny) {
+            const latestPayTs = new Date(payItemEntries[payItemEntries.length - 1].timestamp).getTime();
+            if (latestPayTs >= startTime && latestPayTs <= endTime) {
+              if (isVodafone) vodafoneCashIn += paidAmt;
+              else cashIn += paidAmt;
+            }
           }
         } else if (inv.updated_at) {
           const updTs = new Date(inv.updated_at).getTime();
@@ -8850,21 +8896,21 @@ export const dbService = {
       }
     });
 
-    // 2. Debt Repayments (split between physical cash drawer vs Vodafone Cash wallet)
+    // 2. Debt Repayments (split between physical cash drawer vs Vodafone Cash wallet, including retroactive recovery)
     creditPayments.forEach(cp => {
       const pTime = new Date(cp.payment_date).getTime();
       if (pTime >= startTime && pTime <= endTime) {
-        if (cp.payment_method === 'VODAFONE_CASH') {
+        if (isCreditPaymentVodafone(cp)) {
           vodafoneCashIn += cp.amount;
-        } else {
+        } else if (cp.payment_method !== 'WALLET') {
           cashIn += cp.amount;
         }
       }
     });
 
-    // 2.5 Customer Wallet Deposits made via Vodafone Cash
+    // 2.5 Customer Wallet Deposits made via Vodafone Cash (including change-to-wallet on Vodafone Cash invoices)
     walletTxs.forEach(wtx => {
-      if (wtx.transaction_type === 'DEPOSIT' && wtx.payment_method === 'VODAFONE_CASH' && wtx.created_at) {
+      if (wtx.transaction_type === 'DEPOSIT' && isWalletDepositVodafone(wtx) && wtx.created_at) {
         const wTime = new Date(wtx.created_at).getTime();
         if (wTime >= startTime && wTime <= endTime) {
           vodafoneCashIn += wtx.amount;
@@ -8872,7 +8918,7 @@ export const dbService = {
       }
     });
 
-    // 3. Manual Cash Movements & Drawer-Only Cash Operations (Wallet Deposit/Withdraw, Supplier Cash Purchases, Restock Cash)
+    // 3. Manual Cash Movements, Vodafone Cash Adjustments & Drawer-Only Cash Operations
     cashMovements.forEach(cm => {
       if (!cm.created_at || cm.transaction_type === 'DRAWER_RESET' || cm.transaction_type === 'OPENING_CASH') return;
       const cmTime = new Date(cm.created_at).getTime();
@@ -8881,6 +8927,10 @@ export const dbService = {
           cashIn += cm.amount;
         } else if (cm.transaction_type === 'CASH_ADJUSTMENT_SUB') {
           cashOut += cm.amount;
+        } else if (cm.transaction_type === 'VODAFONE_ADJUSTMENT_ADD') {
+          vodafoneCashIn += cm.amount;
+        } else if (cm.transaction_type === 'VODAFONE_ADJUSTMENT_SUB') {
+          vodafoneCashIn -= cm.amount;
         } else if (cm.transaction_type === 'CASH_SALE' && cm.notes?.startsWith('إيداع محفظة عميل:')) {
           cashIn += cm.amount;
         } else if (
@@ -8922,14 +8972,336 @@ export const dbService = {
     });
 
     const expectedCash = Math.round((shift.opening_balance + cashIn - cashOut) * 100) / 100;
+    const finalVodafoneIn = Math.max(0, Math.round(vodafoneCashIn * 100) / 100);
 
     return {
       ...shift,
       cash_in: Math.round(cashIn * 100) / 100,
-      vodafone_cash_in: Math.round(vodafoneCashIn * 100) / 100,
+      vodafone_cash_in: finalVodafoneIn,
       cash_out: Math.round(cashOut * 100) / 100,
       expected_cash: expectedCash
     };
+  },
+
+  getShiftVodafoneCashBreakdown: (): {
+    items: VodafoneCashBreakdownItem[];
+    total: number;
+    shiftStart: string | null;
+  } => {
+    const activeShift = dbService.getActiveShift();
+    const activeDrawer = dbService.getActiveDrawer();
+    const rawStartIso = activeShift
+      ? (activeShift.last_reset_at && new Date(activeShift.last_reset_at).getTime() > new Date(activeShift.started_at).getTime()
+        ? activeShift.last_reset_at
+        : activeShift.started_at)
+      : (activeDrawer?.created_at || new Date(0).toISOString());
+    const startTime = new Date(rawStartIso).getTime();
+    const endTime = Date.now();
+
+    const allInvoices = dbService.getInvoices(true);
+    const creditPayments = getLocal<CreditPayment[]>(KEYS.CREDIT_PAYMENTS, []);
+    const cashMovements = dbService.getCashHistory();
+    const returns = dbService.getReturnTransactions();
+    const walletTxs = getLocal<WalletTransaction[]>(KEYS.WALLET_TRANSACTIONS, []);
+    const customers = dbService.getCustomers();
+
+    const customerNameById = new Map<string, string>();
+    customers.forEach(c => customerNameById.set(c.id, c.full_name));
+
+    const invoiceById = new Map<string, Invoice>();
+    const invoiceByNum = new Map<string, Invoice>();
+    allInvoices.forEach(inv => {
+      invoiceById.set(inv.id, inv);
+      if (inv.invoice_number) invoiceByNum.set(inv.invoice_number, inv);
+    });
+
+    const walletDeductionsByInvNum = new Map<string, number>();
+    walletTxs.forEach(wtx => {
+      if (wtx.transaction_type === 'INVOICE_PAYMENT' && wtx.notes) {
+        const m = wtx.notes.match(/INV-\d+-\d+/);
+        if (m) {
+          walletDeductionsByInvNum.set(m[0], (walletDeductionsByInvNum.get(m[0]) || 0) + (wtx.amount || 0));
+        }
+      }
+    });
+
+    const isCreditPaymentVodafone = (cp: CreditPayment): boolean => {
+      if (cp.payment_method === 'VODAFONE_CASH') return true;
+      if (cp.payment_method) return false;
+      if (cp.notes && cp.notes.includes('فودافون كاش')) return true;
+      const m = cp.notes?.match(/INV-\d+-\d+/);
+      if (m && invoiceByNum.get(m[0])?.payment_method === 'VODAFONE_CASH') return true;
+      return false;
+    };
+
+    const isWalletDepositVodafone = (wtx: WalletTransaction): boolean => {
+      if (wtx.payment_method === 'VODAFONE_CASH') return true;
+      if (wtx.payment_method) return false;
+      if (wtx.notes && wtx.notes.includes('فودافون كاش')) return true;
+      const m = wtx.notes?.match(/INV-\d+-\d+/);
+      if (m && invoiceByNum.get(m[0])?.payment_method === 'VODAFONE_CASH') return true;
+      return false;
+    };
+
+    const items: VodafoneCashBreakdownItem[] = [];
+
+    // 1. Invoices
+    allInvoices.forEach(inv => {
+      if (inv.invoice_status === 'CANCELLED' || inv.payment_method === 'WALLET') return;
+      const isVodafone = inv.payment_method === 'VODAFONE_CASH';
+      const custName = inv.customer_id ? customerNameById.get(inv.customer_id) : undefined;
+
+      if (isOpenOrDraftStatus(inv.invoice_status)) {
+        const paidAmt = inv.paid_amount || 0;
+        if (paidAmt <= 0) return;
+        const payItemEntries = Array.isArray(inv.timeline)
+          ? inv.timeline.filter(t => t && t.status === 'PAY_ITEM' && t.timestamp)
+          : [];
+        if (payItemEntries.length > 0) {
+          let parsedAny = false;
+          payItemEntries.forEach((entry, idx) => {
+            const ts = new Date(entry.timestamp).getTime();
+            if (ts >= startTime && ts <= endTime) {
+              const amtMatch = entry.notes?.match(/بمبلغ\s+([\d.]+)/);
+              if (amtMatch && entry.notes?.includes('VODAFONE_CASH')) {
+                const entryAmt = parseFloat(amtMatch[1]) || 0;
+                if (entryAmt > 0) {
+                  parsedAny = true;
+                  items.push({
+                    id: `${inv.id}_payitem_${idx}`,
+                    timestamp: entry.timestamp,
+                    category: 'INVOICE',
+                    label: `سداد صنف من فاتورة #${inv.invoice_number}`,
+                    sublabel: custName || entry.notes,
+                    amount: entryAmt
+                  });
+                }
+              }
+            }
+          });
+          if (!parsedAny && isVodafone) {
+            const latestPayTs = new Date(payItemEntries[payItemEntries.length - 1].timestamp).getTime();
+            if (latestPayTs >= startTime && latestPayTs <= endTime) {
+              items.push({
+                id: inv.id,
+                timestamp: payItemEntries[payItemEntries.length - 1].timestamp,
+                category: 'INVOICE',
+                label: `فاتورة مفتوحة #${inv.invoice_number}`,
+                sublabel: custName,
+                amount: paidAmt
+              });
+            }
+          }
+        } else if (isVodafone && inv.updated_at) {
+          const updTs = new Date(inv.updated_at).getTime();
+          if (updTs >= startTime && updTs <= endTime) {
+            items.push({
+              id: inv.id,
+              timestamp: inv.updated_at,
+              category: 'INVOICE',
+              label: `فاتورة #${inv.invoice_number}`,
+              sublabel: custName,
+              amount: paidAmt
+            });
+          }
+        }
+        return;
+      }
+
+      if (!isVodafone) return;
+
+      const paidTimelineEntry = Array.isArray(inv.timeline)
+        ? [...inv.timeline].reverse().find(t => t && (t.status === 'PAID' || t.status === 'CREDIT' || t.status === 'CLOSED'))
+        : undefined;
+      let effectiveDateStr = paidTimelineEntry?.timestamp || inv.invoice_date;
+      if (!paidTimelineEntry?.timestamp && inv.invoice_status === 'CLOSED' && inv.updated_at) {
+        if (inv.payment_type === 'CASH') {
+          effectiveDateStr = inv.updated_at;
+        } else if (inv.payment_type === 'SPLIT') {
+          const updMs = new Date(inv.updated_at).getTime();
+          const hasMatchingCreditPay = creditPayments.some(cp =>
+            cp.customer_id === inv.customer_id &&
+            Math.abs(new Date(cp.payment_date).getTime() - updMs) < 10000
+          );
+          if (!hasMatchingCreditPay) effectiveDateStr = inv.updated_at;
+        }
+      }
+
+      const invTime = new Date(effectiveDateStr).getTime();
+      if (invTime >= startTime && invTime <= endTime) {
+        const walletDeducted = inv.payment_method === 'WALLET_SPLIT'
+          ? (walletDeductionsByInvNum.get(inv.invoice_number) || 0)
+          : 0;
+        let netPaid = 0;
+        if (inv.payment_type === 'CASH') {
+          netPaid = Math.max(0, (inv.paid_amount ?? inv.total) - walletDeducted);
+        } else if (inv.payment_type === 'SPLIT') {
+          netPaid = Math.max(0, (inv.paid_amount || 0) - walletDeducted);
+        }
+        if (netPaid > 0) {
+          items.push({
+            id: inv.id,
+            timestamp: effectiveDateStr,
+            category: 'INVOICE',
+            label: `فاتورة مبيعات #${inv.invoice_number}`,
+            sublabel: custName || (inv.table_number ? `طاولة ${inv.table_number}` : 'عميل نقدي'),
+            amount: netPaid
+          });
+        }
+      }
+    });
+
+    // 2. Credit repayments via Vodafone Cash
+    creditPayments.forEach(cp => {
+      const pTime = new Date(cp.payment_date).getTime();
+      if (pTime >= startTime && pTime <= endTime && isCreditPaymentVodafone(cp)) {
+        const custName = customerNameById.get(cp.customer_id) || 'عميل';
+        items.push({
+          id: cp.id,
+          timestamp: cp.payment_date,
+          category: 'CREDIT_PAYMENT',
+          label: `سداد مديونية آجل: ${custName}`,
+          sublabel: cp.notes,
+          amount: cp.amount
+        });
+      }
+    });
+
+    // 3. Customer Wallet Deposits via Vodafone Cash
+    walletTxs.forEach(wtx => {
+      if (wtx.transaction_type === 'DEPOSIT' && isWalletDepositVodafone(wtx) && wtx.created_at) {
+        const wTime = new Date(wtx.created_at).getTime();
+        if (wTime >= startTime && wTime <= endTime) {
+          items.push({
+            id: wtx.id,
+            timestamp: wtx.created_at,
+            category: 'WALLET_DEPOSIT',
+            label: `إيداع محفظة عميل: ${wtx.customer_name}`,
+            sublabel: wtx.notes,
+            amount: wtx.amount
+          });
+        }
+      }
+    });
+
+    // 4. Manual Vodafone Cash Adjustments
+    cashMovements.forEach(cm => {
+      if (!cm.created_at) return;
+      const cmTime = new Date(cm.created_at).getTime();
+      if (cmTime >= startTime && cmTime <= endTime) {
+        if (cm.transaction_type === 'VODAFONE_ADJUSTMENT_ADD') {
+          items.push({
+            id: cm.id,
+            timestamp: cm.created_at,
+            category: 'ADJUSTMENT',
+            label: 'تسوية إضافة لرصيد المحفظة',
+            sublabel: cm.notes,
+            amount: cm.amount
+          });
+        } else if (cm.transaction_type === 'VODAFONE_ADJUSTMENT_SUB') {
+          items.push({
+            id: cm.id,
+            timestamp: cm.created_at,
+            category: 'ADJUSTMENT',
+            label: 'تسوية خصم من رصيد المحفظة',
+            sublabel: cm.notes,
+            amount: -cm.amount
+          });
+        }
+      }
+    });
+
+    // 5. Refunds on Vodafone Cash invoices
+    returns.forEach(ret => {
+      const retTime = new Date(ret.created_at || ret.return_date).getTime();
+      if (retTime >= startTime && retTime <= endTime) {
+        const origInv = invoiceById.get(ret.original_invoice_id);
+        if (origInv?.payment_method === 'VODAFONE_CASH') {
+          const refundAmt = origInv.payment_type === 'SPLIT'
+            ? Math.min(origInv.paid_amount || 0, ret.total_return_amount)
+            : ret.total_return_amount;
+          if (refundAmt > 0) {
+            items.push({
+              id: ret.id,
+              timestamp: ret.created_at || ret.return_date,
+              category: 'RETURN_REFUND',
+              label: `مرتجع فاتورة #${origInv.invoice_number}`,
+              sublabel: ret.reason || 'مرتجع مبيعات',
+              amount: -refundAmt
+            });
+          }
+        }
+      }
+    });
+
+    items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    const rawSum = items.reduce((s, it) => s + it.amount, 0);
+    const total = Math.max(0, Math.round(rawSum * 100) / 100);
+
+    return {
+      items,
+      total,
+      shiftStart: rawStartIso
+    };
+  },
+
+  adjustVodafoneCashBalance: (
+    delta: number,
+    reason: string,
+    operator = 'أدمن النظام'
+  ): { previousBalance: number; newBalance: number; delta: number } => {
+    const cleanDelta = Math.round(delta * 100) / 100;
+    if (cleanDelta === 0) {
+      const cur = dbService.getActiveShift()?.vodafone_cash_in ?? dbService.getActiveDrawer()?.vodafone_cash_in ?? 0;
+      return { previousBalance: cur, newBalance: cur, delta: 0 };
+    }
+
+    const activeShift = dbService.getActiveShift();
+    const activeDrawer = dbService.getActiveDrawer();
+    const previousBalance = activeShift
+      ? (activeShift.vodafone_cash_in || 0)
+      : (activeDrawer?.vodafone_cash_in || 0);
+    const newBalance = Math.max(0, Math.round((previousBalance + cleanDelta) * 100) / 100);
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const cleanReason = reason?.trim() || 'تسوية ومطابقة رصيد محفظة فودافون كاش الفعلي';
+
+    // 1. Log adjustment in CASH_HISTORY so calculateShiftMetrics & breakdown pick it up identically
+    dbService.saveCashMovement({
+      previous_balance: previousBalance,
+      transaction_type: cleanDelta > 0 ? 'VODAFONE_ADJUSTMENT_ADD' : 'VODAFONE_ADJUSTMENT_SUB',
+      amount: Math.abs(cleanDelta),
+      new_balance: newBalance,
+      date: todayStr,
+      time: timeStr,
+      user: operator,
+      notes: cleanReason
+    });
+
+    // 2. Keep activeDrawer.vodafone_cash_in 100% aligned with newBalance
+    const drawers = dbService.getCashDrawers();
+    const activeIdx = drawers.findIndex(d => d.closing_balance === null);
+    if (activeIdx > -1) {
+      drawers[activeIdx].vodafone_cash_in = newBalance;
+      drawers[activeIdx].updated_at = now.toISOString();
+      setLocal(KEYS.CASH_DRAWERS, drawers);
+    }
+
+    // 3. Audit trail + sync
+    dbService.logAuditAction(
+      'VODAFONE_CASH_ADJUSTMENT',
+      `تسوية رصيد محفظة فودافون كاش (${cleanDelta > 0 ? '+' : ''}${cleanDelta} ج.م) من ${previousBalance} ج.م إلى ${newBalance} ج.م. السبب: ${cleanReason}`,
+      operator
+    );
+
+    syncToServer();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shift_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
+    return { previousBalance, newBalance, delta: cleanDelta };
   },
 
   startShift: (shiftType: ShiftType, openingBalance: number, cashierName: string): Shift => {
