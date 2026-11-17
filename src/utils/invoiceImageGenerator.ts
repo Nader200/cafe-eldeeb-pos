@@ -529,6 +529,13 @@ export async function createInvoiceReceiptImage({
   const fCommReg = `700 14px ${CANVAS_FONT_FAMILY}`;
   const commRegBoxH = 30;
 
+  // Vodafone Cash payment transfer notice box
+  const vodafoneTransferNumber = (settings?.vodafone_cash_number || '').trim() || '01094793701';
+  const vodafoneTransferText = `للدفع عبر فودافون كاش يرجي التحويل على رقم / ${vodafoneTransferNumber}`;
+  const fVodafoneBox = `700 12.5px ${CANVAS_FONT_FAMILY}`;
+  const vodafoneLines = wrapCanvasText(mCtx, vodafoneTransferText, contentW - 24, fVodafoneBox);
+  const vodafoneBoxH = vodafoneLines.length * 22 + 18;
+
   // Measure total height cleanly
   let totalH = padTop;
   totalH += commRegBoxH + 10; // top-right commercial register box
@@ -574,6 +581,9 @@ export async function createInvoiceReceiptImage({
   if (noteLines.length > 0) {
     totalH += 10 + 22 + (noteLines.length * 18 + 16) + 14;
   }
+
+  // Vodafone Cash Transfer Box
+  totalH += vodafoneBoxH + 24;
 
   // Footer
   totalH += 14 + footerLines.length * 20 + padBottom;
@@ -905,6 +915,38 @@ export async function createInvoiceReceiptImage({
       ny += 18;
     }
     y += nBoxH + 10;
+    drawDashedLine(ctx, leftX, rightX, y, '#9ca3af');
+    y += 14;
+  }
+
+  // 8.5. Vodafone Cash Payment Transfer Box
+  {
+    const boxY = y;
+    ctx.save();
+    ctx.fillStyle = '#fef2f2';
+    ctx.strokeStyle = '#fca5a5';
+    ctx.lineWidth = 1.4;
+    drawRoundedRectPath(ctx, leftX, boxY, contentW, vodafoneBoxH, 8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
+    let vy = boxY + 9;
+    for (const vLine of vodafoneLines) {
+      drawTextSegment(
+        ctx,
+        vLine,
+        width / 2,
+        vy + 11,
+        'center',
+        fVodafoneBox,
+        '#b91c1c',
+        isPureLtrText(vLine) ? 'ltr' : 'rtl'
+      );
+      vy += 22;
+    }
+
+    y = boxY + vodafoneBoxH + 10;
     drawDashedLine(ctx, leftX, rightX, y, '#9ca3af');
     y += 14;
   }
