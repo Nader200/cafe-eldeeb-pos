@@ -609,6 +609,7 @@ export default function POSView({
   // Wallet checkout states
   const [useWallet, setUseWallet] = useState<boolean>(false);
   const [walletDeductionAmount, setWalletDeductionAmount] = useState<number>(0);
+  const [transferChangeToWallet, setTransferChangeToWallet] = useState<boolean>(false);
   const [showAdvancedPanel, setShowAdvancedPanel] = useState<boolean>(false);
 
   // Customer previous credit balance settlement states
@@ -628,6 +629,9 @@ export default function POSView({
     } else {
       setPayPreviousCredit(false);
       setPreviousCreditPayAmount(0);
+    }
+    if (!selectedCustomerObj || selectedCustomerObj.id === 'c_general') {
+      setTransferChangeToWallet(false);
     }
   }, [selectedCustomerObj]);
 
@@ -1047,6 +1051,7 @@ export default function POSView({
     // Prefill cash received for quick checkout (include old credit only if toggle is enabled)
     setUseWallet(false);
     setWalletDeductionAmount(0);
+    setTransferChangeToWallet(false);
     const oldCredit = (selectedCustomerObj && selectedCustomerObj.id !== 'c_general')
       ? Math.max(0, selectedCustomerObj.current_balance || 0)
       : 0;
@@ -1242,6 +1247,14 @@ export default function POSView({
       : Math.min(netInvoiceDue, enteredCash);
     const paidVal = cashAmt + walletAmt;
     const creditSettlementAmt = getActiveCreditSettlementAmount();
+    const exactCashDue = netInvoiceDue + creditSettlementAmt;
+    const rawChangeAmt = paymentType === 'CASH'
+      ? Math.max(0, Math.round((enteredCash - exactCashDue) * 100) / 100)
+      : 0;
+    const hasCustomerWallet = Boolean(selectedCustomer && selectedCustomer !== 'c_general');
+    const changeToWalletAmt = (transferChangeToWallet && hasCustomerWallet && rawChangeAmt > 0)
+      ? rawChangeAmt
+      : 0;
 
     try {
       let res;
@@ -1264,7 +1277,8 @@ export default function POSView({
           paymentNumber,
           senderPhone,
           receiptImageUrl,
-          creditSettlementAmt
+          creditSettlementAmt,
+          changeToWalletAmt
         );
       } else {
         res = dbService.createInvoice(
@@ -1284,7 +1298,8 @@ export default function POSView({
           paymentNumber,
           senderPhone,
           receiptImageUrl,
-          creditSettlementAmt
+          creditSettlementAmt,
+          changeToWalletAmt
         );
       }
 
@@ -1292,7 +1307,11 @@ export default function POSView({
       setShowCheckoutModal(false);
       setShowReceiptModal(true);
       onShowSuccessAlert(
-        creditSettlementAmt > 0
+        changeToWalletAmt > 0 && creditSettlementAmt > 0
+          ? `تم إغلاق الفاتورة #${res.invoice.invoice_number} وخصم ${creditSettlementAmt.toLocaleString()} ${settings.currency} من الآجل وترحيل الباقي (${changeToWalletAmt.toLocaleString()} ${settings.currency}) لمحفظة العميل!`
+          : changeToWalletAmt > 0
+          ? `تم إغلاق الفاتورة #${res.invoice.invoice_number} وترحيل الباقي (${changeToWalletAmt.toLocaleString()} ${settings.currency}) إلى محفظة العميل بنجاح!`
+          : creditSettlementAmt > 0
           ? `تم إغلاق الفاتورة #${res.invoice.invoice_number} وخصم ${creditSettlementAmt.toLocaleString()} ${settings.currency} من الحساب الآجل تلقائياً!`
           : `تم تسجيل وإغلاق الفاتورة بنجاح برقم: ${res.invoice.invoice_number}`
       );
@@ -1308,6 +1327,7 @@ export default function POSView({
       setSelectedCustomer('c_general');
       setPayPreviousCredit(false);
       setPreviousCreditPayAmount(0);
+      setTransferChangeToWallet(false);
       setPaymentMethod('CASH');
       setPaymentNumber('');
       setReferenceNumber('');
@@ -2772,12 +2792,54 @@ export default function POSView({
                         })()}
                       </div>
 
-                      {parseFloat(cashReceived) > exactAmt && (
-                        <div className="flex justify-between items-center text-xs mt-3 bg-gold-950/20 p-2.5 rounded-xl border border-gold-600/20 text-gold-500 font-bold">
-                          <span>الباقي / المرتجع للزبون:</span>
-                          <span className="font-mono font-black text-sm">{(parseFloat(cashReceived) - exactAmt).toLocaleString()} {settings.currency}</span>
-                        </div>
-                      )}
+                      {parseFloat(cashReceived) > exactAmt && (() => {
+                        const changeDue = Math.round(((parseFloat(cashReceived) || 0) - exactAmt) * 100) / 100;
+                        const hasWalletAccount = Boolean(selectedCustomerObj && selectedCustomerObj.id !== 'c_general');
+                        const walletBalAfterUse = hasWalletAccount
+                          ? Math.max(0, Math.round(((selectedCustomerObj?.wallet_balance || 0) - (useWallet ? walletDeductionAmount : 0)) * 100) / 100)
+                          : 0;
+                        return (
+                          <div className="mt-3 space-y-2">
+                            <div className="flex justify-between items-center text-xs bg-gold-950/20 p-2.5 rounded-xl border border-gold-600/20 text-gold-500 font-bold">
+                              <span>الباقي / المرتجع للزبون:</span>
+                              <span className="font-mono font-black text-sm">{changeDue.toLocaleString()} {settings.currency}</span>
+                            </div>
+
+                            {hasWalletAccount && selectedCustomerObj && (
+                              <div className={`p-3 rounded-xl border transition-all ${
+                                transferChangeToWallet
+                                  ? 'bg-emerald-950/30 border-emerald-500/60'
+                                  : 'bg-luxury-card/60 border-gold-600/30 hover:border-gold-500/60'
+                              }`}>
+                                <label className="flex items-start gap-2.5 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={transferChangeToWallet}
+                                    onChange={(e) => setTransferChangeToWallet(e.target.checked)}
+                                    className="mt-0.5 rounded border-gray-700 text-emerald-500 focus:ring-emerald-500 bg-luxury-bg w-4 h-4 accent-emerald-500 shrink-0"
+                                  />
+                                  <div className="flex-1 text-right">
+                                    <span className="text-xs font-black text-white block">
+                                      ترحيل الباقي ({changeDue.toLocaleString()} {settings.currency}) إلى محفظة العميل
+                                    </span>
+                                    <span className="text-[10px] text-gray-400 block mt-0.5">
+                                      محفظة: <strong className="text-gold-400">{selectedCustomerObj.full_name}</strong> | الرصيد الحالي: <span className="font-mono text-gray-200">{walletBalAfterUse.toLocaleString()} {settings.currency}</span>
+                                    </span>
+                                    {transferChangeToWallet && (
+                                      <div className="mt-1.5 pt-1.5 border-t border-emerald-500/25 flex items-center justify-between text-[10px] font-bold text-emerald-300">
+                                        <span>رصيد المحفظة بعد الترحيل:</span>
+                                        <span className="font-mono font-black text-emerald-400">
+                                          {(walletBalAfterUse + changeDue).toLocaleString()} {settings.currency}
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </label>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </>
                   )}
                 </div>
@@ -4042,6 +4104,20 @@ export default function POSView({
                           : '0 ج.م (تم السداد بالكامل)'}
                       </span>
                     </div>
+                  </div>
+                )}
+                {(recentInvoice.change_to_wallet || 0) > 0 && (
+                  <div className="mt-1.5 pt-1.5 border-t border-dashed border-emerald-400 space-y-1 bg-emerald-50 p-2 rounded-lg border border-emerald-200">
+                    <div className="flex justify-between text-emerald-800 font-black">
+                      <span>الباقي المرحّل لمحفظة العميل:</span>
+                      <span>+{(recentInvoice.change_to_wallet || 0).toLocaleString()} {settings.currency}</span>
+                    </div>
+                    {recentInvoice.wallet_balance_after_invoice !== undefined && (
+                      <div className="flex justify-between text-emerald-700 font-bold">
+                        <span>رصيد المحفظة الحالي:</span>
+                        <span>{recentInvoice.wallet_balance_after_invoice.toLocaleString()} {settings.currency}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

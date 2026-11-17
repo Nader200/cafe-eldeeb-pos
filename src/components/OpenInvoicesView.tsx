@@ -162,6 +162,7 @@ export default function OpenInvoicesView({
   const [payReceiptImage, setPayReceiptImage] = useState<string>('');
   const [payIncludeOldCredit, setPayIncludeOldCredit] = useState<boolean>(false);
   const [payOldCreditAmount, setPayOldCreditAmount] = useState<number>(0);
+  const [payTransferChangeToWallet, setPayTransferChangeToWallet] = useState<boolean>(false);
 
   // Credit Conversion Modal State
   const [showCreditModal, setShowCreditModal] = useState<boolean>(false);
@@ -421,6 +422,15 @@ export default function OpenInvoicesView({
         ? (settings.instapay_id || settings.instapay_number || 'cafeeldeeb@instapay')
         : '';
 
+      const totalDueNow = payInvoice.total + creditSettlementAmt;
+      const rawChangeAmt = (payMethod === 'CASH' && !isCreditType && payCashReceived > totalDueNow)
+        ? Math.round((payCashReceived - totalDueNow) * 100) / 100
+        : 0;
+      const hasCustomerWallet = Boolean(payCust && payCust.id !== 'c_general');
+      const changeToWalletAmt = (payTransferChangeToWallet && hasCustomerWallet && rawChangeAmt > 0)
+        ? rawChangeAmt
+        : 0;
+
       dbService.closeOpenInvoice(
         payInvoice.id,
         cartItems,
@@ -439,7 +449,8 @@ export default function OpenInvoicesView({
         targetPaymentNumber,
         paySenderPhone,
         payReceiptImage,
-        creditSettlementAmt
+        creditSettlementAmt,
+        changeToWalletAmt
       );
 
       setShowPayModal(false);
@@ -450,10 +461,15 @@ export default function OpenInvoicesView({
       setPayReceiptImage('');
       setPayIncludeOldCredit(false);
       setPayOldCreditAmount(0);
+      setPayTransferChangeToWallet(false);
       loadData();
       if (onShowSuccessAlert) {
         onShowSuccessAlert(
-          creditSettlementAmt > 0
+          changeToWalletAmt > 0 && creditSettlementAmt > 0
+            ? `تم سداد وإغلاق الفاتورة #${payInvoice.invoice_number} وخصم ${creditSettlementAmt.toLocaleString()} ${settings.currency} من الآجل وترحيل الباقي (${changeToWalletAmt.toLocaleString()} ${settings.currency}) لمحفظة العميل!`
+            : changeToWalletAmt > 0
+            ? `تم سداد وإغلاق الفاتورة #${payInvoice.invoice_number} وترحيل الباقي (${changeToWalletAmt.toLocaleString()} ${settings.currency}) إلى محفظة العميل بنجاح!`
+            : creditSettlementAmt > 0
             ? `تم سداد وإغلاق الفاتورة #${payInvoice.invoice_number} وخصم ${creditSettlementAmt.toLocaleString()} ${settings.currency} من الحساب الآجل السابق بنجاح!`
             : `تم سداد وإغلاق الفاتورة رقم #${payInvoice.invoice_number} بنجاح!`
         );
@@ -1355,6 +1371,7 @@ export default function OpenInvoicesView({
                                 setPayIncludeOldCredit(false);
                                 setPayOldCreditAmount(oldBal);
                                 setPayCashReceived(inv.total);
+                                setPayTransferChangeToWallet(false);
                                 setPayNotes('');
                                 setPaySenderPhone('');
                                 setPayRefNo('');
@@ -2946,11 +2963,51 @@ export default function OpenInvoicesView({
                         onChange={(e) => setPayCashReceived(Number(e.target.value) || 0)}
                         className="w-full bg-black border border-gray-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-white font-mono text-sm font-bold text-left"
                       />
-                      {payCashReceived > totalDueNow && (
-                        <p className="text-[10px] text-emerald-400 font-bold text-left mt-1">
-                          المتبقي (الباقي للعميل): {(payCashReceived - totalDueNow).toLocaleString()} {settings.currency}
-                        </p>
-                      )}
+                      {payCashReceived > totalDueNow && (() => {
+                        const changeDue = Math.round((payCashReceived - totalDueNow) * 100) / 100;
+                        const hasWalletAccount = Boolean(payCust && payCust.id !== 'c_general');
+                        const currentWalletBal = hasWalletAccount ? (payCust?.wallet_balance || 0) : 0;
+                        return (
+                          <div className="mt-2 space-y-2">
+                            <p className="text-[11px] text-emerald-400 font-bold flex items-center justify-between bg-emerald-950/20 border border-emerald-500/20 rounded-xl px-2.5 py-1.5">
+                              <span>المتبقي (الباقي للعميل):</span>
+                              <span className="font-mono font-black">{changeDue.toLocaleString()} {settings.currency}</span>
+                            </p>
+                            {hasWalletAccount && payCust && (
+                              <div className={`p-2.5 rounded-xl border transition-all ${
+                                payTransferChangeToWallet
+                                  ? 'bg-emerald-950/35 border-emerald-500/60'
+                                  : 'bg-black/40 border-gold-600/30 hover:border-gold-500/60'
+                              }`}>
+                                <label className="flex items-start gap-2 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={payTransferChangeToWallet}
+                                    onChange={(e) => setPayTransferChangeToWallet(e.target.checked)}
+                                    className="mt-0.5 rounded border-gray-700 text-emerald-500 bg-black w-4 h-4 accent-emerald-500 shrink-0"
+                                  />
+                                  <div className="flex-1 text-right">
+                                    <span className="text-[11px] font-black text-white block">
+                                      ترحيل الباقي ({changeDue.toLocaleString()} {settings.currency}) إلى محفظة العميل
+                                    </span>
+                                    <span className="text-[10px] text-gray-400 block mt-0.5">
+                                      العميل: <strong className="text-gold-400">{payCust.full_name}</strong> | الرصيد الحالي: <span className="font-mono text-gray-200">{currentWalletBal.toLocaleString()} {settings.currency}</span>
+                                    </span>
+                                    {payTransferChangeToWallet && (
+                                      <div className="mt-1 pt-1 border-t border-emerald-500/25 flex items-center justify-between text-[10px] font-bold text-emerald-300">
+                                        <span>رصيد المحفظة بعد الترحيل:</span>
+                                        <span className="font-mono font-black text-emerald-400">
+                                          {(currentWalletBal + changeDue).toLocaleString()} {settings.currency}
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </label>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </>

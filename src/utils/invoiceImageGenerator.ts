@@ -482,6 +482,22 @@ export async function createInvoiceReceiptImage({
         font: fTotalRow,
       });
     }
+    if ((invoice.change_to_wallet || 0) > 0) {
+      postTotalRows.push({
+        label: 'الباقي المرحّل لمحفظة العميل:',
+        value: `+${(invoice.change_to_wallet || 0).toLocaleString()} ${currency}`,
+        color: '#047857',
+        font: fCreditBold,
+      });
+      if (invoice.wallet_balance_after_invoice !== undefined) {
+        postTotalRows.push({
+          label: 'رصيد محفظة العميل الحالي:',
+          value: `${invoice.wallet_balance_after_invoice.toLocaleString()} ${currency}`,
+          color: '#065f46',
+          font: fTotalRow,
+        });
+      }
+    }
   }
 
   // Credit box rows

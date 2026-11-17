@@ -163,6 +163,8 @@ export interface Invoice {
   credit_paid_with_invoice?: number;
   remaining_credit_after_invoice?: number;
   grand_total_with_credit?: number;
+  change_to_wallet?: number;
+  wallet_balance_after_invoice?: number;
 }
 
 export interface InvoiceItem {

@@ -1654,7 +1654,8 @@ export const dbService = {
     paymentNumber?: string,
     senderPhone?: string,
     receiptImageUrl?: string,
-    creditSettlementAmount = 0
+    creditSettlementAmount = 0,
+    changeToWallet = 0
   ): { invoice: Invoice; items: InvoiceItem[] } => {
     const invoices = dbService.getInvoices(true);
     const invoiceItemsList = dbService.getInvoiceItems();
@@ -2111,6 +2112,51 @@ export const dbService = {
       }
     }
 
+    // 4.6 Transfer Cash Change to Customer Wallet if requested (registered customer only)
+    const safeChangeToWallet =
+      changeToWallet > 0 && customerId && customerId !== 'c_general'
+        ? Math.round(changeToWallet * 100) / 100
+        : 0;
+    let changeDepositCustomerName = '';
+    if (safeChangeToWallet > 0 && customerId && customerId !== 'c_general') {
+      const custIdx = customersList.findIndex(c => c.id === customerId);
+      if (custIdx > -1) {
+        const cust = customersList[custIdx];
+        const oldBal = cust.wallet_balance || 0;
+        const newBal = Math.round((oldBal + safeChangeToWallet) * 100) / 100;
+        customersList[custIdx].wallet_balance = newBal;
+        customersList[custIdx].updated_at = new Date().toISOString();
+        changeDepositCustomerName = cust.full_name;
+
+        const wtxList = getLocal<WalletTransaction[]>(KEYS.WALLET_TRANSACTIONS, []);
+        const newWtx: WalletTransaction = {
+          id: `wtx_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          customer_id: customerId,
+          customer_name: cust.full_name,
+          transaction_type: 'DEPOSIT',
+          amount: safeChangeToWallet,
+          previous_balance: oldBal,
+          new_balance: newBal,
+          notes: `ترحيل باقي فاتورة مبيعات رقم ${invoiceNum} إلى محفظة العميل`,
+          date: new Date().toISOString().split('T')[0],
+          time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          user: cashierName,
+          created_at: new Date().toISOString()
+        };
+        wtxList.push(newWtx);
+        setLocal(KEYS.WALLET_TRANSACTIONS, wtxList);
+
+        newInvoice.change_to_wallet = safeChangeToWallet;
+        newInvoice.wallet_balance_after_invoice = newBal;
+
+        dbService.logAuditAction(
+          'WALLET_TRANSACTION',
+          `ترحيل باقي فاتورة مبيعات رقم ${invoiceNum} إلى محفظة العميل: ${cust.full_name}، بمبلغ: ${safeChangeToWallet} ج.م، الرصيد قبل: ${oldBal} ج.م، الرصيد بعد: ${newBal} ج.م`,
+          cashierName
+        );
+      }
+    }
+
     // 5. Update Cash Drawer Immediately (Net of Wallet Deduction + Any Previous Credit Paid)
     const netCashPaid = Math.max(0, actualPaid - walletDeduction) + actualCreditPaid;
     if (netCashPaid > 0) {
@@ -2120,6 +2166,15 @@ export const dbService = {
         actualCreditPaid > 0
           ? `مبيعات نقداً فاتورة رقم ${invoiceNum} + سداد آجل سابق (${actualCreditPaid} ج.م)`
           : `مبيعات نقداً فاتورة رقم ${invoiceNum}`
+      );
+    }
+
+    // 5.1 Record Cash Kept in Drawer for Change Transferred to Customer Wallet (keeps Drawer & Shift 100% synced)
+    if (safeChangeToWallet > 0 && changeDepositCustomerName) {
+      dbService.logCashMovement(
+        safeChangeToWallet,
+        0,
+        `إيداع محفظة عميل: ${changeDepositCustomerName} - ترحيل باقي فاتورة رقم ${invoiceNum}`
       );
     }
 
@@ -2366,7 +2421,8 @@ export const dbService = {
     paymentNumber?: string,
     senderPhone?: string,
     receiptImageUrl?: string,
-    creditSettlementAmount = 0
+    creditSettlementAmount = 0,
+    changeToWallet = 0
   ): { invoice: Invoice; items: InvoiceItem[] } => {
     const invoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
     const invoiceItemsList = getLocal<InvoiceItem[]>(KEYS.INVOICE_ITEMS, []);
@@ -2784,6 +2840,51 @@ export const dbService = {
       }
     }
 
+    // Process Cash Change Transfer to Customer Wallet if requested (registered customer only)
+    const safeChangeToWallet =
+      changeToWallet > 0 && customerId && customerId !== 'c_general'
+        ? Math.round(changeToWallet * 100) / 100
+        : 0;
+    let changeDepositCustomerName = '';
+    if (safeChangeToWallet > 0 && customerId && customerId !== 'c_general') {
+      const custIdx = customersList.findIndex(c => c.id === customerId);
+      if (custIdx > -1) {
+        const cust = customersList[custIdx];
+        const oldBal = cust.wallet_balance || 0;
+        const newBal = Math.round((oldBal + safeChangeToWallet) * 100) / 100;
+        customersList[custIdx].wallet_balance = newBal;
+        customersList[custIdx].updated_at = new Date().toISOString();
+        changeDepositCustomerName = cust.full_name;
+
+        const wtxList = getLocal<WalletTransaction[]>(KEYS.WALLET_TRANSACTIONS, []);
+        const newWtx: WalletTransaction = {
+          id: `wtx_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          customer_id: customerId,
+          customer_name: cust.full_name,
+          transaction_type: 'DEPOSIT',
+          amount: safeChangeToWallet,
+          previous_balance: oldBal,
+          new_balance: newBal,
+          notes: `ترحيل باقي فاتورة مبيعات رقم ${existingInvoice.invoice_number} إلى محفظة العميل`,
+          date: new Date().toISOString().split('T')[0],
+          time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          user: cashierName,
+          created_at: new Date().toISOString()
+        };
+        wtxList.push(newWtx);
+        setLocal(KEYS.WALLET_TRANSACTIONS, wtxList);
+
+        updatedInvoice.change_to_wallet = safeChangeToWallet;
+        updatedInvoice.wallet_balance_after_invoice = newBal;
+
+        dbService.logAuditAction(
+          'WALLET_TRANSACTION',
+          `ترحيل باقي فاتورة مبيعات رقم ${existingInvoice.invoice_number} إلى محفظة العميل: ${cust.full_name}، بمبلغ: ${safeChangeToWallet} ج.م، الرصيد قبل: ${oldBal} ج.م، الرصيد بعد: ${newBal} ج.م`,
+          cashierName
+        );
+      }
+    }
+
     // Update Cash Drawer Immediately (Net of Wallet Deduction + Any Previous Credit Paid)
     const netCashPaid = Math.max(0, actualPaid - walletDeduction) + actualCreditPaid;
     if (netCashPaid > 0) {
@@ -2793,6 +2894,15 @@ export const dbService = {
         actualCreditPaid > 0
           ? `مبيعات نقداً فاتورة رقم ${existingInvoice.invoice_number} + سداد آجل سابق (${actualCreditPaid} ج.م)`
           : `مبيعات نقداً فاتورة رقم ${existingInvoice.invoice_number}`
+      );
+    }
+
+    // Record Cash Kept in Drawer for Change Transferred to Customer Wallet (keeps Drawer & Shift 100% synced)
+    if (safeChangeToWallet > 0 && changeDepositCustomerName) {
+      dbService.logCashMovement(
+        safeChangeToWallet,
+        0,
+        `إيداع محفظة عميل: ${changeDepositCustomerName} - ترحيل باقي فاتورة رقم ${existingInvoice.invoice_number}`
       );
     }
 
