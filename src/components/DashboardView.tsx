@@ -114,12 +114,14 @@ export default function DashboardView({
     refreshShiftState();
     window.addEventListener('cafe_db_synced_remote', handleSync);
     window.addEventListener('shift_updated', handleSync);
+    window.addEventListener('open_invoices_updated', handleSync);
     window.addEventListener('safe_updated', handleSync);
     window.addEventListener('shortage_updated', handleSync);
     window.addEventListener('storage', handleSync);
     return () => {
       window.removeEventListener('cafe_db_synced_remote', handleSync);
       window.removeEventListener('shift_updated', handleSync);
+      window.removeEventListener('open_invoices_updated', handleSync);
       window.removeEventListener('safe_updated', handleSync);
       window.removeEventListener('shortage_updated', handleSync);
       window.removeEventListener('storage', handleSync);
@@ -269,7 +271,7 @@ export default function DashboardView({
 
   // Active shift cash drawer calculation (Single Source of Truth)
   const shiftCashMetrics = useMemo(() => {
-    const shift = activeShift || dbService.getActiveShift();
+    const shift = dbService.getActiveShift() || activeShift;
     if (shift) {
       return {
         opening_balance: shift.opening_balance,

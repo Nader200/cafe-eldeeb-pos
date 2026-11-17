@@ -1368,6 +1368,10 @@ export const dbService = {
     );
 
     syncToServer();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shift_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
     return newTx;
   },
 
@@ -2137,6 +2141,12 @@ export const dbService = {
       }
     }
 
+    syncToServer();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shift_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
     return { invoice: newInvoice, items: newItems };
   },
 
@@ -2465,8 +2475,10 @@ export const dbService = {
       receipt_image_url: effReceiptUrl,
       receiptImageUrl: (effReceiptUrl && !effReceiptUrl.startsWith('data:')) ? effReceiptUrl : '',
       payment_number: effPayNum,
+      invoice_date: dateStr,
       payment_date: dateStr.split('T')[0],
       payment_time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      created_at: existingInvoice.created_at || existingInvoice.invoice_date || dateStr,
       updated_at: dateStr,
       ...(shouldAttachCreditSummary ? {
         previous_credit_balance: previousCreditBalance,
@@ -2784,6 +2796,20 @@ export const dbService = {
       );
     }
 
+    // Record timeline & audit events for payment/credit closure BEFORE saving to storage & server
+    const isCredit = paymentType === 'CREDIT' || sanitizedMethod === 'CREDIT';
+    const closeStatus = isCredit ? 'CREDIT' : 'PAID';
+
+    if (!updatedInvoice.timeline) updatedInvoice.timeline = [];
+    updatedInvoice.timeline.push({
+      status: closeStatus,
+      timestamp: dateStr,
+      operator: cashierName,
+      notes: isCredit
+        ? `تم إغلاق الفاتورة وتحويل الحساب إلى العميل الآجل`
+        : `تم سداد الفاتورة بالكامل وإغلاقها بأسلوب (${sanitizedMethod || 'نقدي'})`
+    });
+
     setLocal(KEYS.INVOICES, invoices);
     setLocal(KEYS.INVOICE_ITEMS, filteredItems);
     setLocal(KEYS.PRODUCTS, products);
@@ -2801,20 +2827,6 @@ export const dbService = {
       }
     }
 
-    // Record timeline & audit events for payment/credit closure
-    const isCredit = paymentType === 'CREDIT' || sanitizedMethod === 'CREDIT';
-    const closeStatus = isCredit ? 'CREDIT' : 'PAID';
-    
-    if (!updatedInvoice.timeline) updatedInvoice.timeline = [];
-    updatedInvoice.timeline.push({
-      status: closeStatus,
-      timestamp: dateStr,
-      operator: cashierName,
-      notes: isCredit
-        ? `تم إغلاق الفاتورة وتحويل الحساب إلى العميل الآجل`
-        : `تم سداد الفاتورة بالكامل وإغلاقها بأسلوب (${sanitizedMethod || 'نقدي'})`
-    });
-
     dbService.logAuditAction(
       isCredit ? 'INVOICE_CREDIT_CONVERTED' : 'INVOICE_PAID',
       `تم إغلاق الفاتورة رقم #${updatedInvoice.invoice_number} ${isCredit ? 'وتحويلها لحساب عميل آجل' : 'وسداد قيمتها بنجاح'} (${total} ج.م)`,
@@ -2829,7 +2841,7 @@ export const dbService = {
           message: `تم إغلاق الفاتورة رقم #${updatedInvoice.invoice_number} ${isCredit ? 'وتحويلها لحساب آجل 📜' : 'وسداد قيمتها بنجاح 💰'}`
         }
       }));
-      window.dispatchEvent(new CustomEvent('open_invoices_updated'));
+      window.dispatchEvent(new CustomEvent('shift_updated'));
       window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
     }
 
@@ -2911,6 +2923,11 @@ export const dbService = {
     setLocal(KEYS.CUSTOMERS, customersList);
     setLocal(KEYS.INVENTORY_TRANSACTIONS, transactions);
     syncToServer();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shift_updated'));
+      window.dispatchEvent(new CustomEvent('open_invoices_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
 
     return invoices[invIdx];
   },
@@ -3626,6 +3643,11 @@ export const dbService = {
     );
 
     syncToServer();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shift_updated'));
+      window.dispatchEvent(new CustomEvent('open_invoices_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
   },
 
   splitInvoiceByAmount: (invoiceId: string, parts: number, cashierName: string): Invoice[] => {
@@ -3772,6 +3794,10 @@ export const dbService = {
       dbService.saveSupplierPurchase(purchaseObj);
     }
 
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shift_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
     return newExp;
   },
   deleteExpense: (id: string) => {
@@ -3790,6 +3816,10 @@ export const dbService = {
     const filtered = list.filter(e => e.id !== id);
     firebaseSyncService.recordDeletion(KEYS.EXPENSES, id);
     setLocal(KEYS.EXPENSES, filtered);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shift_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
     return filtered;
   },
 
@@ -4048,6 +4078,13 @@ export const dbService = {
 
     // Add to cash drawer
     dbService.logCashMovement(amount, 0, `سداد مديونية عميل: ${customersList[custIdx].full_name}`);
+    syncToServer();
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shift_updated'));
+      window.dispatchEvent(new CustomEvent('customer_credit_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
 
     return newPayment;
   },
@@ -4244,6 +4281,10 @@ export const dbService = {
       user,
       notes
     );
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shift_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
   },
 
   // --- Admin Verification Helper for Drawer Reset & Safes ---
@@ -6163,6 +6204,10 @@ export const dbService = {
       // Log cash movement (Paid out)
       const totalCost = costPrice * quantity;
       dbService.logCashMovement(0, totalCost, `شراء وتوريد مخزون: ${products[idx].name_ar}`);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('shift_updated'));
+        window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+      }
     }
   },
 
@@ -8433,29 +8478,96 @@ export const dbService = {
   },
 
   calculateShiftMetrics: (shift: Shift): Shift => {
-    const invoices = dbService.getInvoices();
+    const allInvoices = dbService.getInvoices(true);
     const expenses = dbService.getExpenses();
     const creditPayments = getLocal<CreditPayment[]>(KEYS.CREDIT_PAYMENTS, []);
     const cashMovements = dbService.getCashHistory();
     const returns = dbService.getReturnTransactions();
+    const walletTxs = getLocal<WalletTransaction[]>(KEYS.WALLET_TRANSACTIONS, []);
 
     const rawStartTime = new Date(shift.started_at).getTime();
     const resetStartTime = shift.last_reset_at ? new Date(shift.last_reset_at).getTime() : 0;
     const startTime = Math.max(rawStartTime, resetStartTime);
-    const endTime = shift.ended_at ? new Date(shift.ended_at).getTime() : Date.now();
+    const endTime = shift.status === 'COMPLETED' && shift.ended_at
+      ? new Date(shift.ended_at).getTime()
+      : Date.now();
+
+    // Map wallet deductions per invoice number (for WALLET_SPLIT invoices)
+    const walletDeductionsByInvNum = new Map<string, number>();
+    walletTxs.forEach(wtx => {
+      if (wtx.transaction_type === 'INVOICE_PAYMENT' && wtx.notes) {
+        const m = wtx.notes.match(/INV-\d+-\d+/);
+        if (m) {
+          walletDeductionsByInvNum.set(m[0], (walletDeductionsByInvNum.get(m[0]) || 0) + (wtx.amount || 0));
+        }
+      }
+    });
+
+    const invoiceById = new Map<string, Invoice>();
+    allInvoices.forEach(inv => invoiceById.set(inv.id, inv));
 
     let cashIn = 0;
     let cashOut = 0;
 
-    // 1. Cash from Invoices
-    invoices.forEach(inv => {
+    // 1. Cash from Invoices (including open invoices closed during this shift & partial item payments)
+    allInvoices.forEach(inv => {
       if (inv.invoice_status === 'CANCELLED') return;
-      const invTime = new Date(inv.invoice_date).getTime();
-      if (invTime >= startTime && invTime <= endTime) {
+      if (inv.payment_method === 'WALLET') return;
+
+      if (isOpenOrDraftStatus(inv.invoice_status)) {
+        // Unclosed OPEN/DRAFT invoices only count if single-item payments (paySelectedItem) occurred during the shift
+        const paidAmt = inv.paid_amount || 0;
+        if (paidAmt <= 0) return;
+        const payItemEntries = Array.isArray(inv.timeline)
+          ? inv.timeline.filter(t => t && t.status === 'PAY_ITEM' && t.timestamp)
+          : [];
+        if (payItemEntries.length > 0) {
+          const latestPayTs = new Date(payItemEntries[payItemEntries.length - 1].timestamp).getTime();
+          if (latestPayTs >= startTime && latestPayTs <= endTime) {
+            cashIn += paidAmt;
+          }
+        } else if (inv.updated_at) {
+          const updTs = new Date(inv.updated_at).getTime();
+          if (updTs >= startTime && updTs <= endTime) {
+            cashIn += paidAmt;
+          }
+        }
+        return;
+      }
+
+      // Resolve effective realization timestamp:
+      // Prefer payment/close timeline entry; for legacy CLOSED open invoices without saved timeline, fall back to updated_at
+      const paidTimelineEntry = Array.isArray(inv.timeline)
+        ? [...inv.timeline].reverse().find(t => t && (t.status === 'PAID' || t.status === 'CREDIT' || t.status === 'CLOSED'))
+        : undefined;
+
+      let effectiveDateStr = paidTimelineEntry?.timestamp || inv.invoice_date;
+      if (!paidTimelineEntry?.timestamp && inv.invoice_status === 'CLOSED' && inv.updated_at) {
         if (inv.payment_type === 'CASH') {
-          cashIn += inv.paid_amount || inv.total;
+          effectiveDateStr = inv.updated_at;
         } else if (inv.payment_type === 'SPLIT') {
-          cashIn += inv.paid_amount || 0;
+          const updMs = new Date(inv.updated_at).getTime();
+          const hasMatchingCreditPay = creditPayments.some(cp =>
+            cp.customer_id === inv.customer_id &&
+            Math.abs(new Date(cp.payment_date).getTime() - updMs) < 10000
+          );
+          if (!hasMatchingCreditPay) {
+            effectiveDateStr = inv.updated_at;
+          }
+        }
+      }
+
+      const invTime = new Date(effectiveDateStr).getTime();
+      if (invTime >= startTime && invTime <= endTime) {
+        const walletDeducted = inv.payment_method === 'WALLET_SPLIT'
+          ? (walletDeductionsByInvNum.get(inv.invoice_number) || 0)
+          : 0;
+        if (inv.payment_type === 'CASH') {
+          const grossPaid = inv.paid_amount ?? inv.total;
+          cashIn += Math.max(0, grossPaid - walletDeducted);
+        } else if (inv.payment_type === 'SPLIT') {
+          const grossPaid = inv.paid_amount || 0;
+          cashIn += Math.max(0, grossPaid - walletDeducted);
         }
       }
     });
@@ -8468,14 +8580,23 @@ export const dbService = {
       }
     });
 
-    // 3. Manual Cash Movements
+    // 3. Manual Cash Movements & Drawer-Only Cash Operations (Wallet Deposit/Withdraw, Supplier Cash Purchases, Restock Cash)
     cashMovements.forEach(cm => {
-      if (!cm.created_at || cm.transaction_type === 'DRAWER_RESET') return;
+      if (!cm.created_at || cm.transaction_type === 'DRAWER_RESET' || cm.transaction_type === 'OPENING_CASH') return;
       const cmTime = new Date(cm.created_at).getTime();
       if (cmTime >= startTime && cmTime <= endTime) {
         if (cm.transaction_type === 'CASH_ADJUSTMENT_ADD' || cm.transaction_type === 'SHORTAGE_SETTLEMENT') {
           cashIn += cm.amount;
         } else if (cm.transaction_type === 'CASH_ADJUSTMENT_SUB') {
+          cashOut += cm.amount;
+        } else if (cm.transaction_type === 'CASH_SALE' && cm.notes?.startsWith('إيداع محفظة عميل:')) {
+          cashIn += cm.amount;
+        } else if (
+          cm.transaction_type === 'EXPENSE' &&
+          (cm.notes?.startsWith('سحب من محفظة عميل:') ||
+            cm.notes?.startsWith('مشتريات نقداً للمورد:') ||
+            cm.notes?.startsWith('شراء وتوريد مخزون:'))
+        ) {
           cashOut += cm.amount;
         }
       }
@@ -8491,11 +8612,16 @@ export const dbService = {
       }
     });
 
-    // 5. Cash Refunds from Returns
+    // 5. Cash Refunds from Returns (only when original invoice involved cash)
     returns.forEach(ret => {
       const retTime = new Date(ret.created_at || ret.return_date).getTime();
       if (retTime >= startTime && retTime <= endTime) {
-        cashOut += ret.total_return_amount;
+        const origInv = invoiceById.get(ret.original_invoice_id);
+        if (!origInv || origInv.payment_type === 'CASH') {
+          cashOut += ret.total_return_amount;
+        } else if (origInv.payment_type === 'SPLIT' && (origInv.paid_amount || 0) > 0) {
+          cashOut += Math.min(origInv.paid_amount || 0, ret.total_return_amount);
+        }
       }
     });
 

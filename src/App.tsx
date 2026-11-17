@@ -459,10 +459,12 @@ function AppContent() {
     };
     window.addEventListener('cafe_db_synced_remote', handleRemoteSync);
     window.addEventListener('shift_updated', handleRemoteSync);
+    window.addEventListener('open_invoices_updated', handleRemoteSync);
     window.addEventListener('storage', handleRemoteSync);
     return () => {
       window.removeEventListener('cafe_db_synced_remote', handleRemoteSync);
       window.removeEventListener('shift_updated', handleRemoteSync);
+      window.removeEventListener('open_invoices_updated', handleRemoteSync);
       window.removeEventListener('storage', handleRemoteSync);
     };
   }, []);

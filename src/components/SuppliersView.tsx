@@ -296,6 +296,8 @@ export default function SuppliersView({
     // If CASH purchase, deduct from the drawer immediately
     if (purPaymentMethod === 'CASH') {
       dbService.logCashMovement(0, purAmount, `مشتريات نقداً للمورد: ${selectedSupplier.supplier_name} - ${finalDetails}`);
+      window.dispatchEvent(new CustomEvent('shift_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
     }
 
     onShowSuccessAlert(
