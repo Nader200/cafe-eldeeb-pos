@@ -3001,6 +3001,19 @@ export const dbService = {
     setLocal(KEYS.CUSTOMERS, customersList);
     setLocal(KEYS.INVENTORY_TRANSACTIONS, transactions);
 
+    dbService.logAuditAction(
+      'CANCEL_INVOICE',
+      `تم إلغاء الفاتورة رقم ${invoice.invoice_number} (بقيمة ${invoice.total} ج.م) وإرجاع الكميات للمخزن${invoice.paid_amount > 0 ? ` وخصم ${invoice.paid_amount} ج.م من الدرج` : ''}`,
+      cashierName
+    );
+    syncToServer();
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shift_updated'));
+      window.dispatchEvent(new CustomEvent('open_invoices_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
     return invoices[invIdx];
   },
 
@@ -6345,12 +6358,34 @@ export const dbService = {
       }
     }
 
+    // 2.5 Deduct cash refund from active cash drawer if cash was paid
+    if (totalReturnAmount > 0 && (invoice.payment_type === 'CASH' || (invoice.payment_type === 'SPLIT' && (invoice.paid_amount || 0) > 0))) {
+      const cashRefund = invoice.payment_type === 'CASH'
+        ? totalReturnAmount
+        : Math.min(invoice.paid_amount || 0, totalReturnAmount);
+      if (cashRefund > 0) {
+        dbService.logCashMovement(
+          0,
+          cashRefund,
+          `مرتجع مبيعات رقم ${returnNumber} للفاتورة ${invoice.invoice_number}`,
+          'CASH_WITHDRAWAL',
+          cashierName
+        );
+      }
+    }
+
     // 3. Add to Audit Log
     dbService.logAuditAction(
       'RETURN_TRANSACTION',
       `إنشاء مرتجع رقم ${returnNumber} بقيمة ${totalReturnAmount} ج.م للفاتورة رقم ${invoice.invoice_number}`,
       cashierName
     );
+    syncToServer();
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shift_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
 
     return newReturn;
   },
@@ -8499,14 +8534,20 @@ export const dbService = {
     shifts.push(newShift);
     setLocal(KEYS.SHIFTS, shifts);
 
-    // Sync CashDrawer opening balance
-    dbService.setOpeningCash(
-      openingBalance,
-      now.split('T')[0],
-      now.split('T')[1].substring(0, 8),
-      `بداية ${shiftType === 'DAY' ? 'وردية النهار' : 'وردية المساء'}`,
-      cashierName
-    );
+    // Reset CashDrawer cleanly to a fresh cycle matching the new Shift opening balance
+    const prevDrawer = dbService.getActiveDrawer();
+    const prevDrawerBalance = Math.round((prevDrawer.opening_balance + prevDrawer.cash_in - prevDrawer.cash_out) * 100) / 100;
+    dbService.openCashDrawer(openingBalance);
+    dbService.saveCashMovement({
+      previous_balance: prevDrawerBalance,
+      transaction_type: 'OPENING_CASH',
+      amount: openingBalance,
+      new_balance: openingBalance,
+      date: now.split('T')[0],
+      time: now.split('T')[1].substring(0, 8),
+      user: cashierName || 'Administrator',
+      notes: `بداية ${shiftType === 'DAY' ? 'وردية النهار' : 'وردية المساء'}`
+    });
 
     dbService.logAuditAction('START_SHIFT', `بداية وردية جديدة (${shiftType === 'DAY' ? 'نهار' : 'مساء'}) برصيد افتتاحي ${openingBalance} ج.م`, cashierName);
 
@@ -8661,14 +8702,20 @@ export const dbService = {
     shifts.push(newShift);
     setLocal(KEYS.SHIFTS, shifts);
 
-    // Sync Cash Drawer opening balance
-    dbService.setOpeningCash(
-      actualReceivedCash,
-      now.split('T')[0],
-      now.split('T')[1].substring(0, 8),
-      `استلام وردية وبداية ${nextType === 'DAY' ? 'وردية النهار' : 'وردية المساء'}`,
-      adminName
-    );
+    // Open a clean Cash Drawer cycle matching the handed-over shift opening balance
+    const prevDrawer = dbService.getActiveDrawer();
+    const prevDrawerBalance = Math.round((prevDrawer.opening_balance + prevDrawer.cash_in - prevDrawer.cash_out) * 100) / 100;
+    dbService.openCashDrawer(actualReceivedCash);
+    dbService.saveCashMovement({
+      previous_balance: prevDrawerBalance,
+      transaction_type: 'OPENING_CASH',
+      amount: actualReceivedCash,
+      new_balance: actualReceivedCash,
+      date: now.split('T')[0],
+      time: now.split('T')[1].substring(0, 8),
+      user: adminName || 'Administrator',
+      notes: `استلام وردية وبداية ${nextType === 'DAY' ? 'وردية النهار' : 'وردية المساء'}`
+    });
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('shift_updated'));

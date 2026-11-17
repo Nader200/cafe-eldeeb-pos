@@ -1464,6 +1464,23 @@ export default function POSView({
         </div>
       </div>
 
+      {/* Warning banner if no active shift is open */}
+      {!activeShift && (
+        <div className="bg-amber-950/40 border border-amber-500/40 px-3 py-2 rounded-2xl flex items-center justify-between gap-2 text-[11px] shrink-0">
+          <div className="flex items-center gap-2 text-amber-200 font-bold">
+            <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>تنبيه: لا توجد وردية مفتوحة حالياً — يُفضّل تشغيل الوردية قبل عمل الفواتير لضمان تطابق رصيد الدرج والوردية.</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsShiftModalOpen(true)}
+            className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-black font-black text-[10px] rounded-xl transition-all cursor-pointer shrink-0 active:scale-95"
+          >
+            بدء الوردية الآن
+          </button>
+        </div>
+      )}
+
       {/* Mobile Tab Toggle Bar (visible only on mobile) */}
       <div className="md:hidden flex gap-2 p-1 bg-[#050505] border border-gold-500/10 rounded-2xl shrink-0">
         <button

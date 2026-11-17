@@ -30,13 +30,15 @@ import {
   Hash,
   Layers,
   ArrowRight,
-  RotateCcw
+  RotateCcw,
+  XCircle
 } from 'lucide-react';
 import { dbService } from '../dbService';
 import { Invoice, InvoiceItem, Customer, AppSettings, PaymentType, ReturnTransaction } from '../types';
 import { createInvoicePDF } from '../utils/pdfInvoiceGenerator';
 import { shareInvoiceImageToWhatsApp } from '../utils/invoiceImageGenerator';
 import { getPaymentMethodLabel, getPaymentMethodBadgeClass } from '../utils/paymentUtils';
+import { useAuth } from '../contexts/AuthContext';
 
 interface InvoiceHistoryViewProps {
   onShowSuccessAlert: (msg: string) => void;
@@ -53,9 +55,11 @@ export default function InvoiceHistoryView({
   onNavigate,
   onSelectInvoiceForEdit
 }: InvoiceHistoryViewProps) {
+  const { currentUser } = useAuth();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [settings, setSettings] = useState<AppSettings>(() => dbService.getSettings());
+  const [confirmCancelInvoiceId, setConfirmCancelInvoiceId] = useState<string | null>(null);
 
   // Administrative reopen state
   const [showReopenPinModal, setShowReopenPinModal] = useState<boolean>(false);
@@ -125,6 +129,23 @@ export default function InvoiceHistoryView({
       }
     } catch (e: any) {
       setReopenError(e.message || 'رمز الأمان PIN للمسؤول غير صحيح!');
+    }
+  };
+
+  const handleCancelFullInvoice = (invoice: Invoice) => {
+    try {
+      const operatorName = currentUser?.name || 'أدمن النظام';
+      const cancelled = dbService.cancelInvoice(invoice.id, operatorName);
+      if (cancelled) {
+        onShowSuccessAlert(
+          `تم إلغاء الفاتورة رقم ${cancelled.invoice_number} وإرجاع السلع للمخزن وخصم ${cancelled.paid_amount} ج.م من الدرج بنجاح ✅`
+        );
+        setConfirmCancelInvoiceId(null);
+        setShowDetailModal(false);
+        loadData();
+      }
+    } catch (err: any) {
+      onShowWarningAlert(err?.message || 'حدث خطأ أثناء إلغاء الفاتورة');
     }
   };
 
@@ -1530,9 +1551,48 @@ export default function InvoiceHistoryView({
                 </button>
               )}
 
+              {selectedInvoice.invoice_status !== 'CANCELLED' && (
+                confirmCancelInvoiceId === selectedInvoice.id ? (
+                  <div className="p-3 bg-red-950/40 border border-red-500/50 rounded-xl space-y-2 mt-1">
+                    <p className="text-[11px] font-bold text-red-200 leading-relaxed">
+                      تأكيد إلغاء الفاتورة #{selectedInvoice.invoice_number} بالكامل؟ سيتم إرجاع السلع للمخزن وخصم {selectedInvoice.paid_amount} ج.م من الدرج.
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleCancelFullInvoice(selectedInvoice)}
+                        className="py-2 bg-red-600 hover:bg-red-500 text-white font-black text-xs rounded-lg cursor-pointer"
+                      >
+                        تأكيد الإلغاء النهائي
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmCancelInvoiceId(null)}
+                        className="py-2 bg-luxury-bg border border-gray-800 text-gray-300 font-bold text-xs rounded-lg cursor-pointer"
+                      >
+                        تراجع
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    id="history-action-cancel-full"
+                    type="button"
+                    onClick={() => setConfirmCancelInvoiceId(selectedInvoice.id)}
+                    className="w-full py-2.5 bg-red-950/30 border border-red-800/60 hover:bg-red-700 text-red-400 hover:text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all mt-1"
+                  >
+                    <XCircle className="w-4 h-4" />
+                    إلغاء الفاتورة بالكامل (إرجاع المخزون والدرج)
+                  </button>
+                )
+              )}
+
               <button
                 id="close-history-detail-btn"
-                onClick={() => setShowDetailModal(false)}
+                onClick={() => {
+                  setConfirmCancelInvoiceId(null);
+                  setShowDetailModal(false);
+                }}
                 className="w-full py-2 bg-luxury-bg border border-gray-900 hover:bg-gray-950 text-gray-400 font-bold text-xs rounded-xl cursor-pointer transition-all mt-1"
               >
                 إغلاق النافذة

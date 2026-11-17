@@ -78,7 +78,10 @@ export default function ShiftHandoverModal({
         setActualReceivedCash(String(currentWithMetrics.declared_cash ?? currentWithMetrics.expected_cash));
       } else {
         const lastDrawer = dbService.getActiveDrawer();
-        setStartOpeningBalance(lastDrawer?.opening_balance || 0);
+        const actualDrawerBalance = lastDrawer
+          ? Math.max(0, Math.round((lastDrawer.opening_balance + lastDrawer.cash_in - lastDrawer.cash_out) * 100) / 100)
+          : 0;
+        setStartOpeningBalance(actualDrawerBalance);
       }
     }
   }, [isOpen, activeShift]);
@@ -263,6 +266,26 @@ export default function ShiftHandoverModal({
             </div>
 
             <div>
+              {(() => {
+                const preDrawer = dbService.getActiveDrawer();
+                const preBalance = preDrawer
+                  ? Math.max(0, Math.round((preDrawer.opening_balance + preDrawer.cash_in - preDrawer.cash_out) * 100) / 100)
+                  : 0;
+                if (preDrawer && (preDrawer.cash_in > 0 || preDrawer.cash_out > 0 || preBalance > 0)) {
+                  return (
+                    <div className="mb-3 p-3 bg-amber-950/30 border border-amber-500/40 rounded-2xl text-[11px] text-amber-200 leading-relaxed flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-black text-amber-300 block">يوجد رصيد حالي بالدرج قبل تشغيل الوردية: {preBalance.toLocaleString('ar-EG')} ج.م</span>
+                        <span className="text-[10px] text-gray-300">
+                          تم جلب إجمالي الدرج المفتوح تلقائياً كرصيد افتتاحي للوردية حتى تتطابق حسابات الوردية مع درج النقدية المفتوح بدون تكرار.
+                        </span>
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
               <label className="block text-xs font-bold text-gold-400 mb-1.5">
                 الرصيد الافتتاحي للدرج عند بدء الوردية (ج.م):
               </label>

@@ -24,6 +24,7 @@ import {
 import { dbService } from '../dbService';
 import { Invoice, InvoiceItem, Customer, AppSettings, InvoiceStatus, PaymentType } from '../types';
 import { EldeebLogoFull } from './EldeebLogo';
+import { useAuth } from '../contexts/AuthContext';
 
 interface InvoicesViewProps {
   onShowSuccessAlert: (msg: string) => void;
@@ -31,8 +32,10 @@ interface InvoicesViewProps {
 }
 
 export default function InvoicesView({ onShowSuccessAlert, onShowWarningAlert }: InvoicesViewProps) {
+  const { currentUser } = useAuth();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
   
   // Filters State
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -56,9 +59,11 @@ export default function InvoicesView({ onShowSuccessAlert, onShowWarningAlert }:
     loadInvoicesData();
     const handleSync = () => loadInvoicesData();
     window.addEventListener('cafe_db_synced_remote', handleSync);
+    window.addEventListener('shift_updated', handleSync);
     window.addEventListener('storage', handleSync);
     return () => {
       window.removeEventListener('cafe_db_synced_remote', handleSync);
+      window.removeEventListener('shift_updated', handleSync);
       window.removeEventListener('storage', handleSync);
     };
   }, []);
@@ -120,21 +125,21 @@ export default function InvoicesView({ onShowSuccessAlert, onShowWarningAlert }:
     const items = dbService.getInvoiceItems(invoice.id);
     setInvoiceItems(items);
     setSelectedInvoice(invoice);
+    setConfirmCancelId(null);
     setShowReceiptModal(true);
   };
 
   const handleCancelInvoice = (invoiceId: string) => {
-    if (confirm('⚠️ هل أنت متأكد من رغبتك في إلغاء وتجميد هذه الفاتورة بالكامل؟\n\nسيتم إرجاع المنتجات للمخازن، وإلغاء المديونيات، وسحب المبلغ من الخزينة.')) {
-      try {
-        const cancelled = dbService.cancelInvoice(invoiceId, 'أدمن النظام / نادر الديب');
-        if (cancelled) {
-          onShowSuccessAlert(`تم إلغاء الفاتورة رقم ${cancelled.invoice_number} وإرجاع المخازن بنجاح!`);
-          loadInvoicesData();
-          setShowReceiptModal(false);
-        }
-      } catch (e: any) {
-        onShowWarningAlert(e.message || 'فشلت عملية إلغاء الفاتورة');
+    try {
+      const cancelled = dbService.cancelInvoice(invoiceId, currentUser?.name || 'أدمن النظام / نادر الديب');
+      if (cancelled) {
+        onShowSuccessAlert(`تم إلغاء الفاتورة رقم ${cancelled.invoice_number} وإرجاع المخازن بنجاح!`);
+        setConfirmCancelId(null);
+        loadInvoicesData();
+        setShowReceiptModal(false);
       }
+    } catch (e: any) {
+      onShowWarningAlert(e.message || 'فشلت عملية إلغاء الفاتورة');
     }
   };
 
@@ -501,19 +506,47 @@ export default function InvoicesView({ onShowSuccessAlert, onShowWarningAlert }:
               </button>
 
               {selectedInvoice.invoice_status !== 'CANCELLED' && (
-                <button
-                  id="cancel-invoice-btn"
-                  onClick={() => handleCancelInvoice(selectedInvoice.id)}
-                  className="w-full py-2.5 bg-red-950/20 border border-red-900/50 hover:bg-red-950 text-red-500 hover:text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <XCircle className="w-4 h-4" />
-                  إلغاء الفاتورة وإرجاع السلع للمخزن
-                </button>
+                confirmCancelId === selectedInvoice.id ? (
+                  <div className="p-3 bg-red-950/40 border border-red-500/50 rounded-xl space-y-2">
+                    <p className="text-[11px] font-bold text-red-200 leading-relaxed">
+                      تأكيد إلغاء الفاتورة بالكامل؟ سيتم إرجاع المنتجات للمخزن وخصم {selectedInvoice.paid_amount} ج.م من الدرج.
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleCancelInvoice(selectedInvoice.id)}
+                        className="py-2 bg-red-600 hover:bg-red-500 text-white font-black text-xs rounded-lg cursor-pointer"
+                      >
+                        تأكيد الإلغاء
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmCancelId(null)}
+                        className="py-2 bg-luxury-bg border border-gray-800 text-gray-300 font-bold text-xs rounded-lg cursor-pointer"
+                      >
+                        تراجع
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    id="cancel-invoice-btn"
+                    type="button"
+                    onClick={() => setConfirmCancelId(selectedInvoice.id)}
+                    className="w-full py-2.5 bg-red-950/20 border border-red-900/50 hover:bg-red-950 text-red-500 hover:text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <XCircle className="w-4 h-4" />
+                    إلغاء الفاتورة وإرجاع السلع للمخزن
+                  </button>
+                )
               )}
 
               <button
                 id="close-receipt-preview-btn"
-                onClick={() => setShowReceiptModal(false)}
+                onClick={() => {
+                  setConfirmCancelId(null);
+                  setShowReceiptModal(false);
+                }}
                 className="w-full py-2.5 bg-luxury-bg border border-gray-800 text-gray-400 font-bold text-xs rounded-xl hover:bg-gray-900 cursor-pointer"
               >
                 إغلاق
