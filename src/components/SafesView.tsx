@@ -15,7 +15,8 @@ import {
   Sparkles,
   Pencil,
   Home,
-  Users
+  Users,
+  Trash2
 } from 'lucide-react';
 import { dbService } from '../dbService';
 import { AppSettings, DailyShortage, SafeTransaction, SafeType, ShortageTargetAccount } from '../types';
@@ -23,6 +24,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { isAdminSecurityPasswordSet } from '../lib/securityService';
 import ResetCashDrawerModal from './ResetCashDrawerModal';
 import AdjustSafeBalanceModal from './AdjustSafeBalanceModal';
+import AdjustShortageModal, { ShortageModalMode } from './AdjustShortageModal';
 
 interface SafesViewProps {
   settings: AppSettings;
@@ -94,6 +96,11 @@ export default function SafesView({
   const [showAdjustSafeModal, setShowAdjustSafeModal] = useState(false);
   const [adjustTargetSafe, setAdjustTargetSafe] = useState<SafeType>('PRIVATE_SAFE');
   const [adjustModalMode, setAdjustModalMode] = useState<'ADJUST' | 'RESET'>('ADJUST');
+
+  // Adjust / Reset / Delete Shortage Modal
+  const [showAdjustShortageModal, setShowAdjustShortageModal] = useState(false);
+  const [shortageModalMode, setShortageModalMode] = useState<ShortageModalMode>('TOTAL_ADJUST');
+  const [shortageTargetRecord, setShortageTargetRecord] = useState<DailyShortage | null>(null);
 
   // Ledger Filter
   const [ledgerFilter, setLedgerFilter] = useState<'ALL' | 'PRIVATE_SAFE' | 'RENT_BOX' | 'GAMIA_BOX' | 'AUTO_DAILY'>('ALL');
@@ -749,6 +756,32 @@ export default function SafesView({
               عند إضافة الأدمن لمبلغ العجز يتم إضافته تلقائياً إلى الحساب المختار
             </p>
           </div>
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setShortageTargetRecord(null);
+                setShortageModalMode('TOTAL_ADJUST');
+                setShowAdjustShortageModal(true);
+              }}
+              className="py-2 px-2.5 bg-amber-950/50 hover:bg-amber-600/30 border border-amber-500/35 text-amber-300 hover:text-white rounded-xl text-[11px] font-black transition-all cursor-pointer flex items-center justify-center gap-1"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              <span>تعديل العجز</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShortageTargetRecord(null);
+                setShortageModalMode('TOTAL_RESET');
+                setShowAdjustShortageModal(true);
+              }}
+              className="py-2 px-2.5 bg-red-950/40 hover:bg-red-600/90 border border-red-500/30 text-red-300 hover:text-white rounded-xl text-[11px] font-black transition-all cursor-pointer flex items-center justify-center gap-1"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>تصفير (0)</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1174,14 +1207,28 @@ export default function SafesView({
               يُحفظ هنا أي عجز يظهر في نهاية اليوم، وعند قيام الأدمن بإضافة مبلغ العجز لاحقاً تتم إضافته تلقائياً إلى الحساب المختار
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowManualShortageForm(!showManualShortageForm)}
-            className="px-3.5 py-2 bg-red-950/50 hover:bg-red-600/80 border border-red-500/40 text-red-200 hover:text-white rounded-xl text-xs font-black transition-all cursor-pointer shrink-0 flex items-center gap-1.5"
-          >
-            <Plus className="w-4 h-4" />
-            <span>{showManualShortageForm ? 'إخفاء التسجيل اليدوي' : 'تسجيل عجز نهاية اليوم يدوياً'}</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setShortageTargetRecord(null);
+                setShortageModalMode('TOTAL_ADJUST');
+                setShowAdjustShortageModal(true);
+              }}
+              className="px-3 py-2 bg-amber-950/50 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 hover:text-white rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              <span>تعديل / تصفير العجز</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowManualShortageForm(!showManualShortageForm)}
+              className="px-3.5 py-2 bg-red-950/50 hover:bg-red-600/80 border border-red-500/40 text-red-200 hover:text-white rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              <Plus className="w-4 h-4" />
+              <span>{showManualShortageForm ? 'إخفاء التسجيل اليدوي' : 'تسجيل عجز نهاية اليوم يدوياً'}</span>
+            </button>
+          </div>
         </div>
 
         {/* Optional Manual Shortage Entry Form */}
@@ -1356,17 +1403,43 @@ export default function SafesView({
                       {sh.notes || '-'}
                     </td>
                     <td className="py-3 px-2 text-center whitespace-nowrap">
-                      {sh.status !== 'SETTLED' && sh.remaining_amount > 0 ? (
+                      <div className="inline-flex items-center justify-center gap-1.5">
+                        {sh.status !== 'SETTLED' && sh.remaining_amount > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => handleSettleSingleShortage(sh)}
+                            className="px-2.5 py-1.5 bg-teal-600 hover:bg-teal-500 text-black font-black text-[10px] rounded-lg cursor-pointer transition-all active:scale-95"
+                          >
+                            إضافة ({sh.remaining_amount.toLocaleString('ar-EG')} ج)
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-emerald-400 font-bold px-1.5">مكتمل</span>
+                        )}
                         <button
                           type="button"
-                          onClick={() => handleSettleSingleShortage(sh)}
-                          className="px-3 py-1.5 bg-teal-600 hover:bg-teal-500 text-black font-black text-[10px] rounded-lg cursor-pointer transition-all active:scale-95"
+                          title="تعديل مبلغ سجل العجز"
+                          onClick={() => {
+                            setShortageTargetRecord(sh);
+                            setShortageModalMode('RECORD_EDIT');
+                            setShowAdjustShortageModal(true);
+                          }}
+                          className="p-1.5 bg-amber-950/50 hover:bg-amber-600/40 border border-amber-500/35 text-amber-300 hover:text-white rounded-lg cursor-pointer transition-all active:scale-95"
                         >
-                          إضافة ({sh.remaining_amount.toLocaleString('ar-EG')} ج) للحساب
+                          <Pencil className="w-3.5 h-3.5" />
                         </button>
-                      ) : (
-                        <span className="text-[10px] text-emerald-400 font-bold">مكتمل</span>
-                      )}
+                        <button
+                          type="button"
+                          title="حذف سجل العجز"
+                          onClick={() => {
+                            setShortageTargetRecord(sh);
+                            setShortageModalMode('RECORD_DELETE');
+                            setShowAdjustShortageModal(true);
+                          }}
+                          className="p-1.5 bg-red-950/50 hover:bg-red-600 border border-red-500/35 text-red-300 hover:text-white rounded-lg cursor-pointer transition-all active:scale-95"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -1633,6 +1706,20 @@ export default function SafesView({
         initialSafeType={adjustTargetSafe}
         initialMode={adjustModalMode}
         onClose={() => setShowAdjustSafeModal(false)}
+        onSuccess={() => refreshAll()}
+        onShowSuccessAlert={onShowSuccessAlert}
+        onShowWarningAlert={onShowWarningAlert}
+      />
+
+      {/* Admin-only Adjust / Reset / Delete Shortage Modal */}
+      <AdjustShortageModal
+        isOpen={showAdjustShortageModal}
+        initialMode={shortageModalMode}
+        targetRecord={shortageTargetRecord}
+        onClose={() => {
+          setShowAdjustShortageModal(false);
+          setShortageTargetRecord(null);
+        }}
         onSuccess={() => refreshAll()}
         onShowSuccessAlert={onShowSuccessAlert}
         onShowWarningAlert={onShowWarningAlert}

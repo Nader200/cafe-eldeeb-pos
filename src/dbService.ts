@@ -5167,6 +5167,22 @@ export const dbService = {
     };
 
     const all = dbService.getDailyShortages();
+    const duplicateRecent = all.find(existing => {
+      if (
+        existing.business_date !== dateStr ||
+        Number(existing.shortage_amount) !== calcShortage ||
+        Number(existing.expected_amount) !== expected ||
+        Number(existing.actual_amount) !== actual
+      ) {
+        return false;
+      }
+      const createdMs = Date.parse(existing.created_at || '');
+      return !isNaN(createdMs) && Math.abs(now.getTime() - createdMs) < 5000;
+    });
+    if (duplicateRecent) {
+      return duplicateRecent;
+    }
+
     all.push(record);
     setLocal(KEYS.DAILY_SHORTAGES, all);
 
@@ -5370,6 +5386,301 @@ export const dbService = {
       totalAdded: cleanAmt,
       settledIds
     };
+  },
+
+  adjustTotalPendingShortageAdmin: async (
+    newTotalShortage: number,
+    adminCredential: string,
+    reason: string,
+    operatorName?: string,
+    mode: 'ADJUST' | 'RESET' = 'ADJUST'
+  ): Promise<{ previousTotal: number; newTotal: number; delta: number; removedIds: string[] }> => {
+    const cu = dbService.getCurrentUser();
+    if (cu && cu.role !== 'Admin') {
+      throw new Error('عذراً! صلاحية تعديل أو تصفير مبلغ العجز متاحة للأدمن فقط.');
+    }
+
+    const isValid = await dbService.verifyAdminActionCredential(adminCredential);
+    if (!isValid) {
+      throw new Error(
+        isAdminSecurityPasswordSet()
+          ? 'كلمة مرور حماية الشاشات الحساسة (Admin Security Password) غير صحيحة!'
+          : 'رمز الأمان PIN للمسؤول غير صحيح!'
+      );
+    }
+
+    const targetTotal = mode === 'RESET' ? 0 : Math.round((Number(newTotalShortage) || 0) * 100) / 100;
+    if (isNaN(targetTotal) || targetTotal < 0) {
+      throw new Error('يرجى إدخال قيمة عجز صحيحة لا تقل عن 0 ج.م');
+    }
+
+    const previousTotal = dbService.getTotalPendingShortage();
+    const delta = Math.round((targetTotal - previousTotal) * 100) / 100;
+    if (delta === 0) {
+      throw new Error(
+        mode === 'RESET'
+          ? 'رصيد خانة العجز مصفّر بالفعل (0 ج.م).'
+          : `القيمة الجديدة مطابقة لإجمالي العجز الحالي (${previousTotal.toLocaleString('ar-EG')} ج.م).`
+      );
+    }
+
+    const op = operatorName || cu?.name || 'أدمن النظام';
+    const cleanReason =
+      reason?.trim() ||
+      (mode === 'RESET' ? 'تصفير خانة العجز لتصحيح خطأ حسابي' : 'تعديل إجمالي مبلغ العجز يدوياً لتصحيح خطأ حسابي');
+    const nowIso = new Date().toISOString();
+    const all = dbService.getDailyShortages();
+    const removedIds: string[] = [];
+
+    if (targetTotal === 0) {
+      const nextList: DailyShortage[] = [];
+      for (const s of all) {
+        if (s.status !== 'SETTLED' && Number(s.remaining_amount) > 0) {
+          if ((Number(s.paid_amount) || 0) <= 0) {
+            removedIds.push(s.id);
+          } else {
+            nextList.push({
+              ...s,
+              shortage_amount: Math.round((Number(s.paid_amount) || 0) * 100) / 100,
+              remaining_amount: 0,
+              status: 'SETTLED',
+              notes: `${s.notes ? s.notes + ' | ' : ''}تصفير العجز المتبقي: ${cleanReason}`,
+              updated_at: nowIso
+            });
+          }
+        } else {
+          nextList.push(s);
+        }
+      }
+      setLocal(KEYS.DAILY_SHORTAGES, nextList);
+      if (removedIds.length > 0) {
+        firebaseSyncService.recordDeletions(KEYS.DAILY_SHORTAGES, removedIds);
+      }
+    } else if (targetTotal < previousTotal) {
+      // Reduce pending shortages from newest first
+      let toReduce = Math.round((previousTotal - targetTotal) * 100) / 100;
+      const updatedMap = new Map<string, DailyShortage | null>();
+      for (let i = all.length - 1; i >= 0 && toReduce > 0; i--) {
+        const s = all[i];
+        if (s.status === 'SETTLED' || Number(s.remaining_amount) <= 0) continue;
+        const rem = Math.round((Number(s.remaining_amount) || 0) * 100) / 100;
+        const paid = Math.round((Number(s.paid_amount) || 0) * 100) / 100;
+        const cut = Math.min(rem, toReduce);
+        const nextRem = Math.max(0, Math.round((rem - cut) * 100) / 100);
+        const nextShortage = Math.round((paid + nextRem) * 100) / 100;
+        toReduce = Math.round((toReduce - cut) * 100) / 100;
+
+        if (nextShortage <= 0 && paid <= 0) {
+          removedIds.push(s.id);
+          updatedMap.set(s.id, null);
+        } else {
+          updatedMap.set(s.id, {
+            ...s,
+            shortage_amount: nextShortage,
+            remaining_amount: nextRem,
+            status: nextRem <= 0 ? 'SETTLED' : paid > 0 ? 'PARTIAL' : 'PENDING',
+            notes: `${s.notes ? s.notes + ' | ' : ''}تعديل أدمن: ${cleanReason}`,
+            updated_at: nowIso
+          });
+        }
+      }
+      const nextList = all
+        .map(s => (updatedMap.has(s.id) ? updatedMap.get(s.id) : s))
+        .filter((s): s is DailyShortage => Boolean(s));
+      setLocal(KEYS.DAILY_SHORTAGES, nextList);
+      if (removedIds.length > 0) {
+        firebaseSyncService.recordDeletions(KEYS.DAILY_SHORTAGES, removedIds);
+      }
+    } else {
+      // Increase pending shortage
+      const diff = Math.round((targetTotal - previousTotal) * 100) / 100;
+      const lastPendingIdx = [...all].reverse().findIndex(s => s.status !== 'SETTLED' && Number(s.remaining_amount) > 0);
+      if (lastPendingIdx !== -1) {
+        const actualIdx = all.length - 1 - lastPendingIdx;
+        const target = all[actualIdx];
+        const nextRem = Math.round((Number(target.remaining_amount) + diff) * 100) / 100;
+        const nextShortage = Math.round((Number(target.shortage_amount) + diff) * 100) / 100;
+        all[actualIdx] = {
+          ...target,
+          shortage_amount: nextShortage,
+          remaining_amount: nextRem,
+          status: Number(target.paid_amount) > 0 ? 'PARTIAL' : 'PENDING',
+          notes: `${target.notes ? target.notes + ' | ' : ''}تعديل أدمن (+${diff} ج.م): ${cleanReason}`,
+          updated_at: nowIso
+        };
+        setLocal(KEYS.DAILY_SHORTAGES, all);
+      } else {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const activeDrawer = dbService.getActiveDrawer();
+        const drawerBal = Math.round((activeDrawer.opening_balance + activeDrawer.cash_in - activeDrawer.cash_out) * 100) / 100;
+        all.push({
+          id: `short_adj_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          business_date: todayStr,
+          expected_amount: Math.round((drawerBal + diff) * 100) / 100,
+          actual_amount: drawerBal,
+          shortage_amount: diff,
+          paid_amount: 0,
+          remaining_amount: diff,
+          target_account: 'PRIVATE_SAFE',
+          cashier_name: op,
+          notes: `تعديل عجز يدوي (أدمن): ${cleanReason}`,
+          status: 'PENDING',
+          settlements: [],
+          created_at: nowIso,
+          updated_at: nowIso
+        });
+        setLocal(KEYS.DAILY_SHORTAGES, all);
+      }
+    }
+
+    dbService.logAuditAction(
+      mode === 'RESET' ? 'RESET_SHORTAGE_BALANCE' : 'ADJUST_SHORTAGE_BALANCE',
+      `قام الأدمن (${op}) بـ${mode === 'RESET' ? 'تصفير' : 'تعديل'} إجمالي خانة العجز من ${previousTotal} ج.م إلى ${targetTotal} ج.م (الفرق: ${delta >= 0 ? `+${delta}` : delta} ج.م). السبب: ${cleanReason}`,
+      op
+    );
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shortage_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
+    return {
+      previousTotal,
+      newTotal: targetTotal,
+      delta,
+      removedIds
+    };
+  },
+
+  updateShortageRecordAdmin: async (
+    shortageId: string,
+    params: {
+      newShortageAmount: number;
+      expectedAmount?: number;
+      actualAmount?: number;
+      targetAccount?: ShortageTargetAccount;
+      notes?: string;
+    },
+    adminCredential: string,
+    operatorName?: string
+  ): Promise<DailyShortage> => {
+    const cu = dbService.getCurrentUser();
+    if (cu && cu.role !== 'Admin') {
+      throw new Error('عذراً! تعديل سجل العجز متاح للأدمن فقط.');
+    }
+
+    const isValid = await dbService.verifyAdminActionCredential(adminCredential);
+    if (!isValid) {
+      throw new Error(
+        isAdminSecurityPasswordSet()
+          ? 'كلمة مرور حماية الشاشات الحساسة (Admin Security Password) غير صحيحة!'
+          : 'رمز الأمان PIN للمسؤول غير صحيح!'
+      );
+    }
+
+    const all = dbService.getDailyShortages();
+    const idx = all.findIndex(s => s.id === shortageId);
+    if (idx === -1) {
+      throw new Error('سجل العجز غير موجود!');
+    }
+
+    const current = all[idx];
+    const cleanNewAmount = Math.round((Number(params.newShortageAmount) || 0) * 100) / 100;
+    const paid = Math.round((Number(current.paid_amount) || 0) * 100) / 100;
+
+    if (isNaN(cleanNewAmount) || cleanNewAmount <= 0) {
+      throw new Error('يرجى إدخال قيمة عجز صحيحة أكبر من صفر (أو استخدم زر الحذف لإلغاء السجل).');
+    }
+    if (cleanNewAmount < paid) {
+      throw new Error(`لا يمكن جعل قيمة العجز أقل من المبلغ المسدد بالفعل (${paid.toLocaleString('ar-EG')} ج.م)!`);
+    }
+
+    const op = operatorName || cu?.name || 'أدمن النظام';
+    const nextRemaining = Math.max(0, Math.round((cleanNewAmount - paid) * 100) / 100);
+    const nextStatus: DailyShortage['status'] =
+      nextRemaining <= 0 ? 'SETTLED' : paid > 0 ? 'PARTIAL' : 'PENDING';
+    const nowIso = new Date().toISOString();
+
+    const updated: DailyShortage = {
+      ...current,
+      shortage_amount: cleanNewAmount,
+      remaining_amount: nextRemaining,
+      expected_amount:
+        typeof params.expectedAmount === 'number' && !isNaN(params.expectedAmount) && params.expectedAmount >= 0
+          ? Math.round(params.expectedAmount * 100) / 100
+          : current.expected_amount,
+      actual_amount:
+        typeof params.actualAmount === 'number' && !isNaN(params.actualAmount) && params.actualAmount >= 0
+          ? Math.round(params.actualAmount * 100) / 100
+          : current.actual_amount,
+      target_account: params.targetAccount || current.target_account,
+      notes: params.notes?.trim() || current.notes,
+      status: nextStatus,
+      updated_at: nowIso
+    };
+
+    all[idx] = updated;
+    setLocal(KEYS.DAILY_SHORTAGES, all);
+
+    dbService.logAuditAction(
+      'UPDATE_SHORTAGE_RECORD',
+      `قام الأدمن (${op}) بتعديل سجل عجز يوم ${current.business_date} من ${current.shortage_amount} ج.م إلى ${cleanNewAmount} ج.م (المتبقي: ${nextRemaining} ج.م). السبب: ${updated.notes}`,
+      op
+    );
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shortage_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
+    return updated;
+  },
+
+  deleteShortageRecordAdmin: async (
+    shortageId: string,
+    adminCredential: string,
+    reason?: string,
+    operatorName?: string
+  ): Promise<DailyShortage> => {
+    const cu = dbService.getCurrentUser();
+    if (cu && cu.role !== 'Admin') {
+      throw new Error('عذراً! حذف سجل العجز متاح للأدمن فقط.');
+    }
+
+    const isValid = await dbService.verifyAdminActionCredential(adminCredential);
+    if (!isValid) {
+      throw new Error(
+        isAdminSecurityPasswordSet()
+          ? 'كلمة مرور حماية الشاشات الحساسة (Admin Security Password) غير صحيحة!'
+          : 'رمز الأمان PIN للمسؤول غير صحيح!'
+      );
+    }
+
+    const all = dbService.getDailyShortages();
+    const idx = all.findIndex(s => s.id === shortageId);
+    if (idx === -1) {
+      throw new Error('سجل العجز غير موجود!');
+    }
+
+    const target = all[idx];
+    const nextList = all.filter(s => s.id !== shortageId);
+    setLocal(KEYS.DAILY_SHORTAGES, nextList);
+    firebaseSyncService.recordDeletion(KEYS.DAILY_SHORTAGES, shortageId);
+
+    const op = operatorName || cu?.name || 'أدمن النظام';
+    const cleanReason = reason?.trim() || 'حذف سجل عجز مكرر أو مدخل بالخطأ';
+    dbService.logAuditAction(
+      'DELETE_SHORTAGE_RECORD',
+      `قام الأدمن (${op}) بحذف سجل عجز يوم ${target.business_date} بقيمة ${target.shortage_amount} ج.م (المتبقي كان: ${target.remaining_amount} ج.م). السبب: ${cleanReason}`,
+      op
+    );
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shortage_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
+    return target;
   },
 
   // --- Daily Close ---
