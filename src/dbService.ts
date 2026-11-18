@@ -1624,14 +1624,34 @@ export const dbService = {
     return true;
   },
   getInvoiceItems: (invoiceId?: string): InvoiceItem[] => {
-    const items = getLocal<InvoiceItem[]>(KEYS.INVOICE_ITEMS, []);
+    let items = getLocal<InvoiceItem[]>(KEYS.INVOICE_ITEMS, []);
     if (invoiceId) {
-      const matched = items.filter(it => it.invoice_id === invoiceId);
-      if (matched.length > 0) return matched;
-      const vaultItems = getLocal<InvoiceItem[]>(KEYS.OPEN_INVOICE_ITEMS_VAULT, []);
-      return vaultItems.filter(it => it.invoice_id === invoiceId);
+      const matched = items.filter(it => it && it.invoice_id === invoiceId);
+      if (matched.length === 0) {
+        const vaultItems = getLocal<InvoiceItem[]>(KEYS.OPEN_INVOICE_ITEMS_VAULT, []);
+        items = vaultItems.filter(it => it && it.invoice_id === invoiceId);
+      } else {
+        items = matched;
+      }
+    } else {
+      items = items.filter(Boolean);
     }
-    return items;
+    const map = new Map<string, InvoiceItem>();
+    items.forEach(it => {
+      if (!it || !it.product_id) return;
+      const pId = it.product_id;
+      if (map.has(pId)) {
+        const existing = map.get(pId)!;
+        existing.quantity += it.quantity;
+        existing.total_price = Math.round((existing.unit_price * existing.quantity - (existing.item_discount_amount || 0)) * 100) / 100;
+        if (it.notes && !existing.notes?.includes(it.notes)) {
+          existing.notes = existing.notes ? `${existing.notes}, ${it.notes}` : it.notes;
+        }
+      } else {
+        map.set(pId, { ...it });
+      }
+    });
+    return Array.from(map.values());
   },
 
   /**
@@ -1669,8 +1689,28 @@ export const dbService = {
     const customersList = dbService.getCustomers();
     const transactions = getLocal<InventoryTransaction[]>(KEYS.INVENTORY_TRANSACTIONS, []);
 
+    // Consolidate cart items by product.id to prevent duplicate entries
+    const cartMap = new Map<string, CartItem>();
+    cartItems.forEach(ci => {
+      if (!ci || !ci.product || !ci.product.id) return;
+      const pId = ci.product.id;
+      if (cartMap.has(pId)) {
+        const existing = cartMap.get(pId)!;
+        existing.quantity += ci.quantity;
+        if (ci.item_discount_amount) {
+          existing.item_discount_amount = (existing.item_discount_amount || 0) + ci.item_discount_amount;
+        }
+        if (ci.notes && !existing.notes?.includes(ci.notes)) {
+          existing.notes = existing.notes ? `${existing.notes}, ${ci.notes}` : ci.notes;
+        }
+      } else {
+        cartMap.set(pId, { ...ci });
+      }
+    });
+    const consolidatedCart = Array.from(cartMap.values());
+
     // 0. Check inventory sufficiency first
-    const check = dbService.checkInventorySufficiency(cartItems);
+    const check = dbService.checkInventorySufficiency(consolidatedCart);
     if (!check.sufficient) {
       throw new Error(check.message || 'المخزون غير كافٍ لإتمام عملية البيع!');
     }
@@ -1678,7 +1718,7 @@ export const dbService = {
     // 1. Calculations
     let subtotal = 0;
     let totalItemDiscount = 0;
-    cartItems.forEach(item => {
+    consolidatedCart.forEach(item => {
       const price = item.custom_price !== undefined ? item.custom_price : item.product.selling_price;
       subtotal += price * item.quantity;
       if (item.item_discount_amount) {
@@ -2252,9 +2292,29 @@ export const dbService = {
     const invoiceItemsList = getLocal<InvoiceItem[]>(KEYS.INVOICE_ITEMS, []);
     const dateStr = new Date().toISOString();
 
+    // Consolidate cart items by product.id to prevent duplicate entries
+    const cartMap = new Map<string, CartItem>();
+    cartItems.forEach(ci => {
+      if (!ci || !ci.product || !ci.product.id) return;
+      const pId = ci.product.id;
+      if (cartMap.has(pId)) {
+        const existing = cartMap.get(pId)!;
+        existing.quantity += ci.quantity;
+        if (ci.item_discount_amount) {
+          existing.item_discount_amount = (existing.item_discount_amount || 0) + ci.item_discount_amount;
+        }
+        if (ci.notes && !existing.notes?.includes(ci.notes)) {
+          existing.notes = existing.notes ? `${existing.notes}, ${ci.notes}` : ci.notes;
+        }
+      } else {
+        cartMap.set(pId, { ...ci });
+      }
+    });
+    const consolidatedCart = Array.from(cartMap.values());
+
     let subtotal = 0;
     let totalItemDiscount = 0;
-    cartItems.forEach(item => {
+    consolidatedCart.forEach(item => {
       const price = item.custom_price !== undefined ? item.custom_price : item.product.selling_price;
       subtotal += price * item.quantity;
       if (item.item_discount_amount) {
@@ -2386,8 +2446,8 @@ export const dbService = {
     }
 
     // Save items
-    const filteredItems = invoiceItemsList.filter(item => item.invoice_id !== invoiceId);
-    const newItems: InvoiceItem[] = cartItems.map((cartItem, idx) => {
+    const filteredItems = invoiceItemsList.filter(item => item && item.invoice_id !== invoiceId);
+    const newItems: InvoiceItem[] = consolidatedCart.map((cartItem, idx) => {
       const origPrice = cartItem.original_price ?? cartItem.product.selling_price;
       const unitPrice = cartItem.custom_price !== undefined ? cartItem.custom_price : cartItem.product.selling_price;
       const isPriceEdited = Boolean(
