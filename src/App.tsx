@@ -502,10 +502,7 @@ function AppContent() {
   }, [activeShift, activeDrawer]);
 
   const headerVodafoneIn = useMemo(() => {
-    if (activeShift) {
-      return activeShift.vodafone_cash_in || 0;
-    }
-    return activeDrawer?.vodafone_cash_in || 0;
+    return dbService.getPersistentVodafoneCashBalance();
   }, [activeShift, activeDrawer]);
 
   // Notifications warnings

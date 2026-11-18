@@ -9245,6 +9245,80 @@ export const dbService = {
     };
   },
 
+  getPersistentVodafoneCashBalance: (): number => {
+    const allInvoices = dbService.getInvoices(true);
+    const creditPayments = getLocal<CreditPayment[]>(KEYS.CREDIT_PAYMENTS, []);
+    const cashMovements = dbService.getCashHistory();
+    const returns = dbService.getReturnTransactions();
+    const walletTxs = getLocal<WalletTransaction[]>(KEYS.WALLET_TRANSACTIONS, []);
+
+    const invoiceByNum = new Map<string, Invoice>();
+    allInvoices.forEach(inv => {
+      if (inv.invoice_number) invoiceByNum.set(inv.invoice_number, inv);
+    });
+
+    const isCreditPaymentVodafone = (cp: CreditPayment): boolean => {
+      if (cp.payment_method === 'VODAFONE_CASH') return true;
+      if (cp.payment_method) return false;
+      if (cp.notes && cp.notes.includes('فودافون كاش')) return true;
+      const m = cp.notes?.match(/INV-\d+-\d+/);
+      if (m && invoiceByNum.get(m[0])?.payment_method === 'VODAFONE_CASH') return true;
+      return false;
+    };
+
+    const isWalletDepositVodafone = (wtx: WalletTransaction): boolean => {
+      if (wtx.payment_method === 'VODAFONE_CASH') return true;
+      if (wtx.payment_method) return false;
+      if (wtx.notes && wtx.notes.includes('فودافون كاش')) return true;
+      const m = wtx.notes?.match(/INV-\d+-\d+/);
+      if (m && invoiceByNum.get(m[0])?.payment_method === 'VODAFONE_CASH') return true;
+      return false;
+    };
+
+    let totalVfIn = 0;
+    let totalVfOut = 0;
+
+    allInvoices.forEach(inv => {
+      if (inv.invoice_status === 'CANCELLED' || inv.payment_method === 'WALLET') return;
+      if (inv.payment_method === 'VODAFONE_CASH') {
+        const paid = inv.paid_amount ?? inv.total;
+        totalVfIn += paid;
+      }
+    });
+
+    creditPayments.forEach(cp => {
+      if (isCreditPaymentVodafone(cp)) {
+        totalVfIn += cp.amount;
+      }
+    });
+
+    walletTxs.forEach(wtx => {
+      if (wtx.transaction_type === 'DEPOSIT' && isWalletDepositVodafone(wtx)) {
+        totalVfIn += wtx.amount;
+      }
+    });
+
+    cashMovements.forEach(cm => {
+      if (cm.transaction_type === 'VODAFONE_ADJUSTMENT_ADD') {
+        totalVfIn += cm.amount;
+      } else if (cm.transaction_type === 'VODAFONE_ADJUSTMENT_SUB') {
+        totalVfOut += cm.amount;
+      }
+    });
+
+    returns.forEach(ret => {
+      const origInv = allInvoices.find(i => i.id === ret.original_invoice_id);
+      if (origInv?.payment_method === 'VODAFONE_CASH') {
+        const refundAmt = origInv.payment_type === 'SPLIT'
+          ? Math.min(origInv.paid_amount || 0, ret.total_return_amount)
+          : ret.total_return_amount;
+        totalVfOut += refundAmt;
+      }
+    });
+
+    return Math.max(0, Math.round((totalVfIn - totalVfOut) * 100) / 100);
+  },
+
   adjustVodafoneCashBalance: (
     delta: number,
     reason: string,

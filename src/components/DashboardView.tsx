@@ -272,19 +272,24 @@ export default function DashboardView({
   };
 
   // Active shift cash drawer calculation (Single Source of Truth)
+  const persistentVfBalance = useMemo(() => dbService.getPersistentVodafoneCashBalance(), [tick]);
+
   const shiftCashMetrics = useMemo(() => {
     const shift = dbService.getActiveShift() || activeShift;
+    const persistentVf = dbService.getPersistentVodafoneCashBalance();
     if (shift) {
       const opening = shift.opening_balance || 0;
       const cashIn = shift.cash_in || 0;
-      const vodafoneIn = shift.vodafone_cash_in || 0;
+      const vodafoneIn = persistentVf; // use persistent all-time wallet balance
+      const shiftVodafoneIn = shift.vodafone_cash_in || 0;
       const cashOut = shift.cash_out || 0;
-      const totalIn = Math.round((opening + cashIn + vodafoneIn) * 100) / 100;
+      const totalIn = Math.round((opening + cashIn + shiftVodafoneIn) * 100) / 100;
       const totalBookBalance = Math.round((totalIn - cashOut) * 100) / 100;
       return {
         opening_balance: opening,
         cash_in: cashIn,
-        vodafone_cash_in: vodafoneIn,
+        vodafone_cash_in: persistentVf,
+        shift_vodafone_cash_in: shiftVodafoneIn,
         total_in: totalIn,
         cash_out: cashOut,
         expected_cash: shift.expected_cash,
@@ -294,15 +299,16 @@ export default function DashboardView({
     const drawer = cashDrawer;
     const opening = drawer?.opening_balance || 0;
     const cashIn = drawer?.cash_in || 0;
-    const vodafoneIn = drawer?.vodafone_cash_in || 0;
+    const vodafoneIn = persistentVf;
     const cashOut = drawer?.cash_out || 0;
-    const totalIn = Math.round((opening + cashIn + vodafoneIn) * 100) / 100;
+    const totalIn = Math.round((opening + cashIn + (drawer?.vodafone_cash_in || 0)) * 100) / 100;
     const expectedCash = Math.round((opening + cashIn - cashOut) * 100) / 100;
     const totalBookBalance = Math.round((totalIn - cashOut) * 100) / 100;
     return {
       opening_balance: opening,
       cash_in: cashIn,
-      vodafone_cash_in: vodafoneIn,
+      vodafone_cash_in: persistentVf,
+      shift_vodafone_cash_in: drawer?.vodafone_cash_in || 0,
       total_in: totalIn,
       cash_out: cashOut,
       expected_cash: expectedCash,
