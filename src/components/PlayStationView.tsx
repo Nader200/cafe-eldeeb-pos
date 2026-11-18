@@ -66,6 +66,8 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
   const [isLimited, setIsLimited] = useState<boolean>(false);
   const [limitedMinutes, setLimitedMinutes] = useState<number>(60);
   const [sessionNotes, setSessionNotes] = useState<string>('');
+  const [startMode, setStartMode] = useState<'NOW' | 'MANUAL_MINUTES'>('NOW');
+  const [manualMinutesAgo, setManualMinutesAgo] = useState<number>(15);
 
   // Stop / Billing parameters
   const [billingSession, setBillingSession] = useState<PSSession | null>(null);
@@ -408,6 +410,8 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
     setSessionType('SINGLE');
     setIsLimited(false);
     setLimitedMinutes(60);
+    setStartMode('NOW');
+    setManualMinutesAgo(15);
     setSessionNotes('');
     setShowStartModal(true);
   };
@@ -417,8 +421,10 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
     if (!selectedDevice) return;
 
     const sessionId = `ps_sess_${Date.now()}`;
-    const startTimeStr = new Date().toISOString();
-    const targetEndTime = isLimited ? new Date(Date.now() + limitedMinutes * 60 * 1000).toISOString() : null;
+    const nowMs = Date.now();
+    const effectiveStartMs = startMode === 'MANUAL_MINUTES' ? nowMs - (Math.max(1, manualMinutesAgo) * 60 * 1000) : nowMs;
+    const startTimeStr = new Date(effectiveStartMs).toISOString();
+    const targetEndTime = isLimited ? new Date(effectiveStartMs + limitedMinutes * 60 * 1000).toISOString() : null;
 
     // 1. Update Device State
     const updatedDevice: PSDevice = {
@@ -1402,6 +1408,65 @@ export default function PlayStationView({ onShowSuccessAlert, onShowWarningAlert
                     زوجي (Multi) - {selectedDevice?.hourly_price_multi} ج.م/ساعه
                   </button>
                 </div>
+              </div>
+
+              {/* Manual Start Time Option */}
+              <div className="bg-black/40 p-3 rounded-2xl border border-gray-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-gray-300">وقت بدء الجلسة:</span>
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setStartMode('NOW')}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
+                        startMode === 'NOW'
+                          ? 'bg-gold-600/20 border-gold-500 text-gold-400'
+                          : 'bg-black/40 border-gray-800 text-gray-400'
+                      }`}
+                    >
+                      بدء الآن 🟢
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStartMode('MANUAL_MINUTES')}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
+                        startMode === 'MANUAL_MINUTES'
+                          ? 'bg-amber-600/20 border-amber-500 text-amber-300'
+                          : 'bg-black/40 border-gray-800 text-gray-400'
+                      }`}
+                    >
+                      تحديد وقت سابق (نسيت فتحه) ⏰
+                    </button>
+                  </div>
+                </div>
+
+                {startMode === 'MANUAL_MINUTES' && (
+                  <div className="pt-2 border-t border-gray-800/80 space-y-2">
+                    <label className="text-[10px] text-amber-300 font-bold block">
+                      كم دقيقة مضت منذ بدأ العميل اللعب الفعلي؟
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="1440"
+                      value={manualMinutesAgo}
+                      onChange={(e) => setManualMinutesAgo(parseInt(e.target.value) || 0)}
+                      className="w-full bg-luxury-bg border border-amber-500/40 text-white rounded-xl py-2 px-3 text-xs text-center font-mono font-bold text-amber-400"
+                    />
+                    <div className="flex gap-1.5 justify-center flex-wrap">
+                      {[10, 15, 20, 30, 45, 60].map(m => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setManualMinutesAgo(m)}
+                          className="px-2 py-1 bg-luxury-bg hover:bg-gray-900 text-gray-300 rounded text-[10px] font-bold border border-gray-800 cursor-pointer"
+                        >
+                          منذ {m} دقيقة
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>
