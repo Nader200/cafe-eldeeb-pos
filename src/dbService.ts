@@ -9438,6 +9438,83 @@ export const dbService = {
     return { previousBalance, newBalance, delta: cleanDelta };
   },
 
+  withdrawVodafoneCashToDestination: (
+    amount: number,
+    destination: 'PRIVATE_SAFE' | 'RENT_BOX' | 'GAMIA_BOX' | 'SHORTAGE',
+    operator?: string,
+    notes?: string
+  ): { previousBalance: number; newBalance: number; delta: number } => {
+    const cu = dbService.getCurrentUser();
+    if (cu && cu.role !== 'Admin') {
+      throw new Error('السحب من محفظة فودافون كاش متاح للأدمن فقط!');
+    }
+    const cleanAmount = Math.round((Number(amount) || 0) * 100) / 100;
+    if (cleanAmount <= 0) {
+      throw new Error('يرجى إدخال مبلغ صحيح أكبر من صفر');
+    }
+
+    const currentVf = dbService.getPersistentVodafoneCashBalance();
+    if (cleanAmount > currentVf) {
+      throw new Error(`رصيد محفظة فودافون كاش الحالي (${currentVf} ج.م) لا يكفي لسحب هذا المبلغ!`);
+    }
+
+    const op = operator || cu?.name || 'أدمن النظام';
+    const defaultNotes =
+      destination === 'PRIVATE_SAFE'
+        ? 'سحب من فودافون كاش إلى الخزنة الخاصة'
+        : destination === 'RENT_BOX'
+        ? 'سحب من فودافون كاش إلى قسم الإيجار'
+        : destination === 'GAMIA_BOX'
+        ? 'سحب من فودافون كاش إلى قسم الجمعية'
+        : 'سحب من فودافون كاش لتسوية العجز';
+
+    const finalNotes = notes?.trim() || defaultNotes;
+
+    // 1. Deduct from Vodafone Cash
+    const adjRes = dbService.adjustVodafoneCashBalance(-cleanAmount, finalNotes, op);
+
+    // 2. Add to destination
+    if (destination === 'SHORTAGE') {
+      dbService.addShortageDepositFIFO(cleanAmount, 'PRIVATE_SAFE', op, finalNotes);
+    } else {
+      const prev = dbService.getSafeBalance(destination);
+      const next = Math.round((prev + cleanAmount) * 100) / 100;
+      const now = new Date();
+      const dateStr = now.toISOString().split('T')[0];
+      const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+      const safeTx: SafeTransaction = {
+        id: `safe_${Date.now()}_vf_${Math.random().toString(36).substring(2, 5)}`,
+        safe_type: destination,
+        transaction_type: 'DEPOSIT',
+        amount: cleanAmount,
+        previous_balance: prev,
+        new_balance: next,
+        date: dateStr,
+        time: timeStr,
+        operator: op,
+        notes: finalNotes,
+        created_at: now.toISOString()
+      };
+      const safeTxs = dbService.getSafeTransactions();
+      safeTxs.push(safeTx);
+      setLocal(KEYS.SAFE_TRANSACTIONS, safeTxs);
+
+      dbService.logAuditAction(
+        'VODAFONE_TRANSFER_TO_SAFE',
+        `تحويل ${cleanAmount} ج.م من محفظة فودافون كاش إلى ${dbService.getSafeArabicLabel(destination)} بواسطة ${op} (الرصيد الجديد: ${next} ج.م)`,
+        op
+      );
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('safe_updated'));
+        window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+      }
+    }
+
+    return adjRes;
+  },
+
   startShift: (shiftType: ShiftType, openingBalance: number, cashierName: string): Shift => {
     const shifts = dbService.getShifts();
     const existingActive = shifts.find(s => s.status === 'OPEN' || s.status === 'PENDING_HANDOVER');
