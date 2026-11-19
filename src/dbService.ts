@@ -450,6 +450,35 @@ const setLocal = <T>(key: string, value: T): void => {
     }
   }
 
+  // Structural guard: NEVER allow writing KEYS.INVOICE_ITEMS to silently drop items belonging to active OPEN/DRAFT invoices
+  if (key === 'cafe_invoice_items' && Array.isArray(value) && !isResettingDatabase) {
+    const incomingItems = value as InvoiceItem[];
+    const incomingItemIds = new Set(incomingItems.map(it => it?.id).filter(Boolean));
+    const openInvoices = dbService.getOpenInvoices();
+    const openIds = new Set(openInvoices.map(i => i.id));
+
+    const prevItems = getLocal<InvoiceItem[]>('cafe_invoice_items', []);
+    const vaultItems = getLocal<InvoiceItem[]>(OPEN_ITEMS_VAULT_KEY, []);
+
+    const candidatesMap = new Map<string, InvoiceItem>();
+    [...prevItems, ...vaultItems].forEach(it => {
+      if (!it || !it.id || !it.invoice_id) return;
+      if (!openIds.has(it.invoice_id)) return;
+      const cur = candidatesMap.get(it.id);
+      if (!cur || getInvTs(it) >= getInvTs(cur)) candidatesMap.set(it.id, it);
+    });
+
+    const preservedOpenItems: InvoiceItem[] = [];
+    for (const it of candidatesMap.values()) {
+      if (incomingItemIds.has(it.id)) continue;
+      preservedOpenItems.push(it);
+    }
+
+    if (preservedOpenItems.length > 0) {
+      finalValue = [...incomingItems, ...preservedOpenItems];
+    }
+  }
+
   try {
     localStorage.setItem(key, JSON.stringify(finalValue));
   } catch (err: any) {
@@ -1624,15 +1653,21 @@ export const dbService = {
     return true;
   },
   getInvoiceItems: (invoiceId?: string): InvoiceItem[] => {
-    let items = getLocal<InvoiceItem[]>(KEYS.INVOICE_ITEMS, []);
-    if (invoiceId) {
-      const matched = items.filter(it => it && it.invoice_id === invoiceId);
-      if (matched.length === 0) {
-        const vaultItems = getLocal<InvoiceItem[]>(KEYS.OPEN_INVOICE_ITEMS_VAULT, []);
-        items = vaultItems.filter(it => it && it.invoice_id === invoiceId);
-      } else {
-        items = matched;
+    const mainItems = getLocal<InvoiceItem[]>(KEYS.INVOICE_ITEMS, []);
+    const vaultItems = getLocal<InvoiceItem[]>(KEYS.OPEN_INVOICE_ITEMS_VAULT, []);
+
+    const mapAll = new Map<string, InvoiceItem>();
+    [...vaultItems, ...mainItems].forEach(it => {
+      if (!it || !it.id) return;
+      const cur = mapAll.get(it.id);
+      if (!cur || getInvTs(it) >= getInvTs(cur)) {
+        mapAll.set(it.id, it);
       }
+    });
+    let items = Array.from(mapAll.values());
+
+    if (invoiceId) {
+      items = items.filter(it => it && it.invoice_id === invoiceId);
     } else {
       items = items.filter(Boolean);
     }
