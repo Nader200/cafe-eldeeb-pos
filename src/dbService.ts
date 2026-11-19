@@ -9440,7 +9440,7 @@ export const dbService = {
 
   withdrawVodafoneCashToDestination: (
     amount: number,
-    destination: 'PRIVATE_SAFE' | 'RENT_BOX' | 'GAMIA_BOX' | 'SHORTAGE',
+    destination: 'PRIVATE_SAFE' | 'RENT_BOX' | 'GAMIA_BOX' | 'SHORTAGE' | 'DRAWER',
     operator?: string,
     notes?: string
   ): { previousBalance: number; newBalance: number; delta: number } => {
@@ -9466,6 +9466,8 @@ export const dbService = {
         ? 'سحب من فودافون كاش إلى قسم الإيجار'
         : destination === 'GAMIA_BOX'
         ? 'سحب من فودافون كاش إلى قسم الجمعية'
+        : destination === 'DRAWER'
+        ? 'سحب من فودافون كاش إلى درج الكاش / الرصيد الافتتاحي'
         : 'سحب من فودافون كاش لتسوية العجز';
 
     const finalNotes = notes?.trim() || defaultNotes;
@@ -9476,6 +9478,18 @@ export const dbService = {
     // 2. Add to destination
     if (destination === 'SHORTAGE') {
       dbService.addShortageDepositFIFO(cleanAmount, 'PRIVATE_SAFE', op, finalNotes);
+    } else if (destination === 'DRAWER') {
+      dbService.logCashMovement(cleanAmount, 0, finalNotes, 'CASH_ADJUSTMENT_ADD', op, finalNotes);
+      dbService.logAuditAction(
+        'VODAFONE_TRANSFER_TO_DRAWER',
+        `تحويل ${cleanAmount} ج.م من محفظة فودافون كاش إلى درج الكاش بواسطة ${op}`,
+        op
+      );
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('shift_updated'));
+        window.dispatchEvent(new CustomEvent('safe_updated'));
+        window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+      }
     } else {
       const prev = dbService.getSafeBalance(destination);
       const next = Math.round((prev + cleanAmount) * 100) / 100;

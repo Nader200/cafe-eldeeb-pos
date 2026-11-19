@@ -60,7 +60,7 @@ export default function VodafoneCashModal({
   const [reasonInput, setReasonInput] = useState('');
 
   // Transfer state
-  const [transferDest, setTransferDest] = useState<'PRIVATE_SAFE' | 'RENT_BOX' | 'GAMIA_BOX' | 'SHORTAGE'>('PRIVATE_SAFE');
+  const [transferDest, setTransferDest] = useState<'PRIVATE_SAFE' | 'RENT_BOX' | 'GAMIA_BOX' | 'SHORTAGE' | 'DRAWER'>('PRIVATE_SAFE');
   const [transferAmount, setTransferAmount] = useState('');
   const [transferNotes, setTransferNotes] = useState('');
 
@@ -162,6 +162,8 @@ export default function VodafoneCashModal({
           ? 'قسم الإيجار'
           : transferDest === 'GAMIA_BOX'
           ? 'قسم الجمعية'
+          : transferDest === 'DRAWER'
+          ? 'درج الكاش / الرصيد الافتتاحي'
           : 'خانة العجز';
       setFeedback({
         type: 'success',
@@ -451,8 +453,8 @@ export default function VodafoneCashModal({
                     <ArrowLeftRight className="w-4 h-4 text-fuchsia-400" />
                     <h4 className="text-xs font-black text-fuchsia-300">سحب وتحويل من محفظة فودافون كاش إلى الأقسام</h4>
                   </div>
-                  <p className="text-[10px] text-gray-400 leading-relaxed">
-                    يمكنك خصم أي مبلغ من رصيد محفظة فودافون كاش وتوريده مباشرة إلى الخزنة الخاصة، قسم الإيجار، قسم الجمعية، أو تسوية خانة العجز.
+                   <p className="text-[10px] text-gray-400 leading-relaxed">
+                    يمكنك خصم أي مبلغ من رصيد محفظة فودافون كاش وتوريده مباشرة إلى الخزنة الخاصة، قسم الإيجار، قسم الجمعية، درج الكاش / الرصيد الافتتاحي، أو تسوية خانة العجز.
                   </p>
 
                   <div>
@@ -465,6 +467,7 @@ export default function VodafoneCashModal({
                       <option value="PRIVATE_SAFE">الخزنة الخاصة (Private Safe)</option>
                       <option value="RENT_BOX">قسم الإيجار (Rent Box)</option>
                       <option value="GAMIA_BOX">قسم الجمعية (Gamia Box)</option>
+                      <option value="DRAWER">درج الكاش / الرصيد الافتتاحي (Cash Drawer)</option>
                       <option value="SHORTAGE">خانة العجز (Shortage Settlement)</option>
                     </select>
                   </div>
