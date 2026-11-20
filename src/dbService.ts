@@ -1671,22 +1671,7 @@ export const dbService = {
     } else {
       items = items.filter(Boolean);
     }
-    const map = new Map<string, InvoiceItem>();
-    items.forEach(it => {
-      if (!it || !it.product_id) return;
-      const pId = it.product_id;
-      if (map.has(pId)) {
-        const existing = map.get(pId)!;
-        existing.quantity += it.quantity;
-        existing.total_price = Math.round((existing.unit_price * existing.quantity - (existing.item_discount_amount || 0)) * 100) / 100;
-        if (it.notes && !existing.notes?.includes(it.notes)) {
-          existing.notes = existing.notes ? `${existing.notes}, ${it.notes}` : it.notes;
-        }
-      } else {
-        map.set(pId, { ...it });
-      }
-    });
-    return Array.from(map.values());
+    return items;
   },
 
   /**
