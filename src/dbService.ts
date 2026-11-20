@@ -2479,8 +2479,13 @@ export const dbService = {
       invoices.push(invoice);
     }
 
-    // Save items
-    const filteredItems = invoiceItemsList.filter(item => item && item.invoice_id !== invoiceId);
+    // Save items cleanly by completely removing old items for this invoice from BOTH main items and vault items
+    const currentMainItems = getLocal<InvoiceItem[]>(KEYS.INVOICE_ITEMS, []);
+    const currentVaultItems = getLocal<InvoiceItem[]>(KEYS.OPEN_INVOICE_ITEMS_VAULT, []);
+
+    const filteredMain = currentMainItems.filter(item => item && item.invoice_id !== invoiceId);
+    const filteredVault = currentVaultItems.filter(item => item && item.invoice_id !== invoiceId);
+
     const newItems: InvoiceItem[] = consolidatedCart.map((cartItem, idx) => {
       const origPrice = cartItem.original_price ?? cartItem.product.selling_price;
       const unitPrice = cartItem.custom_price !== undefined ? cartItem.custom_price : cartItem.product.selling_price;
@@ -2511,9 +2516,15 @@ export const dbService = {
     });
 
     setLocal(KEYS.INVOICES, invoices);
-    const updatedAllItems = [...filteredItems, ...newItems];
-    setLocal(KEYS.INVOICE_ITEMS, updatedAllItems);
-    syncOpenInvoicesVaultState(invoices, updatedAllItems, true);
+    const updatedMainItems = [...filteredMain, ...newItems];
+    const updatedVaultItems = [...filteredVault, ...newItems];
+
+    setLocal(KEYS.INVOICE_ITEMS, updatedMainItems);
+    try {
+      localStorage.setItem(KEYS.OPEN_INVOICE_ITEMS_VAULT, JSON.stringify(updatedVaultItems));
+    } catch {}
+    saveVaultToIDB(invoices.filter(i => isOpenOrDraftStatus(i.invoice_status)), updatedVaultItems);
+    syncOpenInvoicesVaultState(invoices, updatedMainItems, true);
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('open_invoices_updated', { detail: { invoice } }));
