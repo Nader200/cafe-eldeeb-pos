@@ -2512,7 +2512,9 @@ export const dbService = {
     });
 
     setLocal(KEYS.INVOICES, invoices);
-    setLocal(KEYS.INVOICE_ITEMS, [...filteredItems, ...newItems]);
+    const updatedAllItems = [...filteredItems, ...newItems];
+    setLocal(KEYS.INVOICE_ITEMS, updatedAllItems);
+    syncOpenInvoicesVaultState(invoices, updatedAllItems, true);
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('open_invoices_updated', { detail: { invoice } }));
