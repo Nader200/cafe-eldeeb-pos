@@ -4291,6 +4291,112 @@ export const dbService = {
     };
   },
 
+  // Admin-Only Customer Wallet Balance Correction (تعديل رصيد محفظة العميل - للأدمن فقط)
+  adjustCustomerWalletAdmin: async (params: {
+    customerId: string;
+    mode: 'SET' | 'DECREASE' | 'INCREASE';
+    amount: number;
+    reason: string;
+    notes?: string;
+    adminCredential: string;
+    operatorName?: string;
+  }): Promise<{ customer: Customer; transaction: WalletTransaction }> => {
+    const cu = dbService.getCurrentUser();
+    if (cu && cu.role !== 'Admin') {
+      throw new Error('تعديل رصيد محفظة العميل متاح للأدمن فقط!');
+    }
+
+    const isValid = await dbService.verifyAdminActionCredential(params.adminCredential);
+    if (!isValid) {
+      throw new Error(
+        isAdminSecurityPasswordSet()
+          ? 'كلمة مرور حماية الشاشات الحساسة (Admin Security Password) غير صحيحة!'
+          : 'رمز الأمان PIN للمسؤول غير صحيح!'
+      );
+    }
+
+    const customersList = dbService.getCustomers();
+    const custIdx = customersList.findIndex(c => c.id === params.customerId);
+    if (custIdx === -1) {
+      throw new Error('العميل غير موجود!');
+    }
+
+    const cleanAmt = Math.round((Number(params.amount) || 0) * 100) / 100;
+    if (params.mode === 'SET') {
+      if (isNaN(cleanAmt) || cleanAmt < 0) {
+        throw new Error('يرجى إدخال قيمة رصيد صحيحة (0 أو أكثر)');
+      }
+    } else if (isNaN(cleanAmt) || cleanAmt <= 0) {
+      throw new Error('يرجى إدخال مبلغ تعديل صحيح أكبر من صفر');
+    }
+
+    const customer = customersList[custIdx];
+    const prevBalance = Math.max(0, Math.round((Number(customer.wallet_balance) || 0) * 100) / 100);
+    let newBalance = prevBalance;
+
+    if (params.mode === 'SET') {
+      newBalance = cleanAmt;
+    } else if (params.mode === 'DECREASE') {
+      newBalance = Math.max(0, Math.round((prevBalance - cleanAmt) * 100) / 100);
+    } else if (params.mode === 'INCREASE') {
+      newBalance = Math.round((prevBalance + cleanAmt) * 100) / 100;
+    }
+
+    const difference = Math.round((newBalance - prevBalance) * 100) / 100;
+    if (difference === 0) {
+      throw new Error('المبلغ الجديد مطابق لرصيد محفظة العميل الحالي بالفعل!');
+    }
+
+    const op = params.operatorName || cu?.name || 'أدمن النظام';
+    const cleanReason = params.reason?.trim() || 'تصحيح رصيد المحفظة';
+    const fullNote = params.notes?.trim()
+      ? `[تعديل أدمن] ${cleanReason} - ${params.notes.trim()}`
+      : `[تعديل أدمن] ${cleanReason} (من ${prevBalance} إلى ${newBalance} ج.م)`;
+
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    const walletTxs = getLocal<WalletTransaction[]>(KEYS.WALLET_TRANSACTIONS, []);
+    const newTx: WalletTransaction = {
+      id: `wtx_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      customer_id: params.customerId,
+      customer_name: customer.full_name,
+      transaction_type: 'MANUAL_ADJUSTMENT',
+      amount: Math.abs(difference),
+      previous_balance: prevBalance,
+      new_balance: newBalance,
+      notes: fullNote,
+      date: dateStr,
+      time: timeStr,
+      user: op,
+      created_at: now.toISOString()
+    };
+    walletTxs.push(newTx);
+
+    customersList[custIdx].wallet_balance = newBalance;
+    customersList[custIdx].updated_at = now.toISOString();
+
+    setLocal(KEYS.WALLET_TRANSACTIONS, walletTxs);
+    setLocal(KEYS.CUSTOMERS, customersList);
+
+    dbService.logAuditAction(
+      'ADMIN_WALLET_ADJUSTMENT',
+      `قام الأدمن (${op}) بتعديل رصيد محفظة العميل "${customer.full_name}" من ${prevBalance} ج.م إلى ${newBalance} ج.م (الفارق: ${difference > 0 ? `+${difference}` : difference} ج.م). السبب: ${cleanReason}`,
+      op
+    );
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('customer_credit_updated'));
+      window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+    }
+
+    return {
+      customer: customersList[custIdx],
+      transaction: newTx
+    };
+  },
+
   // --- Credit Payments ---
   getCreditPayments: (): CreditPayment[] => getLocal<CreditPayment[]>(KEYS.CREDIT_PAYMENTS, []),
   addCreditPayment: (

@@ -83,6 +83,15 @@ export default function EnterpriseCustomersView({
   const [showCreditAdjustCred, setShowCreditAdjustCred] = useState(false);
   const [creditAdjustLoading, setCreditAdjustLoading] = useState(false);
 
+  // Admin-Only Wallet Adjustment Modal States (تعديل رصيد المحفظة للأدمن فقط)
+  const [showWalletAdjustModal, setShowWalletAdjustModal] = useState(false);
+  const [walletAdjustMode, setWalletAdjustMode] = useState<'SET' | 'DECREASE' | 'INCREASE'>('SET');
+  const [walletAdjustAmount, setWalletAdjustAmount] = useState<number>(0);
+  const [walletAdjustNotes, setWalletAdjustNotes] = useState('');
+  const [walletAdjustCred, setWalletAdjustCred] = useState('');
+  const [showWalletAdjustCred, setShowWalletAdjustCred] = useState(false);
+  const [walletAdjustLoading, setWalletAdjustLoading] = useState(false);
+
   const [showStatementModal, setShowStatementModal] = useState(false);
   const [statementPhone, setStatementPhone] = useState('');
   const [statementBusy, setStatementBusy] = useState(false);
@@ -952,6 +961,53 @@ export default function EnterpriseCustomersView({
     } catch (err: any) {
       setCreditAdjustLoading(false);
       onShowWarningAlert(err?.message || 'تعذر تعديل مديونية العميل.');
+    }
+  };
+
+  // Admin-Only Wallet Adjustment Handler (تعديل رصيد محفظة العميل)
+  const handleWalletAdjust = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCustomer) return;
+    if (!isAdmin) {
+      onShowWarningAlert('تعديل رصيد المحفظة متاح لحساب الأدمن فقط!');
+      return;
+    }
+    if (walletAdjustMode === 'SET' ? walletAdjustAmount < 0 : walletAdjustAmount <= 0) {
+      onShowWarningAlert('يرجى إدخال قيمة مالية صالحة');
+      return;
+    }
+    if (!walletAdjustNotes.trim()) {
+      onShowWarningAlert('يرجى كتابة سبب تعديل رصيد المحفظة (مثال: تصحيح خطأ في الرصيد)');
+      return;
+    }
+    if (!walletAdjustCred.trim()) {
+      onShowWarningAlert(hasSecPass ? 'يرجى إدخال كلمة مرور حماية الشاشات الحساسة' : 'يرجى إدخال رمز الأمان PIN للمسؤول');
+      return;
+    }
+
+    setWalletAdjustLoading(true);
+    try {
+      const result = await dbService.adjustCustomerWalletAdmin({
+        customerId: selectedCustomer.id,
+        mode: walletAdjustMode,
+        amount: walletAdjustAmount,
+        reason: walletAdjustNotes.trim(),
+        adminCredential: walletAdjustCred.trim(),
+        operatorName: currentUser?.name || cashierName || 'أدمن النظام'
+      });
+
+      setWalletAdjustLoading(false);
+      onShowSuccessAlert(
+        `تم تعديل رصيد محفظة العميل "${selectedCustomer.full_name}" من ${result.transaction.previous_balance.toLocaleString('ar-EG')} ج.م إلى ${result.transaction.new_balance.toLocaleString('ar-EG')} ج.م بنجاح ✅`
+      );
+      setShowWalletAdjustModal(false);
+      setWalletAdjustAmount(0);
+      setWalletAdjustNotes('');
+      setWalletAdjustCred('');
+      loadData();
+    } catch (err: any) {
+      setWalletAdjustLoading(false);
+      onShowWarningAlert(err?.message || 'تعذر تعديل رصيد محفظة العميل.');
     }
   };
 
@@ -1862,7 +1918,7 @@ export default function EnterpriseCustomersView({
                     <span className="text-sm font-bold text-gold-500 font-mono">
                       {selectedCustomer.wallet_balance || 0} ج.م
                     </span>
-                    <div className="flex gap-1.5 mt-2 justify-end">
+                    <div className="flex flex-wrap gap-1.5 mt-2 justify-end">
                       <button
                         onClick={() => { setWalletOpType('DEPOSIT'); setWalletAmount(0); setShowWalletModal(true); }}
                         className="px-2 py-1 bg-gold-950/40 hover:bg-gold-900/40 text-gold-400 rounded-lg text-[9px] font-bold transition-all cursor-pointer"
@@ -1876,6 +1932,31 @@ export default function EnterpriseCustomersView({
                       >
                         سحب نقدي
                       </button>
+                      {isAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setWalletAdjustMode('SET');
+                            setWalletAdjustAmount(selectedCustomer.wallet_balance || 0);
+                            setWalletAdjustNotes('');
+                            setWalletAdjustCred('');
+                            setShowWalletAdjustModal(true);
+                          }}
+                          className="px-2.5 py-1 bg-gold-950/50 hover:bg-gold-500 text-gold-300 hover:text-black border border-gold-500/40 rounded-lg text-[9px] font-black transition-all cursor-pointer flex items-center gap-1"
+                          title="تعديل رصيد محفظة العميل في حالة وجود خطأ (للأدمن فقط)"
+                        >
+                          <Edit className="w-2.5 h-2.5" />
+                          <span>تعديل الرصيد (أدمن)</span>
+                        </button>
+                      ) : (
+                        <span
+                          className="px-2 py-1 bg-gray-900/70 border border-gray-800 text-gray-500 rounded-lg text-[9px] font-bold flex items-center gap-1"
+                          title="تعديل رصيد المحفظة متاح للأدمن فقط"
+                        >
+                          <Lock className="w-2.5 h-2.5" />
+                          <span>التعديل للأدمن فقط</span>
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -3214,6 +3295,196 @@ export default function EnterpriseCustomersView({
                   className="w-1/2 py-2.5 bg-gradient-to-r from-amber-500 to-gold-600 text-black font-black rounded-xl hover:opacity-95 active:scale-95 transition-all shadow-md cursor-pointer disabled:opacity-50"
                 >
                   {creditAdjustLoading ? 'جاري الحفظ...' : 'حفظ تعديل المديونية'}
+                </button>
+              </div>
+
+            </form>
+
+          </div>
+        </div>
+      )}
+
+      {/* ============================================== */}
+      {/* --- ADMIN-ONLY WALLET BALANCE ADJUSTMENT MODAL --- */}
+      {showWalletAdjustModal && selectedCustomer && isAdmin && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 animate-fade-in overflow-y-auto" dir="rtl">
+          <div className="bg-luxury-card border-2 border-gold-500/40 rounded-3xl p-4 sm:p-6 w-full max-w-md shadow-2xl relative max-h-[92vh] overflow-y-auto my-auto">
+            
+            <button
+              type="button"
+              onClick={() => setShowWalletAdjustModal(false)}
+              className="absolute left-4 top-4 text-gray-400 hover:text-white transition-all cursor-pointer z-20"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className="text-sm font-extrabold text-gold-400 flex items-center gap-2 mb-4 border-b border-luxury-border pb-3">
+              <ShieldCheck className="w-5 h-5" />
+              تعديل رصيد محفظة العميل (للأدمن فقط)
+            </h3>
+
+            <div className="bg-luxury-bg border border-luxury-border p-3.5 rounded-2xl mb-4 space-y-1.5 text-right">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-gray-400 font-bold">اسم العميل:</span>
+                <span className="text-xs font-black text-white">{selectedCustomer.full_name}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-gray-400 font-bold">رصيد المحفظة الحالي:</span>
+                <span className="text-sm font-extrabold text-gold-400 font-mono">
+                  {(selectedCustomer.wallet_balance || 0).toLocaleString('ar-EG')} ج.م
+                </span>
+              </div>
+              {(() => {
+                const cur = Math.max(0, Number(selectedCustomer.wallet_balance) || 0);
+                const val = Number(walletAdjustAmount) || 0;
+                const preview =
+                  walletAdjustMode === 'SET'
+                    ? Math.max(0, val)
+                    : walletAdjustMode === 'DECREASE'
+                      ? Math.max(0, cur - val)
+                      : cur + val;
+                const diff = Math.round((preview - cur) * 100) / 100;
+                return (
+                  <div className="flex items-center justify-between pt-1.5 border-t border-gray-800/80">
+                    <span className="text-[10px] text-gold-300 font-bold">رصيد المحفظة بعد التعديل:</span>
+                    <span className="text-sm font-black font-mono text-emerald-400">
+                      {preview.toLocaleString('ar-EG')} ج.م{' '}
+                      <span className="text-[10px] text-gray-400">
+                        ({diff > 0 ? `+${diff}` : diff} ج.م)
+                      </span>
+                    </span>
+                  </div>
+                );
+              })()}
+            </div>
+
+            <form onSubmit={handleWalletAdjust} className="flex flex-col gap-3.5">
+              {/* Mode Selector */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-bold text-gray-400">طريقة تعديل رصيد المحفظة</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWalletAdjustMode('SET');
+                      setWalletAdjustAmount(selectedCustomer.wallet_balance || 0);
+                    }}
+                    className={`py-2 px-2 rounded-xl text-[10px] font-black border transition-all cursor-pointer ${
+                      walletAdjustMode === 'SET'
+                        ? 'bg-gold-500 text-black border-gold-400'
+                        : 'bg-luxury-bg border-gray-800 text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    تحديد المبلغ الصحيح
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWalletAdjustMode('DECREASE');
+                      setWalletAdjustAmount(0);
+                    }}
+                    className={`py-2 px-2 rounded-xl text-[10px] font-black border transition-all cursor-pointer ${
+                      walletAdjustMode === 'DECREASE'
+                        ? 'bg-emerald-600 text-white border-emerald-500'
+                        : 'bg-luxury-bg border-gray-800 text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    خصم / إنقاص (-)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWalletAdjustMode('INCREASE');
+                      setWalletAdjustAmount(0);
+                    }}
+                    className={`py-2 px-2 rounded-xl text-[10px] font-black border transition-all cursor-pointer ${
+                      walletAdjustMode === 'INCREASE'
+                        ? 'bg-gold-600 text-black border-gold-500'
+                        : 'bg-luxury-bg border-gray-800 text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    إضافة / زيادة (+)
+                  </button>
+                </div>
+              </div>
+
+              {/* Amount */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-bold text-gray-300">
+                  {walletAdjustMode === 'SET'
+                    ? 'إجمالي رصيد محفظة العميل الصحيح بعد التصحيح (ج.م) *'
+                    : walletAdjustMode === 'DECREASE'
+                      ? 'المبلغ المراد خصمه من رصيد المحفظة (ج.م) *'
+                      : 'المبلغ المراد إضافته لرصيد المحفظة (ج.م) *'}
+                </label>
+                <input
+                  type="number"
+                  min={walletAdjustMode === 'SET' ? '0' : '0.5'}
+                  step="0.5"
+                  required
+                  placeholder="0.00"
+                  value={walletAdjustAmount === 0 && walletAdjustMode !== 'SET' ? '' : walletAdjustAmount}
+                  onChange={(e) => setWalletAdjustAmount(Math.max(0, Number(e.target.value) || 0))}
+                  className="w-full bg-luxury-bg border border-gold-500/40 text-gold-300 rounded-xl py-2.5 px-3 text-base font-black focus:outline-none focus:border-gold-400 text-center font-mono"
+                />
+              </div>
+
+              {/* Reason / Notes */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-bold text-gray-300">سبب تعديل رصيد المحفظة *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="مثال: تصحيح خطأ في رصيد المحفظة..."
+                  value={walletAdjustNotes}
+                  onChange={(e) => setWalletAdjustNotes(e.target.value)}
+                  className="w-full bg-luxury-bg border border-luxury-border text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-gold-500 text-right"
+                />
+              </div>
+
+              {/* Admin Security Credential */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-bold text-gold-300">
+                  {hasSecPass ? 'كلمة مرور الشاشات الحساسة (Admin Security Password) *' : 'رمز الأمان PIN للمسؤول *'}
+                </label>
+                <div className="relative">
+                  <input
+                    type={showWalletAdjustCred ? 'text' : 'password'}
+                    required
+                    value={walletAdjustCred}
+                    onChange={(e) => setWalletAdjustCred(e.target.value)}
+                    placeholder={hasSecPass ? 'أدخل Admin Security Password...' : '••••'}
+                    className="w-full bg-luxury-bg border border-luxury-border text-white rounded-xl py-2 pr-3 pl-10 text-xs font-mono focus:outline-none focus:border-gold-500 text-right"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowWalletAdjustCred(!showWalletAdjustCred)}
+                    className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400 hover:text-gold-400 cursor-pointer"
+                  >
+                    {showWalletAdjustCred ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <p className="text-[9px] text-gray-400 leading-relaxed bg-luxury-bg/60 p-2.5 rounded-xl border border-luxury-border">
+                🔒 هذا الإجراء متاح للأدمن فقط ويُصحح رصيد محفظة العميل مع تسجيل المعاملة في سجل الحركات وتوثيق العملية في سجل التدقيق.
+              </p>
+
+              {/* Action buttons */}
+              <div className="flex gap-3 mt-1 text-xs font-bold sticky bottom-0 bg-luxury-card border-t border-luxury-border/80 pt-3 z-10">
+                <button
+                  type="button"
+                  onClick={() => setShowWalletAdjustModal(false)}
+                  className="w-1/2 py-2.5 bg-luxury-bg border border-luxury-border hover:bg-luxury-card text-gray-300 rounded-xl transition-all cursor-pointer"
+                >
+                  إلغاء التراجع
+                </button>
+                <button
+                  type="submit"
+                  disabled={walletAdjustLoading}
+                  className="w-1/2 py-2.5 bg-gradient-to-r from-gold-500 to-amber-600 text-black font-black rounded-xl hover:opacity-95 active:scale-95 transition-all shadow-md cursor-pointer disabled:opacity-50"
+                >
+                  {walletAdjustLoading ? 'جاري الحفظ...' : 'حفظ تعديل الرصيد'}
                 </button>
               </div>
 
