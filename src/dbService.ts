@@ -1671,7 +1671,21 @@ export const dbService = {
     } else {
       items = items.filter(Boolean);
     }
-    return items;
+
+    // Deduplicate by product_id per invoice to ensure items never duplicate or accumulate randomly
+    const uniqueMap = new Map<string, InvoiceItem>();
+    items.forEach(it => {
+      if (!it || !it.product_id) return;
+      const key = `${it.invoice_id}_${it.product_id}`;
+      const existing = uniqueMap.get(key);
+      if (!existing || getInvTs(it) >= getInvTs(existing)) {
+        uniqueMap.set(key, { ...it });
+      } else {
+        existing.quantity += it.quantity;
+        existing.total_price = Math.round((existing.unit_price * existing.quantity - (existing.item_discount_amount || 0)) * 100) / 100;
+      }
+    });
+    return Array.from(uniqueMap.values());
   },
 
   /**
