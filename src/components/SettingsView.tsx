@@ -85,6 +85,7 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
   const [reminderDaysStatement, setReminderDaysStatement] = useState<number>(15);
   const [reminderDaysFinal, setReminderDaysFinal] = useState<number>(30);
   const [enableAutoReminders, setEnableAutoReminders] = useState<boolean>(true);
+  const [whatsappAutoSendReceipt, setWhatsappAutoSendReceipt] = useState<boolean>(true);
   const [whatsappTemplateFriendly, setWhatsappTemplateFriendly] = useState<string>('');
   const [whatsappTemplateStatement, setWhatsappTemplateStatement] = useState<string>('');
   const [whatsappTemplateFinal, setWhatsappTemplateFinal] = useState<string>('');
@@ -314,6 +315,7 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
     setReminderDaysStatement(s.reminder_days_statement || 15);
     setReminderDaysFinal(s.reminder_days_final || 30);
     setEnableAutoReminders(s.whatsapp_reminders_enabled !== false);
+    setWhatsappAutoSendReceipt(s.whatsapp_auto_send_receipt !== false);
     setWhatsappTemplateFriendly(s.whatsapp_template_friendly || '');
     setWhatsappTemplateStatement(s.whatsapp_template_statement || '');
     setWhatsappTemplateFinal(s.whatsapp_template_final || '');
@@ -441,6 +443,7 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
       reminder_days_statement: reminderDaysStatement,
       reminder_days_final: reminderDaysFinal,
       whatsapp_reminders_enabled: enableAutoReminders,
+      whatsapp_auto_send_receipt: whatsappAutoSendReceipt,
       whatsapp_template_friendly: whatsappTemplateFriendly,
       whatsapp_template_statement: whatsappTemplateStatement,
       whatsapp_template_final: whatsappTemplateFinal,
@@ -1072,6 +1075,18 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
                   >
                     <option value="yes">نعم، تفعيل التنبيه التلقائي بوجود دفعات متأخرة على لوحة القيادة</option>
                     <option value="no">إيقاف التنبيهات والجدولة التلقائية</option>
+                  </select>
+                </div>
+
+                <div className="md:col-span-3">
+                  <label className="text-xs text-gray-400 font-bold block mb-1.5">إرسال إشعار السداد وفاتورة الكافيه تلقائياً عبر الواتساب للعميل</label>
+                  <select
+                    value={whatsappAutoSendReceipt ? 'yes' : 'no'}
+                    onChange={(e) => setWhatsappAutoSendReceipt(e.target.value === 'yes')}
+                    className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2.5 px-3 text-xs focus:outline-none focus:border-gold-600 text-right cursor-pointer"
+                  >
+                    <option value="yes">نعم، إرسال إشعار السداد وصورة الفاتورة تلقائياً عبر الواتساب عند إتمام دفع الفاتورة للعميل</option>
+                    <option value="no">إيقاف الإرسال التلقائي (يدوي فقط عبر زر الواتساب)</option>
                   </select>
                 </div>
 

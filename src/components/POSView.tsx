@@ -1132,6 +1132,7 @@ export default function POSView({
       }
 
       setRecentInvoice(res.invoice);
+      checkAndAutoSendWhatsApp(res.invoice);
       setShowCheckoutModal(false);
       setShowReceiptModal(true);
       onShowSuccessAlert(
@@ -1307,6 +1308,7 @@ export default function POSView({
       }
 
       setRecentInvoice(res.invoice);
+      checkAndAutoSendWhatsApp(res.invoice);
       setShowCheckoutModal(false);
       setShowReceiptModal(true);
       onShowSuccessAlert(
@@ -1384,6 +1386,33 @@ export default function POSView({
       console.error('Error in handleShareInvoiceAsPDFToWhatsApp:', err);
       onShowWarningAlert(err?.message || 'عفواً، حدث خطأ أثناء معالجة صورة الفاتورة عبر الواتساب');
     }
+  };
+
+  const checkAndAutoSendWhatsApp = (inv: Invoice) => {
+    if (settings.whatsapp_auto_send_receipt === false) return;
+    if (!inv.customer_id) return;
+    const custObj = customers.find(c => c.id === inv.customer_id);
+    if (!custObj) return;
+    const phone = custObj.whatsapp || custObj.phone;
+    if (!phone) return;
+
+    setTimeout(async () => {
+      try {
+        const items = dbService.getInvoiceItems(inv.id);
+        await shareInvoiceImageToWhatsApp({
+          invoice: inv,
+          items,
+          customer: custObj,
+          settings,
+          phone,
+          onStart: (msg) => onShowSuccessAlert(msg),
+          onSuccess: (msg) => onShowSuccessAlert(msg),
+          onError: (msg) => onShowWarningAlert(msg),
+        });
+      } catch (err) {
+        console.error('Auto WhatsApp send error:', err);
+      }
+    }, 600);
   };
 
   return (

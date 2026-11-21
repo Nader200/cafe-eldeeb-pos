@@ -302,6 +302,7 @@ export interface AppSettings {
   reminder_days_statement?: number;
   reminder_days_final?: number;
   whatsapp_reminders_enabled?: boolean;
+  whatsapp_auto_send_receipt?: boolean;
   whatsapp_template_friendly?: string;
   whatsapp_template_statement?: string;
   whatsapp_template_final?: string;
