@@ -350,6 +350,26 @@ export default function DashboardView({
     };
   }, [invoices, expenses, customers, todayStr]);
 
+  // Live shift product sales counter
+  const shiftProductSales = useMemo(() => {
+    const shiftStart = activeShift ? new Date(activeShift.created_at).getTime() : new Date(todayStr).getTime();
+    const relevantInvoices = invoices.filter(inv => {
+      if (inv.invoice_status === 'CANCELLED') return false;
+      const invTime = new Date(inv.invoice_date).getTime();
+      return invTime >= shiftStart;
+    });
+
+    const salesMap: Record<string, number> = {};
+    relevantInvoices.forEach(inv => {
+      (inv.items || []).forEach(item => {
+        const name = item.product_name || item.name || 'صنف';
+        const qty = item.quantity || 1;
+        salesMap[name] = (salesMap[name] || 0) + qty;
+      });
+    });
+
+    return Object.entries(salesMap).map(([name, count]) => ({ name, count }));
+  }, [invoices, activeShift, todayStr]);
   // 4. Smart Announcement Bar & Stats Ticker sliding state
   const [slideIndex, setSlideIndex] = useState(0);
   const tickerSlides = useMemo(() => {
@@ -884,6 +904,30 @@ export default function DashboardView({
                   </span>
                 ))}
               </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ==================================================
+          3.1. LIVE SHIFT PRODUCT SALES MARQUEE TICKER (عداد مبيعات الأصناف المتحرك للوردية)
+          ================================================== */}
+      <div className="w-full max-w-lg mx-auto bg-gradient-to-r from-[#0a0d0a] via-[#0f0e0a] to-[#0a0d0a] border border-[#D4AF37]/35 rounded-xl p-2.5 flex items-center gap-3 overflow-hidden shadow-lg select-none">
+        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-black border border-[#D4AF37]/50 rounded-lg text-gold-400 text-[11px] font-black z-10 shrink-0">
+          <Coffee className="w-3.5 h-3.5 text-gold-500 animate-bounce" />
+          <span>مبيعات الوردية ☕</span>
+        </div>
+        <div className="relative flex-1 overflow-hidden h-6 flex items-center">
+          <div className="absolute whitespace-nowrap animate-marquee flex items-center gap-6 text-[11px] font-black text-gray-200">
+            {shiftProductSales.length === 0 ? (
+              <span className="text-gray-400">✨ لم يتم بيع أي أصناف بعد في هذه الوردية. ابدأ بإضافة الطلبات من نقطة البيع!</span>
+            ) : (
+              shiftProductSales.map((item, index) => (
+                <span key={index} className="inline-flex items-center gap-2 bg-[#14120a] border border-[#D4AF37]/25 px-2.5 py-0.5 rounded-lg shadow-sm">
+                  <span className="text-[#D4AF37] font-bold">{item.name}:</span>
+                  <span className="text-emerald-400 font-mono font-black text-xs">+{item.count}</span>
+                </span>
+              ))
             )}
           </div>
         </div>
