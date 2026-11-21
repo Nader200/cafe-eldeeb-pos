@@ -48,7 +48,9 @@ import {
   RotateCcw,
   ShieldCheck,
   Lock,
-  Home
+  Home,
+  EyeOff,
+  Eye
 } from 'lucide-react';
 import {
   AreaChart,
@@ -103,6 +105,7 @@ export default function DashboardView({
   const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
   const [showResetDrawerModal, setShowResetDrawerModal] = useState(false);
   const [showVodafoneModal, setShowVodafoneModal] = useState(false);
+  const [hideAmounts, setHideAmounts] = useState(false);
 
   const refreshShiftState = () => {
     setActiveShift(dbService.getActiveShift());
@@ -936,13 +939,22 @@ export default function DashboardView({
             </div>
           </div>
 
-          <button
-            onClick={handleTriggerOpenDrawer}
-            className="px-2.5 py-1.5 bg-[#D4AF37]/15 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black border border-[#D4AF37]/40 rounded-xl text-[10px] font-black cursor-pointer transition-all flex items-center gap-1 active:scale-95 shrink-0"
-          >
-            <Wallet className="w-3.5 h-3.5" />
-            <span>التحكم بالدرج</span>
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setHideAmounts(!hideAmounts)}
+              className="w-8 h-8 rounded-xl bg-luxury-bg hover:bg-[#D4AF37]/20 border border-[#D4AF37]/40 text-[#D4AF37] flex items-center justify-center transition-all cursor-pointer"
+              title={hideAmounts ? "إظهار المبالغ" : "حجب المبالغ للخصوصية"}
+            >
+              {hideAmounts ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={handleTriggerOpenDrawer}
+              className="px-2.5 py-1.5 bg-[#D4AF37]/15 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black border border-[#D4AF37]/40 rounded-xl text-[10px] font-black cursor-pointer transition-all flex items-center gap-1 active:scale-95 shrink-0"
+            >
+              <Wallet className="w-3.5 h-3.5" />
+              <span>التحكم بالدرج</span>
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-col gap-3 pt-1">
@@ -951,14 +963,14 @@ export default function DashboardView({
             <div className="flex flex-col">
               <span className="text-[10px] font-bold text-gray-400">الرصيد الدفتري المتوقع:</span>
               <span className="text-xl sm:text-2xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-r from-[#FFECA1] via-[#D4AF37] to-[#AA7C11] drop-shadow-[0_2px_8px_rgba(212,175,55,0.3)]">
-                {activeShiftCash.toLocaleString('ar-EG')} <span className="text-xs text-[#D4AF37] font-sans">ج.م</span>
+                {hideAmounts ? '****' : activeShiftCash.toLocaleString('ar-EG')} <span className="text-xs text-[#D4AF37] font-sans">ج.م</span>
               </span>
             </div>
 
             {shiftCashMetrics.vodafone_cash_in > 0 && (
               <div className="flex items-center gap-1.5 flex-wrap text-[9px] font-extrabold">
                 <span className="px-2 py-1 rounded-lg bg-emerald-950/40 border border-emerald-700/40 text-emerald-300 font-mono">
-                  💵 كاش الدرج: {shiftCashMetrics.expected_cash.toLocaleString('ar-EG')} ج
+                  💵 كاش الدرج: {hideAmounts ? '****' : shiftCashMetrics.expected_cash.toLocaleString('ar-EG')} ج
                 </span>
                 <button
                   type="button"
@@ -966,7 +978,7 @@ export default function DashboardView({
                   className="px-2 py-1 rounded-lg bg-fuchsia-950/40 hover:bg-fuchsia-900/60 border border-fuchsia-600/40 text-fuchsia-300 font-mono cursor-pointer transition-all active:scale-95"
                   title="اضغط لعرض كشف تحويلات فودافون كاش وتسوية الرصيد"
                 >
-                  📱 فودافون كاش: {shiftCashMetrics.vodafone_cash_in.toLocaleString('ar-EG')} ج
+                  📱 فودافون كاش: {hideAmounts ? '****' : shiftCashMetrics.vodafone_cash_in.toLocaleString('ar-EG')} ج
                 </button>
               </div>
             )}
@@ -976,12 +988,12 @@ export default function DashboardView({
           <div className="grid grid-cols-5 gap-1 sm:gap-1.5 w-full text-center font-bold font-mono">
             <div className="bg-black/60 border border-gray-800 rounded-lg px-1 py-1.5 text-gray-300" title="الرصيد الافتتاحي للوردية الحالية">
               <span className="text-gray-400 text-[8.5px] sm:text-[9px] font-sans font-bold block leading-tight mb-0.5">الافتتاحي</span>
-              <span className="text-gold-300 text-[10px] sm:text-[11px] font-black">{shiftCashMetrics.opening_balance.toLocaleString('ar-EG')}</span>
+              <span className="text-gold-300 text-[10px] sm:text-[11px] font-black">{hideAmounts ? '****' : shiftCashMetrics.opening_balance.toLocaleString('ar-EG')}</span>
             </div>
 
             <div className="bg-emerald-950/40 border border-emerald-800/60 rounded-lg px-1 py-1.5 text-emerald-400" title="إجمالي المقبوضات النقدية بالدرج/الخزنة">
               <span className="text-emerald-400/90 text-[8.5px] sm:text-[9px] font-sans font-bold block leading-tight mb-0.5">وارد خزنة</span>
-              <span className="text-[10px] sm:text-[11px] font-black">+{shiftCashMetrics.cash_in.toLocaleString('ar-EG')}</span>
+              <span className="text-[10px] sm:text-[11px] font-black">{hideAmounts ? '+****' : `+${shiftCashMetrics.cash_in.toLocaleString('ar-EG')}`}</span>
             </div>
 
             <button
@@ -991,17 +1003,17 @@ export default function DashboardView({
               title="اضغط لعرض تفاصيل تحويلات محفظة فودافون كاش وتسوية الرصيد"
             >
               <span className="text-fuchsia-300/90 text-[8.5px] sm:text-[9px] font-sans font-bold block leading-tight mb-0.5">وارد محفظة ↗</span>
-              <span className="text-[10px] sm:text-[11px] font-black">+{shiftCashMetrics.vodafone_cash_in.toLocaleString('ar-EG')}</span>
+              <span className="text-[10px] sm:text-[11px] font-black">{hideAmounts ? '+****' : `+${shiftCashMetrics.vodafone_cash_in.toLocaleString('ar-EG')}`}</span>
             </button>
 
             <div className="bg-amber-950/35 border border-gold-500/50 rounded-lg px-1 py-1.5 text-gold-300" title="إجمالي الافتتاحي + وارد خزنة + وارد محفظة">
               <span className="text-gold-400 text-[8.5px] sm:text-[9px] font-sans font-bold block leading-tight mb-0.5">الإجمالي</span>
-              <span className="text-[10px] sm:text-[11px] font-black">{shiftCashMetrics.total_in.toLocaleString('ar-EG')}</span>
+              <span className="text-[10px] sm:text-[11px] font-black">{hideAmounts ? '****' : shiftCashMetrics.total_in.toLocaleString('ar-EG')}</span>
             </div>
 
             <div className="bg-red-950/40 border border-red-800/60 rounded-lg px-1 py-1.5 text-red-400" title="إجمالي المصروفات النقدية للوردية الحالية">
               <span className="text-red-400/90 text-[8.5px] sm:text-[9px] font-sans font-bold block leading-tight mb-0.5">منصرف</span>
-              <span className="text-[10px] sm:text-[11px] font-black">-{shiftCashMetrics.cash_out.toLocaleString('ar-EG')}</span>
+              <span className="text-[10px] sm:text-[11px] font-black">{hideAmounts ? '-****' : `-${shiftCashMetrics.cash_out.toLocaleString('ar-EG')}`}</span>
             </div>
           </div>
         </div>
@@ -1070,13 +1082,22 @@ export default function DashboardView({
                 <p className="text-[9px] text-gray-400">ترحيل باقي الدرج تلقائياً إلى الخزنة الخاصة بنهاية اليوم</p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => onNavigate('safes')}
-              className="px-3 py-1.5 bg-[#D4AF37] hover:bg-[#FFECA1] text-black rounded-xl text-[10px] font-black cursor-pointer transition-all active:scale-95 shrink-0"
-            >
-              إدارة الخزنة والأقسام
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setHideAmounts(!hideAmounts)}
+                className="w-7 h-7 rounded-xl bg-black/60 hover:bg-[#D4AF37]/20 border border-[#D4AF37]/40 text-[#D4AF37] flex items-center justify-center transition-all cursor-pointer"
+                title={hideAmounts ? "إظهار المبالغ" : "حجب المبالغ للخصوصية"}
+              >
+                {hideAmounts ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigate('safes')}
+                className="px-3 py-1.5 bg-[#D4AF37] hover:bg-[#FFECA1] text-black rounded-xl text-[10px] font-black cursor-pointer transition-all active:scale-95 shrink-0"
+              >
+                إدارة الخزنة والأقسام
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -1089,7 +1110,7 @@ export default function DashboardView({
                 الخزنة الخاصة
               </span>
               <span className="text-sm font-black font-mono text-white">
-                {privateSafeBalance.toLocaleString('ar-EG')} <span className="text-[10px] text-[#D4AF37] font-sans">ج.م</span>
+                {hideAmounts ? '****' : privateSafeBalance.toLocaleString('ar-EG')} <span className="text-[10px] text-[#D4AF37] font-sans">ج.م</span>
               </span>
             </div>
             <div
@@ -1101,7 +1122,7 @@ export default function DashboardView({
                 قسم الإيجار
               </span>
               <span className="text-sm font-black font-mono text-white">
-                {rentBoxBalance.toLocaleString('ar-EG')} <span className="text-[10px] text-sky-400 font-sans">ج.م</span>
+                {hideAmounts ? '****' : rentBoxBalance.toLocaleString('ar-EG')} <span className="text-[10px] text-sky-400 font-sans">ج.م</span>
               </span>
             </div>
             <div
@@ -1113,7 +1134,7 @@ export default function DashboardView({
                 قسم الجمعية
               </span>
               <span className="text-sm font-black font-mono text-white">
-                {gamiaBoxBalance.toLocaleString('ar-EG')} <span className="text-[10px] text-purple-400 font-sans">ج.م</span>
+                {hideAmounts ? '****' : gamiaBoxBalance.toLocaleString('ar-EG')} <span className="text-[10px] text-purple-400 font-sans">ج.م</span>
               </span>
             </div>
             <div
@@ -1131,7 +1152,7 @@ export default function DashboardView({
                 خانة العجز
               </span>
               <span className={`text-sm font-black font-mono ${totalPendingShortage > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
-                {totalPendingShortage.toLocaleString('ar-EG')} <span className="text-[10px] font-sans">ج.م</span>
+                {hideAmounts ? '****' : totalPendingShortage.toLocaleString('ar-EG')} <span className="text-[10px] font-sans">ج.م</span>
               </span>
             </div>
           </div>
