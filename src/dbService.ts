@@ -4033,7 +4033,8 @@ export const dbService = {
     notes?: string,
     paymentMethod?: 'CASH' | 'BANK' | 'VODAFONE_CASH' | 'CREDIT',
     receiptImage?: string,
-    supplierId?: string
+    supplierId?: string,
+    skipCashMovement?: boolean
   ): Expense => {
     const list = dbService.getExpenses();
     const todayStr = new Date().toISOString().split('T')[0];
@@ -4053,8 +4054,8 @@ export const dbService = {
     list.push(newExp);
     setLocal(KEYS.EXPENSES, list);
 
-    // Track movement in cash drawer only if payment method is CASH
-    if (!paymentMethod || paymentMethod === 'CASH') {
+    // Track movement in cash drawer only if payment method is CASH and skipCashMovement is false
+    if (!skipCashMovement && (!paymentMethod || paymentMethod === 'CASH')) {
       dbService.logCashMovement(0, amount, `مصروفات كاش: ${category} - ${description}`);
     }
 
@@ -5061,7 +5062,8 @@ export const dbService = {
     safeType: SafeType,
     amount: number,
     operator?: string,
-    notes?: string
+    notes?: string,
+    options?: { recordAsExpense?: boolean; expenseCategory?: string }
   ): SafeTransaction => {
     const cu = dbService.getCurrentUser();
     if (cu && cu.role !== 'Admin') {
@@ -5083,6 +5085,7 @@ export const dbService = {
     const now = new Date();
     const dateStr = now.toISOString().split('T')[0];
     const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const noteText = notes?.trim() || `سحب / صرف نقدية من ${safeLabel}`;
 
     const tx: SafeTransaction = {
       id: `safe_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -5094,13 +5097,26 @@ export const dbService = {
       date: dateStr,
       time: timeStr,
       operator: op,
-      notes: notes?.trim() || `سحب / صرف نقدية من ${safeLabel}`,
+      notes: noteText,
       created_at: now.toISOString()
     };
 
     const all = dbService.getSafeTransactions();
     all.push(tx);
     setLocal(KEYS.SAFE_TRANSACTIONS, all);
+
+    if (options?.recordAsExpense && safeType === 'PRIVATE_SAFE') {
+      dbService.saveExpense(
+        options.expenseCategory || 'مصروفات الخزنة الخاصة',
+        noteText,
+        cleanAmount,
+        `مسجل تلقائياً من سحب الخزنة الخاصة بواسطة ${op}`,
+        'CASH',
+        undefined,
+        undefined,
+        true // skip cash movement in drawer
+      );
+    }
 
     dbService.logAuditAction(
       'SAFE_WITHDRAWAL',

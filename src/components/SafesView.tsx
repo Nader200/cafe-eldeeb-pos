@@ -107,6 +107,8 @@ export default function SafesView({
 
   // Ledger Filter
   const [ledgerFilter, setLedgerFilter] = useState<'ALL' | 'PRIVATE_SAFE' | 'RENT_BOX' | 'GAMIA_BOX' | 'AUTO_DAILY'>('ALL');
+  const [recordAsExpense, setRecordAsExpense] = useState<boolean>(true);
+  const [expenseCategory, setExpenseCategory] = useState<string>('مصروفات الخزنة الخاصة');
 
   // End-of-Day Cash Shortage Ledger (خانة العجز وتسويتها التلقائية)
   const [shortages, setShortages] = useState<DailyShortage[]>(() => dbService.getDailyShortages());
@@ -327,9 +329,17 @@ export default function SafesView({
           'PRIVATE_SAFE',
           amt,
           currentUser?.name || 'أدمن النظام',
-          privWithdrawNotes || 'سحب إداري من الخزنة الخاصة'
+          privWithdrawNotes || 'سحب إداري خارجي من الخزنة الخاصة',
+          {
+            recordAsExpense,
+            expenseCategory: expenseCategory || 'مصروفات الخزنة الخاصة'
+          }
         );
-        onShowSuccessAlert(`تم سحب ${amt.toLocaleString('ar-EG')} ج.م من الخزنة الخاصة بنجاح ✅`);
+        onShowSuccessAlert(
+          recordAsExpense
+            ? `تم سحب ${amt.toLocaleString('ar-EG')} ج.م من الخزنة الخاصة وتسجيله تلقائياً في صفحة المصروفات العامة بنجاح ✅`
+            : `تم سحب ${amt.toLocaleString('ar-EG')} ج.م من الخزنة الخاصة بنجاح ✅`
+        );
       }
       setPrivWithdrawAmount('');
       setPrivWithdrawNotes('');
@@ -1289,6 +1299,35 @@ export default function SafesView({
                   />
                 </div>
               </div>
+
+              {privWithdrawMode === 'EXTERNAL' && (
+                <div className="bg-black/40 border border-red-500/30 rounded-2xl p-3.5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-gray-200 flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={recordAsExpense}
+                        onChange={(e) => setRecordAsExpense(e.target.checked)}
+                        className="w-4 h-4 accent-red-500 cursor-pointer"
+                      />
+                      <span>تسجيل هذا السحب كمصروف عام تلقائياً في قسم المصروفات (Expenses)</span>
+                    </label>
+                  </div>
+
+                  {recordAsExpense && (
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-400 mb-1">تصنيف المصروف في صفحة المصروفات</label>
+                      <input
+                        type="text"
+                        value={expenseCategory}
+                        onChange={(e) => setExpenseCategory(e.target.value)}
+                        placeholder="مثال: مصروفات إدارية، صيانة، إيجار..."
+                        className="w-full bg-luxury-bg border border-gray-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-red-500 text-right font-medium"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-bold text-amber-300 mb-1.5">
