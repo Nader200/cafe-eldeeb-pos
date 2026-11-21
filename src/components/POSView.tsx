@@ -45,7 +45,8 @@ import {
   Eye,
   FileText,
   Download,
-  Coffee
+  Coffee,
+  ChevronDown
 } from 'lucide-react';
 import { dbService, safeStorage, getItemCategoryIcon } from '../dbService';
 const localStorage = safeStorage;
@@ -164,6 +165,8 @@ export default function POSView({
     window.dispatchEvent(new CustomEvent('pos_cart_updated', { detail: { hasItems, count: cart.length } }));
   }, [cart]);
   const [selectedCustomer, setSelectedCustomer] = useState<string>(() => initialSavedDraft?.selectedCustomer || 'c_general'); // default general customer
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [discount, setDiscount] = useState<number>(() => initialSavedDraft?.discount || 0);
   const [taxPercentage, setTaxPercentage] = useState<number>(() => {
     if (initialSavedDraft && typeof initialSavedDraft.taxPercentage === 'number') {
@@ -1704,27 +1707,83 @@ export default function POSView({
               </span>
             </div>
 
-            {/* Quick Customer Selection Bar */}
-            <div className="flex items-center gap-1.5">
+            {/* Quick Customer Search & Selection Bar */}
+            <div className="flex items-center gap-1.5 relative">
               <div className="flex-1 relative">
-                <select
-                  id="customer-select"
-                  value={selectedCustomer}
-                  onChange={(e) => {
-                    const nextId = e.target.value;
-                    setSelectedCustomer(nextId);
-                    setPayPreviousCredit(false);
-                    const nextCust = customers.find(c => c.id === nextId);
-                    setPreviousCreditPayAmount(nextCust && nextCust.id !== 'c_general' ? Math.max(0, nextCust.current_balance || 0) : 0);
-                  }}
-                  className="w-full bg-luxury-bg border border-gray-900 text-gray-200 text-[11px] py-1.5 pl-3 pr-8 rounded-xl focus:outline-none focus:border-gold-600 text-right font-medium cursor-pointer"
+                <div
+                  onClick={() => setShowCustomerDropdown(!showCustomerDropdown)}
+                  className="w-full bg-luxury-bg border border-gray-900 text-gray-200 text-[11px] py-1.5 px-3 rounded-xl flex items-center justify-between cursor-pointer hover:border-gold-600 transition-all select-none"
                 >
-                  {customers.map(c => (
-                    <option key={c.id} value={c.id}>
-                      👤 {c.full_name} {c.id !== 'c_general' ? `(رصيد: ${c.wallet_balance} | مديونية: ${c.current_balance} ${settings.currency})` : ''}
-                    </option>
-                  ))}
-                </select>
+                  <span className="truncate">
+                    {(() => {
+                      const selCust = customers.find(c => c.id === selectedCustomer);
+                      if (!selCust || selCust.id === 'c_general') return '👤 عميل عام (زبون العابرين)';
+                      return `👤 ${selCust.full_name} (رصيد: ${selCust.wallet_balance || 0} | مديونية: ${selCust.current_balance || 0} ${settings.currency})`;
+                    })()}
+                  </span>
+                  <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0 mr-1" />
+                </div>
+
+                {showCustomerDropdown && (
+                  <div className="absolute top-full right-0 left-0 mt-1 bg-luxury-card border border-luxury-border rounded-xl shadow-2xl z-50 p-2 space-y-1.5 max-h-60 overflow-y-auto" dir="rtl">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        autoFocus
+                        placeholder="ابحث بالاسم أو رقم الهاتف..."
+                        value={customerSearchQuery}
+                        onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                        className="w-full bg-luxury-bg border border-gray-900 text-white rounded-lg py-1.5 pr-8 pl-3 text-[11px] focus:outline-none focus:border-gold-600 text-right"
+                      />
+                      <Search className="w-3.5 h-3.5 text-gray-500 absolute right-2.5 top-2.5" />
+                    </div>
+
+                    <div className="space-y-1 mt-1">
+                      <div
+                        onClick={() => {
+                          setSelectedCustomer('c_general');
+                          setPayPreviousCredit(false);
+                          setPreviousCreditPayAmount(0);
+                          setShowCustomerDropdown(false);
+                          setCustomerSearchQuery('');
+                        }}
+                        className={`p-2 rounded-lg text-[11px] cursor-pointer transition-all text-right ${
+                          selectedCustomer === 'c_general' ? 'bg-gold-600/20 text-gold-400 font-bold border border-gold-600/30' : 'hover:bg-luxury-bg text-gray-300'
+                        }`}
+                      >
+                        👤 عميل عام (زبون العابرين)
+                      </div>
+
+                      {customers
+                        .filter(c => 
+                          c.id !== 'c_general' && (
+                            c.full_name.toLowerCase().includes(customerSearchQuery.toLowerCase()) ||
+                            (c.phone && c.phone.includes(customerSearchQuery))
+                          )
+                        )
+                        .map(c => (
+                          <div
+                            key={c.id}
+                            onClick={() => {
+                              setSelectedCustomer(c.id);
+                              setPayPreviousCredit(false);
+                              setPreviousCreditPayAmount(Math.max(0, c.current_balance || 0));
+                              setShowCustomerDropdown(false);
+                              setCustomerSearchQuery('');
+                            }}
+                            className={`p-2 rounded-lg text-[11px] cursor-pointer transition-all text-right flex flex-col gap-0.5 ${
+                              selectedCustomer === c.id ? 'bg-gold-600/20 text-gold-400 font-bold border border-gold-600/30' : 'hover:bg-luxury-bg text-gray-300'
+                            }`}
+                          >
+                            <span className="font-bold text-white">👤 {c.full_name}</span>
+                            <span className="text-[9px] text-gray-400 font-mono">
+                              رصيد: {c.wallet_balance || 0} ج.م | مديونية: {c.current_balance || 0} ج.م {c.phone ? `| ${c.phone}` : ''}
+                            </span>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
               </div>
               
               <button
