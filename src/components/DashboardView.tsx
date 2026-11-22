@@ -359,17 +359,19 @@ export default function DashboardView({
       return invTime >= shiftStart;
     });
 
+    const relevantInvoiceIds = new Set(relevantInvoices.map(inv => inv.id));
+    const allInvoiceItems = dbService.getInvoiceItems();
+    const shiftItems = allInvoiceItems.filter(item => item && relevantInvoiceIds.has(item.invoice_id));
+
     const salesMap: Record<string, number> = {};
-    relevantInvoices.forEach(inv => {
-      (inv.items || []).forEach(item => {
-        const name = item.product_name || item.name || 'صنف';
-        const qty = item.quantity || 1;
-        salesMap[name] = (salesMap[name] || 0) + qty;
-      });
+    shiftItems.forEach(item => {
+      const name = item.product_name_ar || 'صنف';
+      const qty = item.quantity || 1;
+      salesMap[name] = (salesMap[name] || 0) + qty;
     });
 
     return Object.entries(salesMap).map(([name, count]) => ({ name, count }));
-  }, [invoices, activeShift, todayStr]);
+  }, [invoices, activeShift, todayStr, tick]);
   // 4. Smart Announcement Bar & Stats Ticker sliding state
   const [slideIndex, setSlideIndex] = useState(0);
   const tickerSlides = useMemo(() => {
