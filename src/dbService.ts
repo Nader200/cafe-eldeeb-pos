@@ -9947,6 +9947,89 @@ export const dbService = {
       }
     }
     return { isDuplicate: false };
+  },
+
+  undoCustomerTimelineItem: (
+    timelineId: string,
+    customerId: string,
+    operator = 'أدمن النظام'
+  ): { success: boolean; message: string } => {
+    const customers = dbService.getCustomers();
+    const custIdx = customers.findIndex(c => c.id === customerId);
+    if (custIdx === -1) return { success: false, message: 'العميل غير موجود' };
+
+    // 1. Credit Payment
+    if (timelineId.startsWith('timeline_pay_')) {
+      const paymentId = timelineId.replace('timeline_pay_', '');
+      const payments = getLocal<CreditPayment[]>(KEYS.CREDIT_PAYMENTS, []);
+      const payIdx = payments.findIndex(p => p.id === paymentId);
+      if (payIdx === -1) return { success: false, message: 'عملية السداد غير موجودة' };
+
+      const payment = payments[payIdx];
+      const refundAmount = payment.amount || 0;
+
+      // Revert customer balance: add back to current_balance
+      customers[custIdx].current_balance = Math.round(((customers[custIdx].current_balance || 0) + refundAmount) * 100) / 100;
+      setLocal(KEYS.CUSTOMERS, customers);
+
+      // Remove payment record
+      payments.splice(payIdx, 1);
+      setLocal(KEYS.CREDIT_PAYMENTS, payments);
+
+      // Remove credit transaction
+      const creditTxs = getLocal<CustomerCreditTransaction[]>(KEYS.CREDIT_TRANSACTIONS, []);
+      const filteredTxs = creditTxs.filter(tx => !(tx.customer_id === customerId && tx.transaction_type === 'PAYMENT' && Math.abs(tx.amount - refundAmount) < 0.01));
+      setLocal(KEYS.CREDIT_TRANSACTIONS, filteredTxs);
+
+      // Revert cash drawer (subtract amount from active drawer cash_in)
+      const drawers = dbService.getCashDrawers();
+      const activeIdx = drawers.findIndex(d => d.closing_balance === null);
+      if (activeIdx > -1) {
+        drawers[activeIdx].cash_in = Math.max(0, Math.round(((drawers[activeIdx].cash_in || 0) - refundAmount) * 100) / 100);
+        setLocal(KEYS.CASH_DRAWERS, drawers);
+      }
+
+      dbService.logCashMovement(0, refundAmount, `التراجع عن سداد دين نقدي للعميل: ${customers[custIdx].full_name} بمبلغ ${refundAmount} ج.م`, 'CASH_ADJUSTMENT_SUB', operator, 'تراجع عن حركة سداد');
+      dbService.logAuditAction('UNDO_CREDIT_PAYMENT', `التراجع عن سداد دين نقدي بقيمة ${refundAmount} ج.م للعميل ${customers[custIdx].full_name} بواسطة ${operator}`, operator);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('shift_updated'));
+        window.dispatchEvent(new CustomEvent('customer_credit_updated'));
+        window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+      }
+
+      return { success: true, message: 'تم التراجع عن حركة السداد وإعادة الحساب لأصله بنجاح ✅' };
+    }
+
+    // 2. Admin Debt Correction / Adjustment
+    if (timelineId.startsWith('timeline_ctx_corr_')) {
+      const txId = timelineId.replace('timeline_ctx_corr_', '');
+      const creditTxs = getLocal<CustomerCreditTransaction[]>(KEYS.CREDIT_TRANSACTIONS, []);
+      const txIdx = creditTxs.findIndex(tx => tx.id === txId);
+      if (txIdx === -1) return { success: false, message: 'حركة التصحيح غير موجودة في السجل' };
+
+      const tx = creditTxs[txIdx];
+      const delta = tx.new_balance - tx.previous_balance;
+
+      // Revert customer balance: reverse delta
+      customers[custIdx].current_balance = Math.max(0, Math.round(((customers[custIdx].current_balance || 0) - delta) * 100) / 100);
+      setLocal(KEYS.CUSTOMERS, customers);
+
+      // Remove transaction
+      creditTxs.splice(txIdx, 1);
+      setLocal(KEYS.CREDIT_TRANSACTIONS, creditTxs);
+
+      dbService.logAuditAction('UNDO_DEBT_CORRECTION', `التراجع عن تعديل وتصحيح المديونية بقيمة ${delta} ج.م للعميل ${customers[custIdx].full_name} بواسطة ${operator}`, operator);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('customer_credit_updated'));
+        window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
+      }
+
+      return { success: true, message: 'تم التراجع عن تعديل المديونية وإعادة الحساب لأصله بنجاح ✅' };
+    }
+
+    return { success: false, message: 'لا يمكن التراجع عن هذه الحركة مباشرة.' };
   }
 };
 

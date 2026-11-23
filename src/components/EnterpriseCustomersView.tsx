@@ -1337,6 +1337,24 @@ export default function EnterpriseCustomersView({
     }
   };
 
+  const handleUndoTimelineItem = (evtId: string) => {
+    if (!isAdmin || !selectedCustomer) return;
+    const confirmUndo = window.confirm('⚠️ هل أنت متأكد من رغبتك في التراجع عن هذه الحركة وإلغاء تأثيرها المالي على حساب العميل ودرج النقدية وإعادة الحساب لأصله؟');
+    if (!confirmUndo) return;
+
+    try {
+      const res = dbService.undoCustomerTimelineItem(evtId, selectedCustomer.id, currentUser?.name || 'أدمن النظام');
+      if (res.success) {
+        onShowSuccessAlert(res.message);
+        loadData();
+      } else {
+        onShowWarningAlert(res.message);
+      }
+    } catch (err: any) {
+      onShowWarningAlert(err?.message || 'حدث خطأ أثناء محاولة التراجع عن الحركة.');
+    }
+  };
+
   // Save Customer Statement as PNG Image locally
   const handleDownloadStatementImage = async () => {
     if (!selectedCustomer || statementBusy) return;
@@ -2135,6 +2153,19 @@ export default function EnterpriseCustomersView({
                               <p className="text-[10px] text-gray-400 leading-relaxed">
                                 {evt.description}
                               </p>
+
+                              {isAdmin && (evt.type === 'CREDIT_PAYMENT' || evt.id.startsWith('timeline_ctx_corr_')) && (
+                                <div className="mt-1 pt-1 border-t border-luxury-border flex justify-start">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUndoTimelineItem(evt.id)}
+                                    className="px-2 py-0.5 bg-red-950/40 hover:bg-red-600/60 border border-red-500/40 text-red-300 hover:text-white rounded-lg text-[9px] font-black transition-all cursor-pointer flex items-center gap-1 active:scale-95"
+                                    title="التراجع عن هذه الحركة وإلغاء تأثيرها وإعادة الحساب لأصله"
+                                  >
+                                    <span>↩️ تراجع عن الحركة</span>
+                                  </button>
+                                </div>
+                              )}
 
                             </div>
                           );
