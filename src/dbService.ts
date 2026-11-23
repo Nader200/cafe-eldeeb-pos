@@ -9916,5 +9916,37 @@ export const dbService = {
       newShift,
       handover
     };
+  },
+
+  checkDuplicateInvoice: (
+    cartItems: { product: Product; quantity: number }[],
+    customerId: string | null,
+    tableNumber?: string,
+    total?: number
+  ): { isDuplicate: boolean; previousInvoiceNumber?: string; timeAgoSeconds?: number } => {
+    const invoices = dbService.getInvoices(true);
+    const now = Date.now();
+    const twoMinutesMs = 2 * 60 * 1000;
+
+    for (const inv of invoices) {
+      if (inv.invoice_status === 'CANCELLED') continue;
+      const invTime = new Date(inv.created_at || inv.invoice_date).getTime();
+      if (now - invTime > twoMinutesMs) continue;
+
+      const sameCustomer = customerId && customerId !== 'c_general' && inv.customer_id === customerId;
+      const sameTable = tableNumber && tableNumber.trim().length > 0 && inv.table_number === tableNumber;
+      const sameTotal = total !== undefined && Math.abs((inv.total || 0) - total) < 0.01;
+
+      if ((sameCustomer || sameTable) && sameTotal) {
+        const timeAgoSeconds = Math.round((now - invTime) / 1000);
+        return {
+          isDuplicate: true,
+          previousInvoiceNumber: inv.invoice_number,
+          timeAgoSeconds,
+        };
+      }
+    }
+    return { isDuplicate: false };
   }
 };
+

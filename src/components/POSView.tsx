@@ -1080,6 +1080,13 @@ export default function POSView({
       onShowWarningAlert('يرجى إضافة سلع أولاً لتسجيل عملية الدفع السريع!');
       return;
     }
+    const dupCheck = dbService.checkDuplicateInvoice(cart, selectedCustomer === 'c_general' ? null : selectedCustomer, tableNumber, cartTotals.total);
+    if (dupCheck.isDuplicate) {
+      const proceed = window.confirm(
+        `⚠️ تنبيه تكرار فاتورة (منعاً للعجز أو الزيادة بالحسابات):\nوجدنا فاتورة سابقة برقم #${dupCheck.previousInvoiceNumber} بنفس القيمة الإجمالية ولنفس الطاولة/العميل قبل ${dupCheck.timeAgoSeconds} ثانية!\n\nهل أنت متأكد تماماً من رغبتك في إصدار هذه الفاتورة الجديدة؟`
+      );
+      if (!proceed) return;
+    }
     const oldCredit = (selectedCustomerObj && selectedCustomerObj.id !== 'c_general')
       ? Math.max(0, selectedCustomerObj.current_balance || 0)
       : 0;
@@ -1241,6 +1248,13 @@ export default function POSView({
   };
 
   const completePaymentDirectly = () => {
+    const dupCheck = dbService.checkDuplicateInvoice(cart, selectedCustomer === 'c_general' ? null : selectedCustomer, tableNumber, cartTotals.total);
+    if (dupCheck.isDuplicate) {
+      const proceed = window.confirm(
+        `⚠️ تنبيه تكرار فاتورة (منعاً للعجز أو الزيادة بالحسابات):\nوجدنا فاتورة سابقة برقم #${dupCheck.previousInvoiceNumber} بنفس القيمة الإجمالية ولنفس الطاولة/العميل قبل ${dupCheck.timeAgoSeconds} ثانية!\n\nهل أنت متأكد تماماً من رغبتك في إصدار هذه الفاتورة الجديدة؟`
+      );
+      if (!proceed) return;
+    }
     const walletAmt = useWallet ? walletDeductionAmount : 0;
     const netInvoiceDue = Math.max(0, cartTotals.total - walletAmt);
     const enteredCash = Math.max(0, parseFloat(cashReceived) || 0);
