@@ -10,6 +10,7 @@ import {
 import { getEldeebLogoDataUrl } from '../lib/logoSvg';
 import { getPaymentMethodLabel } from './paymentUtils';
 import { getCleanInvoiceNumber } from './pdfInvoiceGenerator';
+import { dbService } from '../dbService';
 
 export interface ShareInvoiceImageOptions {
   invoice: Invoice;
@@ -1176,6 +1177,24 @@ export function buildCustomerStatementData({
   creditTransactions?: CustomerCreditTransaction[];
 }): BuiltCustomerStatementData {
   const endingBalance = Number(customer.current_balance) || 0;
+
+  const allInvoiceItems = dbService.getInvoiceItems();
+  const itemsByInvoiceId = new Map<string, InvoiceItem[]>();
+  allInvoiceItems.forEach(it => {
+    if (it && it.invoice_id) {
+      const list = itemsByInvoiceId.get(it.invoice_id) || [];
+      list.push(it);
+      itemsByInvoiceId.set(it.invoice_id, list);
+    }
+  });
+
+  const getInvoiceItemsSummary = (invoiceId?: string): string => {
+    if (!invoiceId) return '';
+    const items = itemsByInvoiceId.get(invoiceId) || [];
+    if (items.length === 0) return '';
+    return ` (${items.map(it => `${it.quantity}×${it.product_name_ar}`).join('، ')})`;
+  };
+
   const custCreditTxs = (creditTransactions || [])
     .filter((tx) => tx.customer_id === customer.id)
     .sort((a, b) => new Date(a.created_at || a.date).getTime() - new Date(b.created_at || b.date).getTime());
@@ -1191,7 +1210,8 @@ export function buildCustomerStatementData({
 
       if (tx.transaction_type === 'INVOICE') {
         debit = Number(tx.amount) || 0;
-        desc = tx.notes || (tx.invoice_id ? `فاتورة مبيعات آجل` : 'مبيعات آجل');
+        const itemsSummary = getInvoiceItemsSummary(tx.invoice_id);
+        desc = tx.notes ? `${tx.notes}${itemsSummary}` : (tx.invoice_id ? `فاتورة مبيعات آجل${itemsSummary}` : `مبيعات آجل${itemsSummary}`);
       } else if (tx.transaction_type === 'PAYMENT') {
         credit = Number(tx.amount) || 0;
         desc = tx.notes || 'دفعة سداد نقدية';
@@ -1231,25 +1251,27 @@ export function buildCustomerStatementData({
     };
   }
 
-  // Fallback for customers without credit_transactions history
+  // Fallback for customers without credit_transactions history - include all customer invoices and items
   const custInvoices = (invoices || []).filter(
     (inv) =>
       inv.customer_id === customer.id &&
       inv.invoice_status !== 'CANCELLED' &&
       inv.invoice_status !== 'OPEN' &&
-      inv.invoice_status !== 'DRAFT' &&
-      (inv.payment_type === 'CREDIT' || inv.payment_type === 'SPLIT' || (inv.remaining_amount || 0) > 0)
+      inv.invoice_status !== 'DRAFT'
   );
   const custPayments = (creditPayments || []).filter((p) => p.customer_id === customer.id);
 
   const combined = [
-    ...custInvoices.map((inv) => ({
-      rawDate: inv.created_at || inv.invoice_date,
-      date: (inv.created_at || inv.invoice_date || '').substring(0, 10),
-      desc: `فاتورة مبيعات #${inv.invoice_number}`,
-      debit: inv.remaining_amount > 0 ? inv.remaining_amount : inv.total,
-      credit: 0,
-    })),
+    ...custInvoices.map((inv) => {
+      const itemsSummary = getInvoiceItemsSummary(inv.id);
+      return {
+        rawDate: inv.created_at || inv.invoice_date,
+        date: (inv.created_at || inv.invoice_date || '').substring(0, 10),
+        desc: `فاتورة مبيعات #${inv.invoice_number}${itemsSummary}`,
+        debit: inv.remaining_amount > 0 ? inv.remaining_amount : inv.total,
+        credit: 0,
+      };
+    }),
     ...custPayments.map((p) => ({
       rawDate: p.created_at || p.payment_date,
       date: (p.created_at || p.payment_date || '').substring(0, 10),
