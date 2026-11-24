@@ -1670,11 +1670,7 @@ export const dbService = {
           if (!it || !it.product_id) return;
           const pId = it.product_id;
           const cur = mapByProduct.get(pId);
-          if (cur) {
-            cur.quantity += (it.quantity || 1);
-            cur.total_price = (cur.unit_price * cur.quantity) - (cur.item_discount_amount || 0);
-            changed = true;
-          } else {
+          if (!cur || getInvTs(it) >= getInvTs(cur)) {
             mapByProduct.set(pId, { ...it });
           }
         });
@@ -1723,26 +1719,17 @@ export const dbService = {
     if (invoiceId) {
       items = items.filter(it => it && it.invoice_id === invoiceId);
 
-      // Group and sum quantities for items with the same product_id to prevent any item duplication or inflation
-      const mapByProduct = new Map<string, InvoiceItem>();
+      // Keep strictly the latest unique record per product_id without summing quantities
+      const latestMap = new Map<string, InvoiceItem>();
       items.forEach(it => {
         if (!it || !it.product_id) return;
         const pId = it.product_id;
-        const cur = mapByProduct.get(pId);
-        if (cur) {
-          cur.quantity += (it.quantity || 1);
-          cur.total_price = (cur.unit_price * cur.quantity) - (cur.item_discount_amount || 0);
-          if (getInvTs(it) > getInvTs(cur)) {
-            cur.updated_at = it.updated_at;
-            if (it.notes && !cur.notes?.includes(it.notes)) {
-              cur.notes = cur.notes ? `${cur.notes}, ${it.notes}` : it.notes;
-            }
-          }
-        } else {
-          mapByProduct.set(pId, { ...it });
+        const cur = latestMap.get(pId);
+        if (!cur || getInvTs(it) >= getInvTs(cur)) {
+          latestMap.set(pId, { ...it });
         }
       });
-      return Array.from(mapByProduct.values());
+      return Array.from(latestMap.values());
     }
 
     return items.filter(Boolean);
