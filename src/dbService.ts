@@ -2539,45 +2539,51 @@ export const dbService = {
       invoices.push(invoice);
     }
 
-    // Save items cleanly by completely removing old items for this invoice from BOTH main items and vault items
+    // Save items cleanly by preserving existing items if cart is empty during save/autosave
     const currentMainItems = getLocal<InvoiceItem[]>(KEYS.INVOICE_ITEMS, []);
     const currentVaultItems = getLocal<InvoiceItem[]>(KEYS.OPEN_INVOICE_ITEMS_VAULT, []);
+    const existingItemsForThisInvoice = [...currentMainItems, ...currentVaultItems].filter(item => item && item.invoice_id === invoiceId);
 
     const filteredMain = currentMainItems.filter(item => item && item.invoice_id !== invoiceId);
     const filteredVault = currentVaultItems.filter(item => item && item.invoice_id !== invoiceId);
 
-    const newItems: InvoiceItem[] = consolidatedCart.map((cartItem, idx) => {
-      const origPrice = cartItem.original_price ?? cartItem.product.selling_price;
-      const unitPrice = cartItem.custom_price !== undefined ? cartItem.custom_price : cartItem.product.selling_price;
-      const isPriceEdited = Boolean(
-        cartItem.is_price_edited ||
-        (cartItem.custom_price !== undefined && Math.abs(cartItem.custom_price - origPrice) > 0.001)
-      );
-      const itemTotalPrice = (unitPrice * cartItem.quantity) - (cartItem.item_discount_amount || 0);
-      return {
-        id: `item_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}`,
-        invoice_id: invoiceId,
-        product_id: cartItem.product.id,
-        quantity: cartItem.quantity,
-        unit_price: unitPrice,
-        cost_price: cartItem.product.cost_price,
-        total_price: itemTotalPrice,
-        product_name_ar: cartItem.product.name_ar,
-        notes: cartItem.notes || '',
-        created_at: dateStr,
-        updated_at: dateStr,
-        original_price: origPrice,
-        is_price_edited: isPriceEdited,
-        price_edit_reason: cartItem.price_edit_reason,
-        item_discount_type: cartItem.item_discount_type,
-        item_discount_value: cartItem.item_discount_value,
-        item_discount_amount: cartItem.item_discount_amount
-      };
-    });
+    let itemsToSave: InvoiceItem[] = [];
+    if (consolidatedCart.length === 0 && existingItemsForThisInvoice.length > 0 && existingInvIdx > -1) {
+      itemsToSave = existingItemsForThisInvoice;
+    } else {
+      itemsToSave = consolidatedCart.map((cartItem, idx) => {
+        const origPrice = cartItem.original_price ?? cartItem.product.selling_price;
+        const unitPrice = cartItem.custom_price !== undefined ? cartItem.custom_price : cartItem.product.selling_price;
+        const isPriceEdited = Boolean(
+          cartItem.is_price_edited ||
+          (cartItem.custom_price !== undefined && Math.abs(cartItem.custom_price - origPrice) > 0.001)
+        );
+        const itemTotalPrice = (unitPrice * cartItem.quantity) - (cartItem.item_discount_amount || 0);
+        return {
+          id: `item_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}`,
+          invoice_id: invoiceId,
+          product_id: cartItem.product.id,
+          quantity: cartItem.quantity,
+          unit_price: unitPrice,
+          cost_price: cartItem.product.cost_price,
+          total_price: itemTotalPrice,
+          product_name_ar: cartItem.product.name_ar,
+          notes: cartItem.notes || '',
+          created_at: dateStr,
+          updated_at: dateStr,
+          original_price: origPrice,
+          is_price_edited: isPriceEdited,
+          price_edit_reason: cartItem.price_edit_reason,
+          item_discount_type: cartItem.item_discount_type,
+          item_discount_value: cartItem.item_discount_value,
+          item_discount_amount: cartItem.item_discount_amount
+        };
+      });
+    }
 
     setLocal(KEYS.INVOICES, invoices);
-    const updatedMainItems = [...filteredMain, ...newItems];
-    const updatedVaultItems = [...filteredVault, ...newItems];
+    const updatedMainItems = [...filteredMain, ...itemsToSave];
+    const updatedVaultItems = [...filteredVault, ...itemsToSave];
 
     setLocal(KEYS.INVOICE_ITEMS, updatedMainItems);
     try {
@@ -2592,7 +2598,7 @@ export const dbService = {
       window.dispatchEvent(new CustomEvent('cafe_db_synced_remote'));
     }
 
-    return { invoice, items: newItems };
+    return { invoice, items: itemsToSave };
   },
 
   closeOpenInvoice: (
