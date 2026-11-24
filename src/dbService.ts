@@ -2551,8 +2551,17 @@ export const dbService = {
     const currentVaultItems = getLocal<InvoiceItem[]>(KEYS.OPEN_INVOICE_ITEMS_VAULT, []);
     const existingItemsForThisInvoice = [...currentMainItems, ...currentVaultItems].filter(item => item && item.invoice_id === invoiceId);
 
-    const filteredMain = currentMainItems.filter(item => item && item.invoice_id !== invoiceId);
-    const filteredVault = currentVaultItems.filter(item => item && item.invoice_id !== invoiceId);
+    const targetInvId = String(invoiceId || '').trim();
+    const filteredMain = currentMainItems.filter(item => {
+      if (!item) return false;
+      const iId = String(item.invoice_id || '').trim();
+      return iId !== targetInvId;
+    });
+    const filteredVault = currentVaultItems.filter(item => {
+      if (!item) return false;
+      const iId = String(item.invoice_id || '').trim();
+      return iId !== targetInvId;
+    });
 
     let itemsToSave: InvoiceItem[] = [];
     if (consolidatedCart.length === 0 && existingItemsForThisInvoice.length > 0 && existingInvIdx > -1) {
