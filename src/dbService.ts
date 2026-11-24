@@ -1654,6 +1654,58 @@ export const dbService = {
     setLocal(KEYS.INVOICES, updated);
     return true;
   },
+  repairOpenInvoices: (): void => {
+    try {
+      const invoices = getLocal<Invoice[]>(KEYS.INVOICES, []);
+      const allItems = getLocal<InvoiceItem[]>(KEYS.INVOICE_ITEMS, []);
+      let changed = false;
+
+      invoices.forEach(inv => {
+        if (!inv || !isOpenOrDraftStatus(inv.invoice_status)) return;
+        const invItems = allItems.filter(it => it && it.invoice_id === inv.id);
+        if (invItems.length === 0) return;
+
+        const mapByProduct = new Map<string, InvoiceItem>();
+        invItems.forEach(it => {
+          if (!it || !it.product_id) return;
+          const pId = it.product_id;
+          const cur = mapByProduct.get(pId);
+          if (cur) {
+            cur.quantity += (it.quantity || 1);
+            cur.total_price = (cur.unit_price * cur.quantity) - (cur.item_discount_amount || 0);
+            changed = true;
+          } else {
+            mapByProduct.set(pId, { ...it });
+          }
+        });
+
+        let sub = 0;
+        let totDisc = 0;
+        const consolidated = Array.from(mapByProduct.values());
+        consolidated.forEach(it => {
+          sub += (it.unit_price * it.quantity);
+          totDisc += (it.item_discount_amount || 0);
+        });
+
+        const netSub = Math.max(0, sub - totDisc);
+        const taxAmt = Math.round(netSub * ((inv.tax || 0) / Math.max(1, inv.subtotal || 1)));
+        const finalTot = netSub + taxAmt - (inv.discount > totDisc ? (inv.discount - totDisc) : 0);
+
+        if (Math.abs(inv.total - finalTot) > 1) {
+          inv.subtotal = sub;
+          inv.total = Math.max(0, finalTot);
+          inv.remaining_amount = inv.total;
+          changed = true;
+        }
+      });
+
+      if (changed) {
+        setLocal(KEYS.INVOICES, invoices);
+      }
+    } catch (e) {
+      console.error('Error in repairOpenInvoices:', e);
+    }
+  },
   getInvoiceItems: (invoiceId?: string): InvoiceItem[] => {
     const mainItems = getLocal<InvoiceItem[]>(KEYS.INVOICE_ITEMS, []);
     const vaultItems = getLocal<InvoiceItem[]>(KEYS.OPEN_INVOICE_ITEMS_VAULT, []);
@@ -1671,17 +1723,26 @@ export const dbService = {
     if (invoiceId) {
       items = items.filter(it => it && it.invoice_id === invoiceId);
 
-      // Keep strictly the latest record per product_id for this invoice without summing quantities
-      const latestMap = new Map<string, InvoiceItem>();
+      // Group and sum quantities for items with the same product_id to prevent any item duplication or inflation
+      const mapByProduct = new Map<string, InvoiceItem>();
       items.forEach(it => {
         if (!it || !it.product_id) return;
         const pId = it.product_id;
-        const cur = latestMap.get(pId);
-        if (!cur || getInvTs(it) >= getInvTs(cur)) {
-          latestMap.set(pId, { ...it });
+        const cur = mapByProduct.get(pId);
+        if (cur) {
+          cur.quantity += (it.quantity || 1);
+          cur.total_price = (cur.unit_price * cur.quantity) - (cur.item_discount_amount || 0);
+          if (getInvTs(it) > getInvTs(cur)) {
+            cur.updated_at = it.updated_at;
+            if (it.notes && !cur.notes?.includes(it.notes)) {
+              cur.notes = cur.notes ? `${cur.notes}, ${it.notes}` : it.notes;
+            }
+          }
+        } else {
+          mapByProduct.set(pId, { ...it });
         }
       });
-      return Array.from(latestMap.values());
+      return Array.from(mapByProduct.values());
     }
 
     return items.filter(Boolean);

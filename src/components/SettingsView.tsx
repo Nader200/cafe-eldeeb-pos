@@ -102,7 +102,7 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
   const { currentUser } = useAuth();
 
   // Tab Control
-  const [activeTab, setActiveTab] = useState<'general' | 'backup' | 'brand' | 'accounting' | 'payments' | 'partners' | 'updates' | 'manual'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'backup' | 'brand' | 'accounting' | 'payments' | 'partners' | 'updates' | 'manual' | 'commercial'>('general');
 
   // Version & Updates Management State
   const [autoUpdateEnabled, setAutoUpdateEnabled] = useState<boolean>(true);
@@ -912,6 +912,18 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
           }`}
         >
           📖 دليل المستخدم (Manual)
+        </button>
+        <button
+          id="tab-settings-commercial"
+          type="button"
+          onClick={() => setActiveTab('commercial')}
+          className={`flex-1 py-3 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+            activeTab === 'commercial'
+              ? 'bg-gold-600 text-black font-extrabold shadow-md'
+              : 'text-gray-400 hover:text-white hover:bg-gray-900/60'
+          }`}
+        >
+          💼 النسخ التجاري (White-Label)
         </button>
       </div>
 
@@ -2525,6 +2537,74 @@ export default function SettingsView({ onShowSuccessAlert, onShowWarningAlert, o
       {/* 9. User Manual Tab */}
       {activeTab === 'manual' && (
         <UserManualView currentUser={currentUser} />
+      )}
+
+      {/* 10. Commercial White-Label Guide & Toolkit Tab */}
+      {activeTab === 'commercial' && (
+        <div className="bg-luxury-card border border-luxury-border rounded-3xl p-6 shadow-xl space-y-6">
+          <div className="border-b border-gray-900 pb-4">
+            <h3 className="text-base font-black text-white flex items-center gap-2.5">
+              <Sparkles className="w-5 h-5 text-gold-500 animate-pulse" />
+              <span>دليل إنتاج وتوزيع النسخ التجارية (White-Label) لأصحاب الكافيهات</span>
+            </h3>
+            <p className="text-xs text-gray-400 mt-1">
+              خطوات عملية متكاملة لعمل نسخة تجارية منفصلة لبيعها أو تسليمها لكافيه آخر دون المساس بنسختك الحالية.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {/* Step 1 */}
+            <div className="bg-black/40 border border-gray-900 rounded-2xl p-5 space-y-3">
+              <div className="w-8 h-8 rounded-xl bg-gold-600/20 border border-gold-500/40 flex items-center justify-center text-gold-400 font-black text-sm">
+                ١
+              </div>
+              <h4 className="text-sm font-extrabold text-white">فصل التطبيق وإنشاء مشروع مستقل للعميل</h4>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                لكل كافيه جديد، يتم عمل نسخة مجلد/مستودع جديدة من الشيفرة المصدرية (Source Code)، بحيث يكون لكل عميل نظام مستقل تماماً وقاعدة بيانات خاصة به على متصفحه أو مشروعه السحابي (Firebase/Local) لضمان الأمان التام وعدم تداخل البيانات.
+              </p>
+            </div>
+
+            {/* Step 2 */}
+            <div className="bg-black/40 border border-gray-900 rounded-2xl p-5 space-y-3">
+              <div className="w-8 h-8 rounded-xl bg-gold-600/20 border border-gold-500/40 flex items-center justify-center text-gold-400 font-black text-sm">
+                ٢
+              </div>
+              <h4 className="text-sm font-extrabold text-white">تخصيص الهوية التجارية وبيانات الكافيه</h4>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                من خلال تبويب <strong>"الإعدادات العامة والأمان"</strong> في نسخة العميل الجديد، قم بتعديل: اسم الكافيه، رقم الهاتف، العنوان، وشعار الفاتورة ورسائل الفوتر بما يتطابق مع هوية الكافيه الجديد.
+              </p>
+            </div>
+
+            {/* Step 3 */}
+            <div className="bg-black/40 border border-gray-900 rounded-2xl p-5 space-y-3">
+              <div className="w-8 h-8 rounded-xl bg-gold-600/20 border border-gold-500/40 flex items-center justify-center text-gold-400 font-black text-sm">
+                ٣
+              </div>
+              <h4 className="text-sm font-extrabold text-white">تفريغ بيانات التجربة وبدء نسخة نظيفة</h4>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                قبل تسليم التطبيق للعميل، يمكنك استخدام زر <strong>"إعادة ضبط المصنع الشاملة"</strong> من تبويب الإعدادات العامة لحذف الفواتير التجريبية وفتح درج نقدية افتتاحي جديد باسم الكافيه الجديد.
+              </p>
+            </div>
+
+            {/* Step 4 */}
+            <div className="bg-black/40 border border-gray-900 rounded-2xl p-5 space-y-3">
+              <div className="w-8 h-8 rounded-xl bg-gold-600/20 border border-gold-500/40 flex items-center justify-center text-gold-400 font-black text-sm">
+                ٤
+              </div>
+              <h4 className="text-sm font-extrabold text-white">البناء والنشر (Build & Deploy / APK)</h4>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                قم ببناء نسخة الإنتاج عبر تنفيذ أمر <code className="text-gold-400 bg-black/60 px-1.5 py-0.5 rounded font-mono">npm run build</code> ورفعها على استضافة ويب مخصصة للعميل، أو تحويلها إلى تطبيق أندرويد (APK) باستخدام أداة Capacitor لتثبيتها على تابلت الك্যাশير.
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-amber-950/20 border border-amber-900/40 rounded-2xl p-4 flex items-center gap-3">
+            <ShieldCheck className="w-6 h-6 text-amber-500 shrink-0" />
+            <p className="text-xs text-amber-200/90 leading-relaxed">
+              <strong>ملاحظة هامة:</strong> نسختك الحالية التي تعمل بها في الكافيه لن يتأثر أي شيء فيها، حيث أن كل متصفح أو جهاز يحتفظ بقاعدة بيانات محلية مستقلة (<code className="text-gold-400 font-mono">localStorage / IndexedDB</code>) ما لم تقم بمزامنتها على نفس مشروع Firebase السحابي الخاص بالعميل الآخر.
+            </p>
+          </div>
+        </div>
       )}
 
       {/* Update Modal */}
