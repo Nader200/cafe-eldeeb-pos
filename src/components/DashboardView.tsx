@@ -393,38 +393,25 @@ export default function DashboardView({
     }));
   }, [invoices, activeShift, todayStr, tick]);
 
-  // Shift credit sales total calculated precisely as Total Shift Sales minus Cash Sales
+  // Shift credit sales total: only completed/closed credit invoices in this shift
   const shiftCreditSalesTotal = useMemo(() => {
     const shiftStart = activeShift ? new Date(activeShift.created_at).getTime() : new Date(todayStr).getTime();
-    const relevantInvoices = invoices.filter(inv => {
-      if (inv.invoice_status === 'CANCELLED') return false;
+    
+    const closedCreditInvoices = invoices.filter(inv => {
+      if (!inv) return false;
+      const st = String(inv.invoice_status || '').toUpperCase().trim();
+      if (st === 'CANCELLED' || st === 'OPEN' || st === 'DRAFT') return false;
+
       const invTime = new Date(inv.invoice_date).getTime();
-      return invTime >= shiftStart;
-    });
+      if (invTime < shiftStart) return false;
 
-    const openInvoicesList = dbService.getOpenInvoices();
-    const allShiftInvoices = [...relevantInvoices, ...openInvoicesList];
-    const uniqueMap = new Map<string, any>();
-    allShiftInvoices.forEach(inv => {
-      if (inv && inv.id) uniqueMap.set(inv.id, inv);
-    });
-    const shiftInvs = Array.from(uniqueMap.values());
-
-    let totalSales = 0;
-    let cashSales = 0;
-
-    shiftInvs.forEach(inv => {
-      const tot = inv.total || 0;
-      totalSales += tot;
       const isCredit = inv.payment_type === 'CREDIT' || 
                        String(inv.payment_method || '').toUpperCase() === 'CREDIT' ||
                        (inv.remaining_amount && inv.remaining_amount > 0 && inv.paid_amount === 0);
-      if (!isCredit) {
-        cashSales += tot;
-      }
+      return isCredit;
     });
 
-    return Math.max(0, totalSales - cashSales);
+    return closedCreditInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
   }, [invoices, activeShift, todayStr, tick]);
   // 4. Smart Announcement Bar & Stats Ticker sliding state
   const [slideIndex, setSlideIndex] = useState(0);
