@@ -350,7 +350,7 @@ export default function DashboardView({
     };
   }, [invoices, expenses, customers, todayStr]);
 
-  // Live shift product sales counter
+  // Live shift product sales & credit/open counter
   const shiftProductSales = useMemo(() => {
     const shiftStart = activeShift ? new Date(activeShift.created_at).getTime() : new Date(todayStr).getTime();
     const relevantInvoices = invoices.filter(inv => {
@@ -360,6 +360,15 @@ export default function DashboardView({
     });
 
     const relevantInvoiceIds = new Set(relevantInvoices.map(inv => inv.id));
+    
+    // Also include all active open invoices (tables / open orders) so credit & open items are shown
+    const openInvoicesList = dbService.getOpenInvoices();
+    openInvoicesList.forEach(inv => {
+      if (inv && inv.id) {
+        relevantInvoiceIds.add(inv.id);
+      }
+    });
+
     const allInvoiceItems = dbService.getInvoiceItems();
     const shiftItems = allInvoiceItems.filter(item => item && relevantInvoiceIds.has(item.invoice_id));
 
@@ -917,7 +926,7 @@ export default function DashboardView({
       <div className="w-full max-w-lg mx-auto bg-gradient-to-r from-[#0a0d0a] via-[#0f0e0a] to-[#0a0d0a] border border-[#D4AF37]/35 rounded-xl p-2.5 flex items-center gap-3 overflow-hidden shadow-lg select-none">
         <div className="flex items-center gap-1.5 px-2.5 py-1 bg-black border border-[#D4AF37]/50 rounded-lg text-gold-400 text-[11px] font-black z-10 shrink-0">
           <Coffee className="w-3.5 h-3.5 text-gold-500 animate-bounce" />
-          <span>مبيعات الوردية ☕</span>
+          <span>أصناف الوردية (مبيعات + آجل) ☕</span>
         </div>
         <div className="relative flex-1 overflow-hidden h-6 flex items-center">
           <div className="absolute whitespace-nowrap animate-marquee flex items-center gap-6 text-[11px] font-black text-gray-200">
