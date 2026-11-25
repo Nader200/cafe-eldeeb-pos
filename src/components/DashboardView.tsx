@@ -372,14 +372,25 @@ export default function DashboardView({
     const allInvoiceItems = dbService.getInvoiceItems();
     const shiftItems = allInvoiceItems.filter(item => item && relevantInvoiceIds.has(item.invoice_id));
 
-    const salesMap: Record<string, number> = {};
+    const salesMap: Record<string, { count: number; totalRevenue: number }> = {};
     shiftItems.forEach(item => {
       const name = item.product_name_ar || 'صنف';
       const qty = item.quantity || 1;
-      salesMap[name] = (salesMap[name] || 0) + qty;
+      const price = item.unit_price || 0;
+      const rev = item.total_price !== undefined ? item.total_price : (price * qty);
+
+      if (!salesMap[name]) {
+        salesMap[name] = { count: 0, totalRevenue: 0 };
+      }
+      salesMap[name].count += qty;
+      salesMap[name].totalRevenue += rev;
     });
 
-    return Object.entries(salesMap).map(([name, count]) => ({ name, count }));
+    return Object.entries(salesMap).map(([name, data]) => ({
+      name,
+      count: data.count,
+      totalRevenue: Math.round(data.totalRevenue * 100) / 100
+    }));
   }, [invoices, activeShift, todayStr, tick]);
   // 4. Smart Announcement Bar & Stats Ticker sliding state
   const [slideIndex, setSlideIndex] = useState(0);
@@ -937,6 +948,7 @@ export default function DashboardView({
                 <span key={index} className="inline-flex items-center gap-2 bg-[#14120a] border border-[#D4AF37]/25 px-2.5 py-0.5 rounded-lg shadow-sm">
                   <span className="text-[#D4AF37] font-bold">{item.name}:</span>
                   <span className="text-emerald-400 font-mono font-black text-xs">+{item.count}</span>
+                  <span className="text-gold-300/80 text-[10px] font-mono">({item.totalRevenue.toLocaleString()} ج.م)</span>
                 </span>
               ))
             )}
