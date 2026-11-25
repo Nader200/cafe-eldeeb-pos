@@ -393,27 +393,36 @@ export default function DashboardView({
     }));
   }, [invoices, activeShift, todayStr, tick]);
 
-  // Shift net credit sales total starting from active shift start time
+  // Shift credit sales total calculated as Total Shift Sales minus Cash Sales
   const shiftCreditSalesTotal = useMemo(() => {
     const shiftStart = activeShift ? new Date(activeShift.created_at).getTime() : new Date(todayStr).getTime();
     const relevantInvoices = invoices.filter(inv => {
       if (inv.invoice_status === 'CANCELLED') return false;
       const invTime = new Date(inv.invoice_date).getTime();
-      if (invTime < shiftStart) return false;
+      return invTime >= shiftStart;
+    });
+
+    const openInvoicesList = dbService.getOpenInvoices();
+    const allShiftInvoices = [...relevantInvoices, ...openInvoicesList];
+    const uniqueMap = new Map<string, any>();
+    allShiftInvoices.forEach(inv => {
+      if (inv && inv.id) uniqueMap.set(inv.id, inv);
+    });
+    const shiftInvs = Array.from(uniqueMap.values());
+
+    let totalSales = 0;
+    let cashSales = 0;
+
+    shiftInvs.forEach(inv => {
+      const tot = inv.total || 0;
+      totalSales += tot;
       const isCredit = inv.payment_type === 'CREDIT' || String(inv.payment_method || '').toUpperCase() === 'CREDIT';
-      return isCredit;
+      if (!isCredit) {
+        cashSales += tot;
+      }
     });
-    const totalCreditCreated = relevantInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
 
-    const creditPayments = dbService.getCreditPayments();
-    const shiftPayments = creditPayments.filter(cp => {
-      if (!cp || !cp.created_at) return false;
-      const pTime = new Date(cp.created_at).getTime();
-      return pTime >= shiftStart;
-    });
-    const totalPaymentsReceived = shiftPayments.reduce((sum, cp) => sum + (cp.amount || 0), 0);
-
-    return Math.max(0, totalCreditCreated - totalPaymentsReceived);
+    return Math.max(0, totalSales - cashSales);
   }, [invoices, activeShift, todayStr, tick]);
   // 4. Smart Announcement Bar & Stats Ticker sliding state
   const [slideIndex, setSlideIndex] = useState(0);
