@@ -393,18 +393,18 @@ export default function DashboardView({
     }));
   }, [invoices, activeShift, todayStr, tick]);
 
-  // Shift credit sales total (strictly independent of drawer cash)
+  // Shift credit sales total starting from today (Day shift onwards)
   const shiftCreditSalesTotal = useMemo(() => {
-    const shiftStart = activeShift ? new Date(activeShift.created_at).getTime() : new Date(todayStr).getTime();
+    const todayStart = new Date(todayStr).getTime();
     const relevantInvoices = invoices.filter(inv => {
       if (inv.invoice_status === 'CANCELLED') return false;
       const invTime = new Date(inv.invoice_date).getTime();
-      if (invTime < shiftStart) return false;
+      if (invTime < todayStart) return false;
       const isCredit = inv.payment_type === 'CREDIT' || String(inv.payment_method || '').toUpperCase() === 'CREDIT';
       return isCredit;
     });
     return relevantInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
-  }, [invoices, activeShift, todayStr, tick]);
+  }, [invoices, todayStr, tick]);
   // 4. Smart Announcement Bar & Stats Ticker sliding state
   const [slideIndex, setSlideIndex] = useState(0);
   const tickerSlides = useMemo(() => {
