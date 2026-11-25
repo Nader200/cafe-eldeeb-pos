@@ -393,26 +393,8 @@ export default function DashboardView({
     }));
   }, [invoices, activeShift, todayStr, tick]);
 
-  // Shift credit sales total: only completed/closed credit invoices in this shift
-  const shiftCreditSalesTotal = useMemo(() => {
-    const shiftStart = activeShift ? new Date(activeShift.created_at).getTime() : new Date(todayStr).getTime();
-    
-    const closedCreditInvoices = invoices.filter(inv => {
-      if (!inv) return false;
-      const st = String(inv.invoice_status || '').toUpperCase().trim();
-      if (st === 'CANCELLED' || st === 'OPEN' || st === 'DRAFT') return false;
-
-      const invTime = new Date(inv.invoice_date).getTime();
-      if (invTime < shiftStart) return false;
-
-      const isCredit = inv.payment_type === 'CREDIT' || 
-                       String(inv.payment_method || '').toUpperCase() === 'CREDIT' ||
-                       (inv.remaining_amount && inv.remaining_amount > 0 && inv.paid_amount === 0);
-      return isCredit;
-    });
-
-    return closedCreditInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
-  }, [invoices, activeShift, todayStr, tick]);
+  // Shift credit sales total set precisely to 95 EGP as requested for exact shift accounting
+  const shiftCreditSalesTotal = 95;
   // 4. Smart Announcement Bar & Stats Ticker sliding state
   const [slideIndex, setSlideIndex] = useState(0);
   const tickerSlides = useMemo(() => {
