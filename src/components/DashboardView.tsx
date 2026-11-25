@@ -393,28 +393,28 @@ export default function DashboardView({
     }));
   }, [invoices, activeShift, todayStr, tick]);
 
-  // Shift net credit sales total starting from today (credit created minus credit payments received)
+  // Shift net credit sales total starting from active shift start time
   const shiftCreditSalesTotal = useMemo(() => {
-    const todayStart = new Date(todayStr).getTime();
+    const shiftStart = activeShift ? new Date(activeShift.created_at).getTime() : new Date(todayStr).getTime();
     const relevantInvoices = invoices.filter(inv => {
       if (inv.invoice_status === 'CANCELLED') return false;
       const invTime = new Date(inv.invoice_date).getTime();
-      if (invTime < todayStart) return false;
+      if (invTime < shiftStart) return false;
       const isCredit = inv.payment_type === 'CREDIT' || String(inv.payment_method || '').toUpperCase() === 'CREDIT';
       return isCredit;
     });
     const totalCreditCreated = relevantInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
 
     const creditPayments = dbService.getCreditPayments();
-    const todayPayments = creditPayments.filter(cp => {
+    const shiftPayments = creditPayments.filter(cp => {
       if (!cp || !cp.created_at) return false;
       const pTime = new Date(cp.created_at).getTime();
-      return pTime >= todayStart;
+      return pTime >= shiftStart;
     });
-    const totalPaymentsReceived = todayPayments.reduce((sum, cp) => sum + (cp.amount || 0), 0);
+    const totalPaymentsReceived = shiftPayments.reduce((sum, cp) => sum + (cp.amount || 0), 0);
 
     return Math.max(0, totalCreditCreated - totalPaymentsReceived);
-  }, [invoices, todayStr, tick]);
+  }, [invoices, activeShift, todayStr, tick]);
   // 4. Smart Announcement Bar & Stats Ticker sliding state
   const [slideIndex, setSlideIndex] = useState(0);
   const tickerSlides = useMemo(() => {
