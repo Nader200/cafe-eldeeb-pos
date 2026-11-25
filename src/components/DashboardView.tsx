@@ -393,7 +393,7 @@ export default function DashboardView({
     }));
   }, [invoices, activeShift, todayStr, tick]);
 
-  // Shift credit sales total calculated as Total Shift Sales minus Cash Sales
+  // Shift credit sales total calculated precisely as Total Shift Sales minus Cash Sales
   const shiftCreditSalesTotal = useMemo(() => {
     const shiftStart = activeShift ? new Date(activeShift.created_at).getTime() : new Date(todayStr).getTime();
     const relevantInvoices = invoices.filter(inv => {
@@ -416,7 +416,9 @@ export default function DashboardView({
     shiftInvs.forEach(inv => {
       const tot = inv.total || 0;
       totalSales += tot;
-      const isCredit = inv.payment_type === 'CREDIT' || String(inv.payment_method || '').toUpperCase() === 'CREDIT';
+      const isCredit = inv.payment_type === 'CREDIT' || 
+                       String(inv.payment_method || '').toUpperCase() === 'CREDIT' ||
+                       (inv.remaining_amount && inv.remaining_amount > 0 && inv.paid_amount === 0);
       if (!isCredit) {
         cashSales += tot;
       }
