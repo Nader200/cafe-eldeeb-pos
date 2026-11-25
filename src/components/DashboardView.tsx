@@ -392,6 +392,19 @@ export default function DashboardView({
       totalRevenue: Math.round(data.totalRevenue * 100) / 100
     }));
   }, [invoices, activeShift, todayStr, tick]);
+
+  // Shift credit sales total (strictly independent of drawer cash)
+  const shiftCreditSalesTotal = useMemo(() => {
+    const shiftStart = activeShift ? new Date(activeShift.created_at).getTime() : new Date(todayStr).getTime();
+    const relevantInvoices = invoices.filter(inv => {
+      if (inv.invoice_status === 'CANCELLED') return false;
+      const invTime = new Date(inv.invoice_date).getTime();
+      if (invTime < shiftStart) return false;
+      const isCredit = inv.payment_type === 'CREDIT' || String(inv.payment_method || '').toUpperCase() === 'CREDIT';
+      return isCredit;
+    });
+    return relevantInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
+  }, [invoices, activeShift, todayStr, tick]);
   // 4. Smart Announcement Bar & Stats Ticker sliding state
   const [slideIndex, setSlideIndex] = useState(0);
   const tickerSlides = useMemo(() => {
@@ -1031,6 +1044,14 @@ export default function DashboardView({
               <span className="text-[10px] font-bold text-gray-400">الرصيد الدفتري المتوقع:</span>
               <span className="text-xl sm:text-2xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-r from-[#FFECA1] via-[#D4AF37] to-[#AA7C11] drop-shadow-[0_2px_8px_rgba(212,175,55,0.3)]">
                 {hideAmounts ? '****' : activeShiftCash.toLocaleString('ar-EG')} <span className="text-xs text-[#D4AF37] font-sans">ج.م</span>
+              </span>
+            </div>
+
+            {/* Credit Sales Box (Independent info box, strictly separated from drawer balance) */}
+            <div className="bg-amber-950/30 border border-amber-500/40 rounded-xl px-3 py-1.5 flex flex-col items-end text-right shadow-md">
+              <span className="text-[9px] font-bold text-amber-400">مبيعات الأصناف الأجلة (خارج الدرج)</span>
+              <span className="text-sm sm:text-base font-black font-mono text-amber-300">
+                {hideAmounts ? '****' : shiftCreditSalesTotal.toLocaleString('ar-EG')} <span className="text-[10px] text-amber-400 font-sans">ج.م</span>
               </span>
             </div>
 
