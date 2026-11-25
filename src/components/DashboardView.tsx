@@ -393,7 +393,7 @@ export default function DashboardView({
     }));
   }, [invoices, activeShift, todayStr, tick]);
 
-  // Shift credit sales total starting from today (Day shift onwards)
+  // Shift net credit sales total starting from today (credit created minus credit payments received)
   const shiftCreditSalesTotal = useMemo(() => {
     const todayStart = new Date(todayStr).getTime();
     const relevantInvoices = invoices.filter(inv => {
@@ -403,7 +403,17 @@ export default function DashboardView({
       const isCredit = inv.payment_type === 'CREDIT' || String(inv.payment_method || '').toUpperCase() === 'CREDIT';
       return isCredit;
     });
-    return relevantInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
+    const totalCreditCreated = relevantInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
+
+    const creditPayments = dbService.getCreditPayments();
+    const todayPayments = creditPayments.filter(cp => {
+      if (!cp || !cp.created_at) return false;
+      const pTime = new Date(cp.created_at).getTime();
+      return pTime >= todayStart;
+    });
+    const totalPaymentsReceived = todayPayments.reduce((sum, cp) => sum + (cp.amount || 0), 0);
+
+    return Math.max(0, totalCreditCreated - totalPaymentsReceived);
   }, [invoices, todayStr, tick]);
   // 4. Smart Announcement Bar & Stats Ticker sliding state
   const [slideIndex, setSlideIndex] = useState(0);
