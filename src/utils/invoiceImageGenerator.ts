@@ -359,6 +359,13 @@ export async function createInvoiceReceiptImage({
   rawMeta.push({ label: 'حالة السداد:', value: paymentStatusLabel, color: paymentStatusColor, font: fMetaValue });
   if (invoice.customer_id) {
     rawMeta.push({ label: 'العميل:', value: custName, color: '#000000', font: fMetaValue });
+    const custWallet = invoice.customer_wallet_balance ?? customer?.wallet_balance ?? 0;
+    rawMeta.push({
+      label: 'رصيد محفظة العميل:',
+      value: `${custWallet.toLocaleString()} ${currency}`,
+      color: '#047857',
+      font: fMetaValue,
+    });
   }
 
   const metaEntries: MetaEntry[] = rawMeta.map((m) => {
@@ -482,6 +489,22 @@ export async function createInvoiceReceiptImage({
         color: '#d97706',
         font: fTotalRow,
       });
+    }
+    if ((invoice.wallet_deduction || 0) > 0) {
+      postTotalRows.push({
+        label: 'المدفوع من رصيد المحفظة:',
+        value: `-${(invoice.wallet_deduction || 0).toLocaleString()} ${currency}`,
+        color: '#047857',
+        font: fCreditBold,
+      });
+      if (invoice.wallet_balance_after_deduction !== undefined) {
+        postTotalRows.push({
+          label: 'رصيد المحفظة بعد الخصم:',
+          value: `${invoice.wallet_balance_after_deduction.toLocaleString()} ${currency}`,
+          color: '#065f46',
+          font: fTotalRow,
+        });
+      }
     }
     if ((invoice.change_to_wallet || 0) > 0) {
       postTotalRows.push({

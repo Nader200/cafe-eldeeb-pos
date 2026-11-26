@@ -1919,6 +1919,13 @@ export const dbService = {
         remaining_credit_after_invoice: remainingCreditAfter,
         grand_total_with_credit: total + previousCreditBalance,
       } : {}),
+      ...(targetCustIdx > -1 ? {
+        customer_wallet_balance: Math.max(0, customersList[targetCustIdx].wallet_balance || 0),
+        ...(walletDeduction > 0 ? {
+          wallet_deduction: walletDeduction,
+          wallet_balance_after_deduction: Math.max(0, (customersList[targetCustIdx].wallet_balance || 0) - walletDeduction),
+        } : {}),
+      } : {}),
     };
 
     const newItems: InvoiceItem[] = [];
@@ -2755,6 +2762,13 @@ export const dbService = {
         credit_paid_with_invoice: actualCreditPaid,
         remaining_credit_after_invoice: remainingCreditAfter,
         grand_total_with_credit: total + previousCreditBalance,
+      } : {}),
+      ...(targetCustIdx > -1 ? {
+        customer_wallet_balance: Math.max(0, customersList[targetCustIdx].wallet_balance || 0),
+        ...(walletDeduction > 0 ? {
+          wallet_deduction: walletDeduction,
+          wallet_balance_after_deduction: Math.max(0, (customersList[targetCustIdx].wallet_balance || 0) - walletDeduction),
+        } : {}),
       } : {}),
     };
 

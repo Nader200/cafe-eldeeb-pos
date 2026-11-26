@@ -165,6 +165,9 @@ export interface Invoice {
   grand_total_with_credit?: number;
   change_to_wallet?: number;
   wallet_balance_after_invoice?: number;
+  customer_wallet_balance?: number;
+  wallet_deduction?: number;
+  wallet_balance_after_deduction?: number;
 }
 
 export interface InvoiceItem {

@@ -4093,7 +4093,19 @@ export default function POSView({
                   </div>
                 )}
                 {recentInvoice.customer_id && (
-                  <p>العميل: {(customers.find(c => c.id === recentInvoice.customer_id))?.full_name}</p>
+                  (() => {
+                    const cust = customers.find(c => c.id === recentInvoice.customer_id);
+                    const custWallet = recentInvoice.customer_wallet_balance ?? (cust?.wallet_balance || 0);
+                    return (
+                      <div className="space-y-0.5">
+                        <p>العميل: <span className="font-bold">{cust?.full_name || 'عميل مسجل'}</span></p>
+                        <div className="flex justify-between font-bold text-emerald-700">
+                          <span>رصيد المحفظة:</span>
+                          <span className="font-mono">{custWallet.toLocaleString()} {settings.currency}</span>
+                        </div>
+                      </div>
+                    );
+                  })()
                 )}
               </div>
 
@@ -4206,6 +4218,20 @@ export default function POSView({
                           : '0 ج.م (تم السداد بالكامل)'}
                       </span>
                     </div>
+                  </div>
+                )}
+                {(recentInvoice.wallet_deduction || 0) > 0 && (
+                  <div className="mt-1.5 pt-1.5 border-t border-dashed border-emerald-400 space-y-1 bg-emerald-50 p-2 rounded-lg border border-emerald-200">
+                    <div className="flex justify-between text-emerald-800 font-black">
+                      <span>المدفوع من رصيد المحفظة:</span>
+                      <span>-{(recentInvoice.wallet_deduction || 0).toLocaleString()} {settings.currency}</span>
+                    </div>
+                    {recentInvoice.wallet_balance_after_deduction !== undefined && (
+                      <div className="flex justify-between text-emerald-700 font-bold">
+                        <span>رصيد المحفظة بعد الخصم:</span>
+                        <span>{recentInvoice.wallet_balance_after_deduction.toLocaleString()} {settings.currency}</span>
+                      </div>
+                    )}
                   </div>
                 )}
                 {(recentInvoice.change_to_wallet || 0) > 0 && (
