@@ -1218,98 +1218,96 @@ export function buildCustomerStatementData({
     return ` (${items.map(it => `${it.quantity}×${it.product_name_ar}`).join('، ')})`;
   };
 
-  const custCreditTxs = (creditTransactions || [])
-    .filter((tx) => tx.customer_id === customer.id)
-    .sort((a, b) => new Date(a.created_at || a.date).getTime() - new Date(b.created_at || b.date).getTime());
+  const custCreditTxs = (creditTransactions || []).filter((tx) => tx.customer_id === customer.id);
+  const seenInvoiceIds = new Set<string>();
 
-  if (custCreditTxs.length > 0) {
-    let totalDebits = 0;
-    let totalCredits = 0;
-    const rows: StatementLedgerRow[] = custCreditTxs.map((tx) => {
-      const dateStr = (tx.date || tx.created_at || '').substring(0, 10) || '-';
-      let debit = 0;
-      let credit = 0;
-      let desc = tx.notes || '';
+  const unifiedRecords: Array<{
+    rawDate: string;
+    date: string;
+    desc: string;
+    debit: number;
+    credit: number;
+  }> = [];
 
-      if (tx.transaction_type === 'INVOICE') {
-        debit = Number(tx.amount) || 0;
-        const itemsSummary = getInvoiceItemsSummary(tx.invoice_id);
-        desc = tx.notes ? `${tx.notes}${itemsSummary}` : (tx.invoice_id ? `فاتورة مبيعات آجل${itemsSummary}` : `مبيعات آجل${itemsSummary}`);
-      } else if (tx.transaction_type === 'PAYMENT') {
-        credit = Number(tx.amount) || 0;
-        desc = tx.notes || 'دفعة سداد نقدية';
-      } else if (tx.transaction_type === 'REFUND') {
-        credit = Number(tx.amount) || 0;
-        desc = tx.notes || 'مرتجع / خصم مديونية';
+  custCreditTxs.forEach((tx) => {
+    const rawDate = tx.created_at || tx.date || new Date().toISOString();
+    const dateStr = rawDate.substring(0, 10) || '-';
+    let debit = 0;
+    let credit = 0;
+    let desc = tx.notes || '';
+
+    if (tx.invoice_id) {
+      seenInvoiceIds.add(tx.invoice_id);
+    }
+
+    if (tx.transaction_type === 'INVOICE') {
+      debit = Number(tx.amount) || 0;
+      const itemsSummary = getInvoiceItemsSummary(tx.invoice_id);
+      desc = tx.notes ? `${tx.notes}${itemsSummary}` : (tx.invoice_id ? `فاتورة مبيعات آجل${itemsSummary}` : `مبيعات آجل${itemsSummary}`);
+    } else if (tx.transaction_type === 'PAYMENT') {
+      credit = Number(tx.amount) || 0;
+      desc = tx.notes || 'دفعة سداد نقدية';
+    } else if (tx.transaction_type === 'REFUND') {
+      credit = Number(tx.amount) || 0;
+      desc = tx.notes || 'مرتجع / خصم مديونية';
+    } else {
+      const delta = (Number(tx.new_balance) || 0) - (Number(tx.previous_balance) || 0);
+      if (delta >= 0) {
+        debit = delta;
+        desc = tx.notes || 'تعديل / إضافة مديونية إداري';
       } else {
-        const delta = (Number(tx.new_balance) || 0) - (Number(tx.previous_balance) || 0);
-        if (delta >= 0) {
-          debit = delta;
-          desc = tx.notes || 'تعديل / إضافة مديونية إداري';
-        } else {
-          credit = Math.abs(delta);
-          desc = tx.notes || 'تسوية / خصم مديونية إداري';
-        }
+        credit = Math.abs(delta);
+        desc = tx.notes || 'تسوية / خصم مديونية إداري';
       }
+    }
 
-      totalDebits += debit;
-      totalCredits += credit;
+    unifiedRecords.push({ rawDate, date: dateStr, desc, debit, credit });
+  });
 
-      return {
-        date: dateStr,
-        desc,
-        debit,
-        credit,
-        balance: Number(tx.new_balance) || 0,
-      };
+  const custPayments = (creditPayments || []).filter((p) => p.customer_id === customer.id);
+  custPayments.forEach((p) => {
+    const rawDate = p.created_at || p.payment_date || new Date().toISOString();
+    const dateStr = rawDate.substring(0, 10) || '-';
+    unifiedRecords.push({
+      rawDate,
+      date: dateStr,
+      desc: `دفعة سداد نقدية${p.notes ? ` - ${p.notes}` : ''}`,
+      debit: 0,
+      credit: p.amount || 0,
     });
+  });
 
-    const startingBalance = Number(custCreditTxs[0].previous_balance) || 0;
-    return {
-      rows,
-      startingBalance,
-      totalDebits,
-      totalCredits,
-      endingBalance,
-    };
-  }
-
-  // Fallback for customers without credit_transactions history - include all customer invoices and items
   const custInvoices = (invoices || []).filter(
     (inv) =>
       inv.customer_id === customer.id &&
       inv.invoice_status !== 'CANCELLED' &&
       inv.invoice_status !== 'OPEN' &&
-      inv.invoice_status !== 'DRAFT'
+      inv.invoice_status !== 'DRAFT' &&
+      !seenInvoiceIds.has(inv.id) &&
+      ((inv.remaining_amount || 0) > 0 || inv.payment_type === 'CREDIT' || inv.payment_type === 'SPLIT')
   );
-  const custPayments = (creditPayments || []).filter((p) => p.customer_id === customer.id);
+  custInvoices.forEach((inv) => {
+    const rawDate = inv.created_at || inv.invoice_date || new Date().toISOString();
+    const dateStr = rawDate.substring(0, 10) || '-';
+    const itemsSummary = getInvoiceItemsSummary(inv.id);
+    const amountVal = (inv.remaining_amount !== undefined && inv.remaining_amount > 0) ? inv.remaining_amount : inv.total;
+    unifiedRecords.push({
+      rawDate,
+      date: dateStr,
+      desc: `فاتورة مبيعات #${inv.invoice_number}${itemsSummary}`,
+      debit: amountVal,
+      credit: 0,
+    });
+  });
 
-  const combined = [
-    ...custInvoices.map((inv) => {
-      const itemsSummary = getInvoiceItemsSummary(inv.id);
-      return {
-        rawDate: inv.created_at || inv.invoice_date,
-        date: (inv.created_at || inv.invoice_date || '').substring(0, 10),
-        desc: `فاتورة مبيعات #${inv.invoice_number}${itemsSummary}`,
-        debit: inv.remaining_amount > 0 ? inv.remaining_amount : inv.total,
-        credit: 0,
-      };
-    }),
-    ...custPayments.map((p) => ({
-      rawDate: p.created_at || p.payment_date,
-      date: (p.created_at || p.payment_date || '').substring(0, 10),
-      desc: `دفعة سداد نقدية${p.notes ? ` - ${p.notes}` : ''}`,
-      debit: 0,
-      credit: p.amount || 0,
-    })),
-  ].sort((a, b) => new Date(a.rawDate).getTime() - new Date(b.rawDate).getTime());
+  unifiedRecords.sort((a, b) => new Date(a.rawDate).getTime() - new Date(b.rawDate).getTime());
 
-  const totalDebits = combined.reduce((sum, r) => sum + r.debit, 0);
-  const totalCredits = combined.reduce((sum, r) => sum + r.credit, 0);
+  const totalDebits = unifiedRecords.reduce((sum, r) => sum + r.debit, 0);
+  const totalCredits = unifiedRecords.reduce((sum, r) => sum + r.credit, 0);
   const startingBalance = endingBalance - totalDebits + totalCredits;
 
   let running = startingBalance;
-  const rows: StatementLedgerRow[] = combined.map((rec) => {
+  const rows: StatementLedgerRow[] = unifiedRecords.map((rec) => {
     running += rec.debit - rec.credit;
     return {
       date: rec.date || '-',
