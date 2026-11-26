@@ -393,8 +393,7 @@ export default function DashboardView({
     }));
   }, [invoices, activeShift, todayStr, tick]);
 
-  // Shift credit sales total set precisely to 95 EGP as requested for exact shift accounting
-  const shiftCreditSalesTotal = 95;
+
   // 4. Smart Announcement Bar & Stats Ticker sliding state
   const [slideIndex, setSlideIndex] = useState(0);
   const tickerSlides = useMemo(() => {
@@ -1037,13 +1036,7 @@ export default function DashboardView({
               </span>
             </div>
 
-            {/* Credit Sales Box (Independent info box, strictly separated from drawer balance) */}
-            <div className="bg-amber-950/30 border border-amber-500/40 rounded-xl px-3 py-1.5 flex flex-col items-end text-right shadow-md">
-              <span className="text-[9px] font-bold text-amber-400">مبيعات الأصناف الأجلة (خارج الدرج)</span>
-              <span className="text-sm sm:text-base font-black font-mono text-amber-300">
-                {hideAmounts ? '****' : shiftCreditSalesTotal.toLocaleString('ar-EG')} <span className="text-[10px] text-amber-400 font-sans">ج.م</span>
-              </span>
-            </div>
+
 
             {shiftCashMetrics.vodafone_cash_in > 0 && (
               <div className="flex items-center gap-1.5 flex-wrap text-[9px] font-extrabold">
