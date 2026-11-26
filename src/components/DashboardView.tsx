@@ -806,7 +806,7 @@ export default function DashboardView({
           100% { transform: translateX(-100%); }
         }
         .animate-marquee {
-          animation: marquee 38s linear infinite;
+          animation: marquee 75s linear infinite;
         }
         .animate-marquee:hover {
           animation-play-state: paused;
