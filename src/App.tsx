@@ -83,6 +83,7 @@ import CalculatorModal from './components/CalculatorModal';
 import UpdateModal from './components/UpdateModal';
 import UserManualView from './components/UserManualView';
 import AdminReauthModal from './components/AdminReauthModal';
+import CustomerMenuView from './components/CustomerMenuView';
 import SafesView from './components/SafesView';
 import ResetCashDrawerModal from './components/ResetCashDrawerModal';
 import { checkForUpdates } from './services/updateService';
@@ -136,6 +137,13 @@ export default function App() {
 }
 
 function AppContent() {
+  const isCustomerMenuMode = typeof window !== 'undefined' && (window.location.search.includes('view=customer-menu') || window.location.pathname.includes('/menu'));
+  if (isCustomerMenuMode) {
+    return <CustomerMenuView onBackToPOS={() => {
+      window.location.href = '/dashboard';
+    }} />;
+  }
+
   const { currentUser, isAuthenticated, login, logout, hasPermission } = useAuth();
 
   // App settings & Cash Drawer State (Synchronously initialized)

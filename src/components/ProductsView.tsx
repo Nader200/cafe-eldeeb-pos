@@ -367,6 +367,29 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
             <Plus className="w-4 h-4 stroke-[2.5]" />
             إضافة منتج جديد
           </button>
+          
+          <button
+            onClick={() => {
+              const menuUrl = `${window.location.origin}${window.location.pathname}?view=customer-menu`;
+              navigator.clipboard.writeText(menuUrl);
+              onShowSuccessAlert('📋 تم نسخ رابط المنيو الذاتي للعملاء بنجاح! يمكنك إرساله للعملاء لطلب المشروبات والأصناف مباشرة عبر الواتساب 📱');
+            }}
+            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold rounded-xl transition-all cursor-pointer shadow-md flex items-center gap-1.5"
+            title="نسخ رابط المنيو الإلكتروني للعملاء للطلب المباشر"
+          >
+            <span>🔗 نسخ رابط المنيو للعملاء</span>
+          </button>
+          
+          <button
+            onClick={() => {
+              const menuUrl = `${window.location.origin}${window.location.pathname}?view=customer-menu`;
+              window.open(menuUrl, '_blank');
+            }}
+            className="px-3.5 py-2.5 bg-luxury-bg border border-gray-800 hover:border-gold-600 text-gold-400 hover:text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md flex items-center gap-1"
+            title="فتح المنيو كعميل في نافذة جديدة"
+          >
+            <span>🌐 فتح المنيو</span>
+          </button>
         </div>
       </div>
 
