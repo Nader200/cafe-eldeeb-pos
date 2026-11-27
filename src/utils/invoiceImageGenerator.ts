@@ -6,6 +6,7 @@ import {
   ReturnTransaction,
   CreditPayment,
   CustomerCreditTransaction,
+  WalletTransaction,
 } from '../types';
 import { getEldeebLogoDataUrl } from '../lib/logoSvg';
 import { getPaymentMethodLabel } from './paymentUtils';
@@ -45,6 +46,7 @@ export interface ShareCustomerStatementImageOptions {
   invoices: Invoice[];
   creditPayments: CreditPayment[];
   creditTransactions?: CustomerCreditTransaction[];
+  walletTransactions?: WalletTransaction[];
   settings: AppSettings;
   phone?: string;
   onStart?: (msg: string) => void;
@@ -1193,11 +1195,13 @@ export function buildCustomerStatementData({
   invoices,
   creditPayments,
   creditTransactions = [],
+  walletTransactions = [],
 }: {
   customer: Customer;
   invoices: Invoice[];
   creditPayments: CreditPayment[];
   creditTransactions?: CustomerCreditTransaction[];
+  walletTransactions?: WalletTransaction[];
 }): BuiltCustomerStatementData {
   const endingBalance = Number(customer.current_balance) || 0;
 
@@ -1277,6 +1281,31 @@ export function buildCustomerStatementData({
     });
   });
 
+  const custWalletTxs = (walletTransactions || []).filter((tx) => tx.customer_id === customer.id);
+  custWalletTxs.forEach((wtx) => {
+    const rawDate = wtx.created_at || wtx.date || new Date().toISOString();
+    const dateStr = rawDate.substring(0, 10) || '-';
+    let debit = 0;
+    let credit = 0;
+    let desc = wtx.notes || '';
+
+    if (wtx.transaction_type === 'DEPOSIT') {
+      credit = Number(wtx.amount) || 0;
+      desc = wtx.notes || `إيداع رصيد محفظة (${wtx.amount} ج.م)`;
+    } else if (wtx.transaction_type === 'INVOICE_PAYMENT' || wtx.transaction_type === 'INVOICE_DEDUCTION') {
+      credit = Number(wtx.amount) || 0;
+      desc = wtx.notes || `خصم سداد فاتورة من رصيد المحفظة (${wtx.amount} ج.م)`;
+    } else if (wtx.transaction_type === 'WITHDRAWAL') {
+      debit = Number(wtx.amount) || 0;
+      desc = wtx.notes || `سحب رصيد من المحفظة (${wtx.amount} ج.م)`;
+    } else {
+      credit = Number(wtx.amount) || 0;
+      desc = wtx.notes || `معاملة محفظة (${wtx.amount} ج.م)`;
+    }
+
+    unifiedRecords.push({ rawDate, date: dateStr, desc, debit, credit });
+  });
+
   const custInvoices = (invoices || []).filter(
     (inv) =>
       inv.customer_id === customer.id &&
@@ -1335,12 +1364,14 @@ export async function createCustomerStatementImage({
   invoices,
   creditPayments,
   creditTransactions = [],
+  walletTransactions = [],
   settings,
 }: {
   customer: Customer;
   invoices: Invoice[];
   creditPayments: CreditPayment[];
   creditTransactions?: CustomerCreditTransaction[];
+  walletTransactions?: WalletTransaction[];
   settings: AppSettings;
 }): Promise<{ imageBlob: Blob; imageFile: File; imageFileName: string; dataUrl: string }> {
   if (!customer) {
@@ -1367,6 +1398,7 @@ export async function createCustomerStatementImage({
       invoices,
       creditPayments,
       creditTransactions,
+      walletTransactions,
     });
 
   const logoImg = await loadImageElement(getEldeebLogoDataUrl(300, false, 'gold'));
@@ -1715,6 +1747,7 @@ export async function shareCustomerStatementImageToWhatsApp({
   invoices,
   creditPayments,
   creditTransactions = [],
+  walletTransactions = [],
   settings,
   phone,
   onStart,
@@ -1729,6 +1762,7 @@ export async function shareCustomerStatementImageToWhatsApp({
       invoices,
       creditPayments,
       creditTransactions,
+      walletTransactions,
       settings,
     });
 

@@ -1305,8 +1305,9 @@ export default function EnterpriseCustomersView({
       invoices,
       creditPayments,
       creditTransactions,
+      walletTransactions,
     });
-  }, [selectedCustomer, invoices, creditPayments, creditTransactions]);
+  }, [selectedCustomer, invoices, creditPayments, creditTransactions, walletTransactions]);
 
   // Open in-app Statement Modal (Preview + Send as Image + Download PNG + Print)
   const handlePrintStatement = () => {
@@ -1326,6 +1327,7 @@ export default function EnterpriseCustomersView({
         invoices,
         creditPayments,
         creditTransactions,
+        walletTransactions,
         settings,
         phone: targetPhone !== undefined ? targetPhone : (selectedCustomer.whatsapp || selectedCustomer.phone || ''),
         onStart: (msg) => onShowSuccessAlert(msg),
@@ -1367,6 +1369,7 @@ export default function EnterpriseCustomersView({
         invoices,
         creditPayments,
         creditTransactions,
+        walletTransactions,
         settings,
       });
       const link = document.createElement('a');
