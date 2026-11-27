@@ -30,7 +30,7 @@ export default function CustomerMenuView({ onBackToPOS }: CustomerMenuViewProps)
   }, []);
 
   const loadData = () => {
-    setProducts(dbService.getProducts().filter(p => p.is_available !== false));
+    setProducts(dbService.getProducts());
     setCategories(dbService.getCategories());
     setSettings(dbService.getSettings());
   };
@@ -45,6 +45,7 @@ export default function CustomerMenuView({ onBackToPOS }: CustomerMenuViewProps)
   }, [products, selectedCategory, searchQuery]);
 
   const addToCart = (product: Product) => {
+    if (product.is_available === false) return;
     setCart(prev => {
       const existingIdx = prev.findIndex(item => item.product.id === product.id);
       if (existingIdx > -1) {
@@ -230,10 +231,13 @@ export default function CustomerMenuView({ onBackToPOS }: CustomerMenuViewProps)
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {filteredProducts.map(product => {
             const inCart = cart.find(i => i.product.id === product.id);
+            const isAvailable = product.is_available !== false;
             return (
               <div
                 key={product.id}
-                className="bg-neutral-900 border border-neutral-800/80 hover:border-amber-500/40 rounded-2xl p-3 flex flex-col justify-between transition-all duration-300 group shadow-lg"
+                className={`bg-neutral-900 border rounded-2xl p-3 flex flex-col justify-between transition-all duration-300 group shadow-lg ${
+                  isAvailable ? 'border-neutral-800/80 hover:border-amber-500/40' : 'border-red-950/60 opacity-75'
+                }`}
               >
                 <div>
                   <div className="w-full h-24 rounded-xl bg-neutral-950 border border-neutral-800 mb-2.5 overflow-hidden flex items-center justify-center relative">
@@ -245,6 +249,11 @@ export default function CustomerMenuView({ onBackToPOS }: CustomerMenuViewProps)
                     <span className="absolute top-1.5 left-1.5 px-2 py-0.5 bg-neutral-950/80 backdrop-blur border border-amber-500/30 text-amber-400 font-mono text-[10px] font-black rounded-lg">
                       {product.selling_price.toLocaleString()} {settings.currency || 'ج.م'}
                     </span>
+                    {!isAvailable && (
+                      <span className="absolute top-1.5 right-1.5 px-2 py-0.5 bg-red-950/90 border border-red-500/60 text-red-400 font-black text-[9px] rounded-lg shadow animate-pulse">
+                        غير متاح 🚫
+                      </span>
+                    )}
                   </div>
                   <h3 className="text-xs font-bold text-white group-hover:text-amber-400 transition line-clamp-1">{product.name_ar}</h3>
                   {product.description && (
@@ -253,7 +262,14 @@ export default function CustomerMenuView({ onBackToPOS }: CustomerMenuViewProps)
                 </div>
 
                 <div className="mt-3 pt-2 border-t border-neutral-800/60 flex items-center justify-between">
-                  {inCart ? (
+                  {!isAvailable ? (
+                    <button
+                      disabled
+                      className="w-full py-1.5 bg-neutral-950 text-red-400 border border-red-900/40 rounded-xl text-xs font-bold cursor-not-allowed text-center"
+                    >
+                      غير متاح حالياً 🚫
+                    </button>
+                  ) : inCart ? (
                     <div className="flex items-center gap-1.5 bg-neutral-950 px-2 py-1 rounded-xl border border-amber-500/30 w-full justify-between">
                       <button
                         onClick={() => updateQuantity(product.id, -1)}

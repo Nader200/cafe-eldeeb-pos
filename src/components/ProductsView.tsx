@@ -215,6 +215,19 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
     loadCatalogData();
   };
 
+  const handleToggleAvailability = (id: string) => {
+    const prod = products.find(p => p.id === id);
+    if (!prod) return;
+    const newStatus = prod.is_available === false ? true : false;
+    dbService.saveProduct({
+      ...prod,
+      is_available: newStatus,
+      updated_at: new Date().toISOString()
+    });
+    loadCatalogData();
+    onShowSuccessAlert(`تم تحديث توفر الصنف "${prod.name_ar}" في المنيو إلى (${newStatus ? 'متاح ✅' : 'غير متاح 🚫'}) بنجاح.`);
+  };
+
   // --- Category Handlers ---
   const handleOpenAddCategory = () => {
     setEditingCategory(null);
@@ -459,13 +472,14 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
                 <th className="pb-3 pt-1 px-2 text-left">سعر البيع المقيد</th>
                 <th className="pb-3 pt-1 px-2 text-center">المخزون الحالي</th>
                 <th className="pb-3 pt-1 px-2 text-center">المفضلة</th>
+                <th className="pb-3 pt-1 px-2 text-center">حالة المنيو</th>
                 <th className="pb-3 pt-1 px-2 text-center">الإجراءات</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-900/40">
               {filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="text-center py-12 text-gray-500">
+                  <td colSpan={9} className="text-center py-12 text-gray-500">
                     لا توجد منتجات مسجلة مطابقة لخيارات الفلترة
                   </td>
                 </tr>
@@ -530,6 +544,19 @@ export default function ProductsView({ onShowSuccessAlert, onShowWarningAlert }:
                           className="text-gray-600 hover:text-gold-500 transition-colors cursor-pointer"
                         >
                           <Star className={`w-4.5 h-4.5 ${p.is_favorite ? 'text-gold-500 fill-gold-500' : 'text-gray-700'}`} />
+                        </button>
+                      </td>
+                      <td className="py-3 px-2 text-center">
+                        <button
+                          onClick={() => handleToggleAvailability(p.id)}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
+                            p.is_available !== false
+                              ? 'bg-emerald-950/60 text-emerald-400 border-emerald-800/60 hover:bg-red-950/40 hover:text-red-400 hover:border-red-800'
+                              : 'bg-red-950/60 text-red-400 border-red-800/60 hover:bg-emerald-950/40 hover:text-emerald-400 hover:border-emerald-800'
+                          }`}
+                          title="اضغط لتغيير حالة توفر الصنف في المنيو للعملاء"
+                        >
+                          {p.is_available !== false ? '✅ متاح' : '🚫 غير متاح'}
                         </button>
                       </td>
                       <td className="py-3 px-2 text-center">
