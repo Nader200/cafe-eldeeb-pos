@@ -82,6 +82,40 @@ export default function CustomerMenuView({ onBackToPOS }: CustomerMenuViewProps)
 
   const handleSendOrderWhatsApp = () => {
     if (cart.length === 0) return;
+
+    // Automatically save as an open invoice in the POS system ("الفواتير المفتوحة والمعلقة")
+    try {
+      const custName = customerName.trim() ? `العميل: ${customerName.trim()}` : 'عميل المنيو الإلكتروني';
+      const tblNum = tableNumber.trim() ? tableNumber.trim() : 'منيو ذاتي';
+      const notesCombined = [
+        custName,
+        orderNotes.trim() ? `ملاحظات: ${orderNotes.trim()}` : ''
+      ].filter(Boolean).join(' | ');
+
+      dbService.saveOpenInvoice(
+        undefined,
+        cart.map(item => ({
+          product: item.product,
+          quantity: item.quantity,
+          notes: item.notes || ''
+        })),
+        'CASH',
+        'c_general',
+        0,
+        0,
+        0,
+        'المنيو الإلكتروني الذاتي',
+        notesCombined,
+        tblNum,
+        'CASH',
+        '',
+        '',
+        'OPEN'
+      );
+    } catch (err) {
+      console.error('Error auto-saving open invoice from menu:', err);
+    }
+
     const currency = settings.currency || 'ج.م';
     const cafeName = settings.cafe_name || 'كافيه الديب';
 
